@@ -1,0 +1,8 @@
+name: pipelang-build
+description: Build the standalone PipeLang command line tools.
+docker_preflight: false
+steps:
+  - id: build
+    kind: host
+    cwd: repo
+    run: assets/scripts/build.sh

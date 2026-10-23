@@ -1,0 +1,8 @@
+name: pipelang-test
+description: Verify standalone CLI, materialization, compatibility and compiler contracts.
+docker_preflight: false
+steps:
+  - id: test
+    kind: host
+    cwd: repo
+    run: assets/scripts/test.sh

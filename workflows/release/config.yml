@@ -1,0 +1,8 @@
+name: release.build
+description: Build standalone PipeLang CLI archives for GitHub Releases.
+docker_preflight: false
+steps:
+  - id: portable-cli-archives
+    kind: host
+    cwd: repo
+    run: assets/scripts/build.sh

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'workflows/release/assets/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import release_contract as contract
+import build as producer
 import publish
 import qualify
 
@@ -62,6 +63,53 @@ def fixture(directory, *, native_binary=None):
                    'scope': 'native-standalone-acceptance-not-full-conformance'}
         (directory / ('native-' + target.replace('/', '-') + '.json')).write_text(json.dumps(receipt))
     return metadata, manifest_sha
+
+
+class DeterministicArchiveTests(unittest.TestCase):
+    def test_same_payload_ignores_source_mtime_permissions_and_archive_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stage = root / 'stage'
+            stage.mkdir()
+            for system in ('linux', 'darwin', 'windows'):
+                with self.subTest(system=system):
+                    for path in stage.iterdir():
+                        path.unlink()
+                    suffix = '.exe' if system == 'windows' else ''
+                    payload = {command + suffix: b'binary-' + command.encode()
+                               for command in contract.COMMANDS}
+                    payload.update({'LICENSE': b'license', 'README.md': b'readme',
+                                    'VERSION': (VERSION + '\n').encode(),
+                                    'SOURCE_COMMIT': (SOURCE + '\n').encode()})
+                    for name, data in payload.items():
+                        path = stage / name
+                        path.write_bytes(data)
+                        os.utime(path, (1000000000, 1000000000))
+                        path.chmod(0o600)
+                    first = root / (system + '-first.archive')
+                    producer.write_archive(stage, first, system)
+                    for path in stage.iterdir():
+                        os.utime(path, (1800000000, 1800000000))
+                        path.chmod(0o777)
+                    second = root / (system + '-different-name.archive')
+                    producer.write_archive(stage, second, system)
+                    self.assertEqual(first.read_bytes(), second.read_bytes())
+                    if system == 'windows':
+                        with zipfile.ZipFile(first) as archive:
+                            for entry in archive.infolist():
+                                self.assertEqual(entry.date_time, (1980, 1, 1, 0, 0, 0))
+                                mode = 0o755 if entry.filename.endswith('.exe') else 0o644
+                                self.assertEqual(entry.external_attr >> 16, 0o100000 | mode)
+                                self.assertEqual(archive.read(entry), payload[entry.filename])
+                    else:
+                        self.assertEqual(first.read_bytes()[4:8], b'\0' * 4)
+                        with tarfile.open(first, 'r:gz') as archive:
+                            for entry in archive.getmembers():
+                                self.assertEqual((entry.uid, entry.gid, entry.mtime), (0, 0, 0))
+                                self.assertEqual((entry.uname, entry.gname), ('', ''))
+                                mode = 0o755 if entry.name in contract.COMMANDS else 0o644
+                                self.assertEqual(entry.mode, mode)
+                                self.assertEqual(archive.extractfile(entry).read(), payload[entry.name])
 
 
 class StandaloneReleaseTests(unittest.TestCase):

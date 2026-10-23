@@ -1,0 +1,20 @@
+# Version updates target dev. Security updates use the default branch (master)
+# regardless of target-branch; qualify fixes through the protected branch flow.
+version: 2
+updates:
+- package-ecosystem: gomod
+  directory: /
+  target-branch: dev
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 5
+- package-ecosystem: github-actions
+  directory: /
+  target-branch: dev
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 5
+  groups:
+    actions:
+      patterns:
+      - '*'

@@ -1,0 +1,8 @@
+schema: 1
+routes:
+  - task: compiler-or-sdk
+    read: [docs/agents/core/architecture.md, docs/agents/core/validation.md]
+  - task: workflows
+    read: [docs/agents/workflows/authoring.md, docs/agents/core/validation.md]
+  - task: migration
+    read: [docs/agents/backlog.md, docs/agents/core/architecture.md]

@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "compile": {
+    "workflows": [
+      "workflows"
+    ]
+  },
+  "dockpipe_version": "0.6.25"
+}

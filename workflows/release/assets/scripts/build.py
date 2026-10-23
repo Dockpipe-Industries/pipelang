@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Cross-build source-bound archives; native qualification and publication are separate."""
+import gzip
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,38 @@ import zipfile
 import release_contract as contract
 
 ROOT = Path(__file__).resolve().parents[4]
+
+
+def write_archive(stage, archive, system):
+    paths = sorted(stage.iterdir())
+    if any(path.is_symlink() or not path.is_file() for path in paths):
+        raise ValueError('Release archive inputs must be regular files')
+    executable_names = {command + ('.exe' if system == 'windows' else '')
+                        for command in contract.COMMANDS}
+    if system == 'windows':
+        with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as stream:
+            for path in paths:
+                entry = zipfile.ZipInfo(path.name, date_time=(1980, 1, 1, 0, 0, 0))
+                entry.create_system = 3
+                mode = 0o755 if path.name in executable_names else 0o644
+                entry.external_attr = (0o100000 | mode) << 16
+                entry.compress_type = zipfile.ZIP_DEFLATED
+                stream.writestr(entry, contract.bounded(path, contract.MAX_MEMBER))
+    else:
+        with archive.open('wb') as output:
+            with gzip.GzipFile(filename='', mode='wb', fileobj=output, mtime=0) as compressed:
+                with tarfile.open(fileobj=compressed, mode='w', format=tarfile.USTAR_FORMAT) as stream:
+                    for path in paths:
+                        entry = tarfile.TarInfo(path.name)
+                        entry.size = path.stat().st_size
+                        entry.mode = 0o755 if path.name in executable_names else 0o644
+                        entry.uid = 0
+                        entry.gid = 0
+                        entry.uname = ''
+                        entry.gname = ''
+                        entry.mtime = 0
+                        with path.open('rb') as data:
+                            stream.addfile(entry, data)
 
 
 def main():
@@ -45,14 +78,7 @@ def main():
             (stage / 'SOURCE_COMMIT').write_text(source + '\n')
             inventory = {path.name: {'sha256': contract.digest(contract.bounded(path, contract.MAX_MEMBER)),
                                     'size_bytes': path.stat().st_size} for path in sorted(stage.iterdir())}
-            if system == 'windows':
-                with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as stream:
-                    for path in sorted(stage.iterdir()):
-                        stream.write(path, path.name)
-            else:
-                with tarfile.open(archive, 'w:gz') as stream:
-                    for path in sorted(stage.iterdir()):
-                        stream.add(path, arcname=path.name)
+            write_archive(stage, archive, system)
         data = contract.bounded(archive, contract.MAX_ARCHIVE)
         records[target] = {'name': archive.name, 'sha256': contract.digest(data),
                            'size_bytes': len(data), 'files': inventory}

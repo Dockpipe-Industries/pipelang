@@ -1,9 +1,0 @@
-{
-  "schema": 1,
-  "state": "awaiting-public-core-cli",
-  "required_repository": "Dockpipe-Industries/dockpipe",
-  "required_capabilities": ["host-python-script", "native-windows-host-shell"],
-  "required_platforms": ["darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64"],
-  "required_lock_fields": ["version", "release", "url", "sha256", "size_bytes", "executable", "executable_size_bytes"],
-  "installable": false
-}

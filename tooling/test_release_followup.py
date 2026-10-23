@@ -30,16 +30,12 @@ class ReleaseFollowupTests(unittest.TestCase):
                 with self.subTest(path=path.relative_to(ROOT)):
                     self.assertNotIn(b'\r', path.read_bytes())
 
-    def test_pending_public_input_cannot_be_mistaken_for_lock(self):
-        pending = json.loads((ROOT / 'tooling/dockpipe-bootstrap-pending.json').read_text())
-        self.assertEqual(pending['state'], 'awaiting-public-core-cli')
-        self.assertIs(pending['installable'], False)
-        self.assertEqual(len(pending['required_platforms']), 5)
-        self.assertNotIn('artifacts', pending)
-        self.assertNotIn('dockpipe', pending)
+    def test_public_bootstrap_uses_the_exact_lock_without_obsolete_pending_marker(self):
+        self.assertFalse((ROOT / 'tooling/dockpipe-bootstrap-pending.json').exists())
         config = json.loads((ROOT / 'dockpipe.config.json').read_text())
         lock = json.loads((ROOT / 'dockpipe.lock.json').read_text())
         self.assertEqual(config['dockpipe_version'], lock['dockpipe']['version'])
+        self.assertEqual(len(lock['dockpipe']['artifacts']), 5)
 
     def test_old_tag_cannot_be_published_again_by_replacement(self):
         workflow = (ROOT / 'workflows/release/assets/scripts/publish.py').read_text()

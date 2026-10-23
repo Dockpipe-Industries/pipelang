@@ -5,3 +5,6 @@ packages/pipeon/resolvers/pipeon/bin/pipeon text eol=lf
 packages/dorkpipe/tests/fixtures/backlog.remote/remote-diff.patch text eol=lf
 # Embedded Unicode data is verified against its upstream byte checksum at startup.
 src/lib/pipelang/coreir/unicode/CaseFolding-17.0.0.txt text eol=lf
+# Legacy compatibility checks bind exact paths and source bytes on every host.
+docs/agents/tasks/fixtures/pipelang-vnext/legacy-v0.0.0.1-inventory.txt text eol=lf
+tests/pipelangcompat/fixtures/** text eol=lf

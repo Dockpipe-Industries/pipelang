@@ -19,6 +19,17 @@ class ReleaseFollowupTests(unittest.TestCase):
         self.assertIn('run: assets/scripts/test.py', text)
         self.assertNotIn('test.sh', text)
 
+    def test_byte_frozen_compatibility_inputs_have_lf_checkout_rules(self):
+        rules = (ROOT / '.gitattributes').read_text().splitlines()
+        inventory = 'docs/agents/tasks/fixtures/pipelang-vnext/legacy-v0.0.0.1-inventory.txt'
+        self.assertIn(inventory + ' text eol=lf', rules)
+        self.assertIn('tests/pipelangcompat/fixtures/** text eol=lf', rules)
+        self.assertNotIn(b'\r', (ROOT / inventory).read_bytes())
+        for path in (ROOT / 'tests/pipelangcompat/fixtures').rglob('*'):
+            if path.is_file():
+                with self.subTest(path=path.relative_to(ROOT)):
+                    self.assertNotIn(b'\r', path.read_bytes())
+
     def test_pending_public_input_cannot_be_mistaken_for_lock(self):
         pending = json.loads((ROOT / 'tooling/dockpipe-bootstrap-pending.json').read_text())
         self.assertEqual(pending['state'], 'awaiting-public-core-cli')

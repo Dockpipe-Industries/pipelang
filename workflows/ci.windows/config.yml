@@ -5,4 +5,4 @@ steps:
   - id: portable-tests
     kind: host
     cwd: repo
-    run: assets/scripts/test.sh
+    run: assets/scripts/test.py

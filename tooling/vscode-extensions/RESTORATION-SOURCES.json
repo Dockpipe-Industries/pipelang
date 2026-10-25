@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "source_repository": "Dockpipe-Industries/dorkpipe",
+  "source_head": "b1f93d50be9974b03d49285fec3ae158f7d8c2fb",
+  "snapshot_kind": "selected-working-postimages",
+  "files": [
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/README.md",
+      "source_sha256": "cfa568d5e4490533ad0e751021bc0e293a1e4b0caf0ba0dff4a7d44004df89ff",
+      "source_working_change": true,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/docs/legacy-language-history.md",
+      "destination_sha256": "cfa568d5e4490533ad0e751021bc0e293a1e4b0caf0ba0dff4a7d44004df89ff"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/LICENSE",
+      "source_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "source_working_change": false,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/LICENSE",
+      "destination_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/README.md",
+      "source_sha256": "cfa568d5e4490533ad0e751021bc0e293a1e4b0caf0ba0dff4a7d44004df89ff",
+      "source_working_change": true,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/README.md",
+      "destination_sha256": "4c4ca1c6b899ff0fbe9cffea0b4c1b9bb82a756a76aff9276f11763365c42c2f"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/extension.js",
+      "source_sha256": "8da8ce7c2c61cd17540d99420dc2a7265b77de43c1a22cc2ea14612b8cc0166c",
+      "source_working_change": true,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/extension.js",
+      "destination_sha256": "9d3ebcd51f18868b4e90a0b39cb668f0f5f37453307e67204301dd53253c65bb"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/extension.test.js",
+      "source_sha256": "682716538b7487004aa4e61f1cfc6d151dc11a68f55ff42431568b5fc8a0a988",
+      "source_working_change": true,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/extension.test.js",
+      "destination_sha256": "b687919e2fb0705f2b2b1a8d81d5eacba42630d8439dd1335c7d3ac3bc1f3198"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/images/icon.png",
+      "source_sha256": "d9b4daaf20c60a74867288bbefee57a57205597aef0b6a1a34097d4895c7c714",
+      "source_working_change": false,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/images/icon.png",
+      "destination_sha256": "d9b4daaf20c60a74867288bbefee57a57205597aef0b6a1a34097d4895c7c714"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/language-configuration.json",
+      "source_sha256": "088e951ee44aa9fbdf022b5ad77b17ffebf9673ae46a473104d8498310911d30",
+      "source_working_change": false,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/language-configuration.json",
+      "destination_sha256": "088e951ee44aa9fbdf022b5ad77b17ffebf9673ae46a473104d8498310911d30"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/package-lock.json",
+      "source_sha256": "6dba0a2a55f5e4991d0709f538ff826932a29ca2e0d80284341a554a3db63036",
+      "source_working_change": false,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/package-lock.json",
+      "destination_sha256": "2cd3cf421b128cc499a4ece2ef59bb5f3c617a500672883bec78b4550b2aab39"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/package.json",
+      "source_sha256": "68e076fc02ff644644e14dce59a4bf43a88fd7954ebcf60ae9409ddd6b0e17ef",
+      "source_working_change": false,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/package.json",
+      "destination_sha256": "9beab3ef9d1c9626ccf7bc73649575c988ebd03eb5ed10d40ea9abb9dea27459"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/snippets/pipelang.json",
+      "source_sha256": "d48bdce0b8ba126810a440d1db49655407f2dc1f33c94660e62d4993f09cc0d8",
+      "source_working_change": false,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/snippets/pipelang.json",
+      "destination_sha256": "d48bdce0b8ba126810a440d1db49655407f2dc1f33c94660e62d4993f09cc0d8"
+    },
+    {
+      "source": "tooling/vscode-extensions/dockpipe-language-support/syntaxes/pipelang.tmLanguage.json",
+      "source_sha256": "76d8f0c6aeece32f8ae9aa65bbb08b9986ddf2a91e2230d4157da7b357fc3bf3",
+      "source_working_change": false,
+      "destination": "tooling/vscode-extensions/pipelang-language-support/syntaxes/pipelang.tmLanguage.json",
+      "destination_sha256": "76d8f0c6aeece32f8ae9aa65bbb08b9986ddf2a91e2230d4157da7b357fc3bf3"
+    }
+  ]
+}

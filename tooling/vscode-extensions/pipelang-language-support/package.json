@@ -1,0 +1,94 @@
+{
+  "name": "pipelang-language-support",
+  "displayName": "PipeLang Language Support",
+  "description": "PipeLang syntax, snippets, keyword completion and standalone compiler diagnostics.",
+  "version": "0.0.1",
+  "publisher": "dockpipe",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dockpipe-Industries/pipelang.git"
+  },
+  "license": "Apache-2.0",
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "pipelang",
+    "language"
+  ],
+  "activationEvents": [
+    "onLanguage:pipelang"
+  ],
+  "files": [
+    "extension.js",
+    "images/**",
+    "language-configuration.json",
+    "syntaxes/**",
+    "snippets/**",
+    "README.md",
+    "LICENSE",
+    "package.json",
+    "CHANGELOG.md"
+  ],
+  "main": "extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "pipelang",
+        "aliases": [
+          "PipeLang",
+          "pipelang"
+        ],
+        "extensions": [
+          ".pipe"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "pipelang",
+        "scopeName": "source.pipelang",
+        "path": "./syntaxes/pipelang.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "pipelang",
+        "path": "./snippets/pipelang.json"
+      }
+    ],
+    "configuration": {
+      "title": "PipeLang",
+      "properties": {
+        "pipelang.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Explicit standalone PipeLang executable; defaults to the installed pipelang command."
+        },
+        "pipelang.diagnostics.timeoutMs": {
+          "type": "integer",
+          "default": 10000,
+          "minimum": 100,
+          "description": "Maximum compiler diagnostic request duration in milliseconds."
+        },
+        "pipelang.diagnostics.maxOutputBytes": {
+          "type": "integer",
+          "default": 4194304,
+          "minimum": 1024,
+          "description": "Maximum stdout/stderr bytes buffered for each compiler diagnostic request."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.7.1"
+  },
+  "scripts": {
+    "test": "node extension.test.js"
+  }
+}

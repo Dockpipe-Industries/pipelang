@@ -100,7 +100,11 @@ func float64String(raw json.RawMessage) (string, error) {
 }
 
 func (emitter NativeEmitter) generateFloat64(ctx context.Context, program coreir.Program) (Generated, error) {
-	request, err := projectFloat64Program(program)
+	return emitter.generateFloat64WithProfile(ctx, program, Float64ComparisonCapability)
+}
+
+func (emitter NativeEmitter) generateFloat64WithProfile(ctx context.Context, program coreir.Program, selectedProfile string) (Generated, error) {
+	request, err := projectFloat64ProgramWithProfile(program, selectedProfile)
 	if err != nil {
 		return Generated{}, err
 	}
@@ -122,7 +126,14 @@ func (emitter NativeEmitter) generateFloat64(ctx context.Context, program coreir
 	if err := errors.Join(contractError, profileError, sourceError); err != nil {
 		return Generated{}, err
 	}
-	if contract != float64ResponseContract || profile != Float64ComparisonCapability || len(source) == 0 || len(source) > maximumNativeSource {
+	expectedContract := float64ResponseContract
+	if selectedProfile == Float64ConditionalCapability {
+		expectedContract = float64ConditionalResponseContract
+	}
+	if selectedProfile == Float64CallsCapability {
+		expectedContract = float64CallsResponseContract
+	}
+	if contract != expectedContract || profile != selectedProfile || len(source) == 0 || len(source) > maximumNativeSource {
 		return Generated{}, errors.New("float64 emitter response has invalid contract, profile or source size")
 	}
 	rawFunctions := bytes.TrimSpace(fields["functions"])

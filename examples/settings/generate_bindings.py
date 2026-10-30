@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Legacy scalar/source-v2 compatibility fixture. Current applications use the installed native model SDK.
 """Build the settings fixture from pinned PipeLang tools and admitted metadata."""
 import argparse
 import hashlib

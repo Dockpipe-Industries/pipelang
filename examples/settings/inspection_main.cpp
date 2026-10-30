@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <future>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -57,8 +58,8 @@ struct SaveGate {
     {
         std::unique_lock<std::mutex> lock(mutex);
         if (!changed.wait_for(lock, std::chrono::seconds(5), [&] { return released; }))
-            return {pipeview_settings::model::Outcome::Failure, "Inspection save gate deadline exceeded"};
-        return {pipeview_settings::model::Outcome::Success, {}};
+            return pipeview_settings::SaveResult::Failure("Inspection save gate deadline exceeded");
+        return pipeview_settings::SaveResult::Success();
     }
 
     void release()
@@ -96,7 +97,7 @@ int main(int argc, char** argv)
         auto gate = std::make_shared<SaveGate>();
         std::string error;
         auto application = pipeview_settings::Application::create(path, error,
-            [gate](pipeview_settings::SettingsValue) { return gate->persist(); });
+            [gate](pipeview_settings::SettingsValue, pipeview_settings::model::CancellationToken) { return gate->persist(); });
         require(bool(application), error);
         ReleaseGate releaseGate{gate};
         auto foreign = std::async(std::launch::async, [&] {
@@ -108,7 +109,7 @@ int main(int argc, char** argv)
             return false;
         });
         require(foreign.get(), "Foreign inspection accessed owner state");
-        const std::set<std::string> exposed{"playerName", "vsync", "volume", "save.status"};
+        const std::set<std::string> exposed{"model.draft.playerName", "model.draft.vsync", "model.draft.volume", "getter.StatusText", "model.error"};
         const auto initial = pipeview_settings::inspect(*application, exposed);
         const auto redacted = pipeview_settings::inspect(*application);
         bool refusedUnknownExposure = false;
@@ -118,10 +119,10 @@ int main(int argc, char** argv)
             refusedUnknownExposure = true;
         }
         require(refusedUnknownExposure, "Inspection accepted an unknown exposure identity");
-        require(application->session()->setValue("playerName", std::string{"Presentation staging"}, error), error);
+        require(application->session()->setValue("model.draft.playerName", std::string{"Presentation staging"}, error), error);
         require(pipeview_settings::inspect(*application, exposed) == initial,
             "Inspection used presentation staging instead of authoritative state");
-        require(application->session()->setValue("playerName", std::string{"Rider"}, error), error);
+        require(application->session()->setValue("model.draft.playerName", std::string{"Rider"}, error), error);
         editName(*application, "X");
         click(*application, "vsync-toggle");
         click(*application, "volume-stepper");

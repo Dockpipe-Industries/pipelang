@@ -29,3 +29,10 @@ if [ "${PIPELANG_BUILD_CPP_VIEW_PARSER:-0}" = 1 ]; then
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$PWD/bin"
     cmake --build bin/cpp-view-parser-build --parallel 2
 fi
+
+# Ordinary models and typed view bridges are a separate, native-only SDK.
+if [ "${PIPELANG_BUILD_NATIVE_MODELS:-0}" = 1 ]; then
+    cmake -S sdk/pipeview/model -B bin/model-sdk-build \
+        -DCMAKE_BUILD_TYPE=Release
+    cmake --build bin/model-sdk-build --parallel 1
+fi

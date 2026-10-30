@@ -2,86 +2,26 @@ cmake_minimum_required(VERSION 3.21.1)
 project(PipeViewSettings LANGUAGES CXX)
 
 option(PIPEVIEW_SETTINGS_BUILD_NATIVE "Build the native Vulkan showcase" ON)
-
-set(PIPEVIEW_VIEW_SYNTAX "pipelang" CACHE STRING "Explicit view syntax: pipelang or xml")
-set_property(CACHE PIPEVIEW_VIEW_SYNTAX PROPERTY STRINGS pipelang xml)
-if(PIPEVIEW_VIEW_SYNTAX STREQUAL "pipelang")
-    set(view_source "${CMAKE_CURRENT_SOURCE_DIR}/SettingsView.pipe")
-elseif(PIPEVIEW_VIEW_SYNTAX STREQUAL "xml")
-    set(view_source "${CMAKE_CURRENT_SOURCE_DIR}/SettingsView.xml")
-else()
-    message(FATAL_ERROR "PIPEVIEW_VIEW_SYNTAX must be pipelang or xml")
-endif()
-
-set(PIPELANG_CPP_COMPILER "" CACHE FILEPATH "Pinned PipeLang scalar compiler")
-set(PIPELANG_CPP_COMPILER_SHA256 "" CACHE STRING "Exact compiler SHA256")
-set(PIPELANG_VIEW_COMPILER "" CACHE FILEPATH "Pinned PipeLang view compiler")
-set(PIPELANG_VIEW_COMPILER_SHA256 "" CACHE STRING "Exact view compiler SHA256")
-set(PIPELANG_CPP_EMITTER "" CACHE FILEPATH "Optional native emitter")
-set(PIPELANG_CPP_EMITTER_SHA256 "" CACHE STRING "Exact native emitter SHA256")
-set(PIPELANG_CPP_LEXER "" CACHE FILEPATH "Optional native lexer")
-set(PIPELANG_CPP_LEXER_SHA256 "" CACHE STRING "Exact native lexer SHA256")
-function(check_tool path_variable hash_variable)
-    if(NOT IS_ABSOLUTE "${${path_variable}}" OR NOT EXISTS "${${path_variable}}" OR IS_DIRECTORY "${${path_variable}}")
-        message(FATAL_ERROR "${path_variable} must be an existing absolute executable")
-    endif()
-    string(LENGTH "${${hash_variable}}" hash_length)
-    if(NOT hash_length EQUAL 64 OR NOT "${${hash_variable}}" MATCHES "^[0-9a-f]+$")
-        message(FATAL_ERROR "${hash_variable} must be an exact lowercase SHA256")
-    endif()
-    file(SHA256 "${${path_variable}}" actual)
-    if(NOT actual STREQUAL "${${hash_variable}}")
-        message(FATAL_ERROR "${path_variable} checksum mismatch")
-    endif()
-endfunction()
-check_tool(PIPELANG_CPP_COMPILER PIPELANG_CPP_COMPILER_SHA256)
-check_tool(PIPELANG_VIEW_COMPILER PIPELANG_VIEW_COMPILER_SHA256)
-set(component_arguments)
-set(component_dependencies)
-foreach(component IN ITEMS EMITTER LEXER)
-    if(PIPELANG_CPP_${component} OR PIPELANG_CPP_${component}_SHA256)
-        check_tool(PIPELANG_CPP_${component} PIPELANG_CPP_${component}_SHA256)
-        string(TOLOWER "${component}" name)
-        list(APPEND component_arguments --${name} "${PIPELANG_CPP_${component}}"
-            --${name}-sha256 "${PIPELANG_CPP_${component}_SHA256}")
-        list(APPEND component_dependencies "${PIPELANG_CPP_${component}}")
-    endif()
-endforeach()
-set(PIPELANG_CPP_VIEW_PARSER "" CACHE FILEPATH "Optional explicitly selected native view parser")
-set(PIPELANG_CPP_VIEW_PARSER_SHA256 "" CACHE STRING "Exact native view parser SHA256")
-if(PIPELANG_CPP_VIEW_PARSER OR PIPELANG_CPP_VIEW_PARSER_SHA256)
-    check_tool(PIPELANG_CPP_VIEW_PARSER PIPELANG_CPP_VIEW_PARSER_SHA256)
-    if(NOT PIPEVIEW_VIEW_SYNTAX STREQUAL "pipelang")
-        message(FATAL_ERROR "The native view parser supports PipeLang source only")
-    endif()
-    list(APPEND component_arguments --view-parser "${PIPELANG_CPP_VIEW_PARSER}"
-        --view-parser-sha256 "${PIPELANG_CPP_VIEW_PARSER_SHA256}")
-    list(APPEND component_dependencies "${PIPELANG_CPP_VIEW_PARSER}")
-endif()
 set(forgepipe_components UI)
 if(PIPEVIEW_SETTINGS_BUILD_NATIVE)
     list(APPEND forgepipe_components NativeHost)
 endif()
 find_package(ForgePipe 0.9.0 EXACT CONFIG REQUIRED COMPONENTS ${forgepipe_components})
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(PipeLangModel 0.1.0 EXACT CONFIG REQUIRED)
 find_package(Threads REQUIRED)
-set(generated "${CMAKE_CURRENT_BINARY_DIR}/compiled-ui")
-add_custom_command(
-    OUTPUT "${generated}/DemoBindings.hpp" "${generated}/generated.hpp" "${generated}/bindings.json"
-        "${generated}/PipeViewDocument.hpp" "${generated}/PipeViewDocument.hpp.json"
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_bindings.py"
-        --compiler "${PIPELANG_CPP_COMPILER}" --compiler-sha256 "${PIPELANG_CPP_COMPILER_SHA256}"
-        --viewc "${PIPELANG_VIEW_COMPILER}" --viewc-sha256 "${PIPELANG_VIEW_COMPILER_SHA256}"
-        --source "${CMAKE_CURRENT_SOURCE_DIR}/Settings.pipe"
-        --view-source "${view_source}" --view-syntax "${PIPEVIEW_VIEW_SYNTAX}"
-        --output "${generated}" ${component_arguments}
-    DEPENDS Settings.pipe "${view_source}" generate_bindings.py "${PIPELANG_CPP_COMPILER}"
-        "${PIPELANG_VIEW_COMPILER}" ${component_dependencies}
-    VERBATIM)
-add_library(settings-application STATIC Example.cpp SettingsStore.cpp Inspection.cpp "${generated}/DemoBindings.hpp")
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+pipelang_add_model_bindings(settings-bindings
+    STYLE_INSPECTION
+    MODEL "${CMAKE_CURRENT_SOURCE_DIR}/Settings.pipe"
+    VIEW "${CMAKE_CURRENT_SOURCE_DIR}/SettingsView.pipe"
+    NAMESPACE settings_models
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/compiled-ui")
+add_library(settings-application STATIC Example.cpp SettingsStore.cpp Inspection.cpp)
 target_compile_features(settings-application PUBLIC cxx_std_20)
-target_include_directories(settings-application PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${generated}")
-target_link_libraries(settings-application PUBLIC ForgePipe::UI Threads::Threads)
+target_include_directories(settings-application PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(settings-application PUBLIC ForgePipe::UI settings-bindings Threads::Threads)
+
 add_executable(pipeview-settings-model model_main.cpp)
 target_link_libraries(pipeview-settings-model PRIVATE settings-application)
 if(PIPEVIEW_SETTINGS_BUILD_NATIVE)
@@ -96,9 +36,18 @@ if(BUILD_TESTING)
     add_test(NAME PipeViewPercentSettings COMMAND pipeview-settings-percent "${CMAKE_CURRENT_BINARY_DIR}/percent-fixture")
     add_executable(pipeview-settings-async async_main.cpp)
     target_link_libraries(pipeview-settings-async PRIVATE settings-application)
-    add_executable(pipeview-settings-inspection inspection_main.cpp)
-    target_link_libraries(pipeview-settings-inspection PRIVATE settings-application)
     add_test(NAME PipeViewOwnedSaveWorker COMMAND pipeview-settings-async "${CMAKE_CURRENT_BINARY_DIR}/async-fixture")
     add_test(NAME PipeViewSettingsModel COMMAND pipeview-settings-model "${CMAKE_CURRENT_BINARY_DIR}/model-fixture")
-    add_test(NAME PipeViewBindingAdmission COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_bindings.py")
+    add_executable(pipeview-settings-inspection inspection_main.cpp)
+    target_link_libraries(pipeview-settings-inspection PRIVATE settings-application)
+    add_test(NAME PipeViewSettingsInspection COMMAND pipeview-settings-inspection
+        "${CMAKE_CURRENT_BINARY_DIR}/inspection-fixture" "${CMAKE_CURRENT_BINARY_DIR}/inspection.json")
+    add_test(NAME PipeViewInspectionAdmission COMMAND "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_model_inspection.py" "${CMAKE_CURRENT_BINARY_DIR}/inspection.json")
+    set_tests_properties(PipeViewInspectionAdmission PROPERTIES DEPENDS PipeViewSettingsInspection)
+    add_test(NAME PipeViewStyleDescriptorAdmission COMMAND "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_style_inspection.py" "${CMAKE_CURRENT_BINARY_DIR}/compiled-ui")
+    # The former scalar/source-v2 adapter remains explicit compatibility evidence.
+    add_test(NAME LegacyPipeViewBindingAdmission COMMAND "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_bindings.py")
 endif()

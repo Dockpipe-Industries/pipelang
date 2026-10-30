@@ -38,10 +38,10 @@ struct Gate {
         entered = true;
         condition.notify_all();
         if (!condition.wait_for(lock, std::chrono::seconds(5), [&] { return released; }))
-            return {Outcome::Failure, "Fixture gate deadline exceeded"};
+            return pipeview_settings::SaveResult::Failure("Fixture gate deadline exceeded");
         finished = true;
         condition.notify_all();
-        return {Outcome::Success, {}};
+        return pipeview_settings::SaveResult::Success();
     }
 
     void wait(bool Gate::*flag)
@@ -78,7 +78,13 @@ void edit(Application &application, const std::string &text)
 {
     click(application, "name-field");
     std::string error;
-    require(application.session()->textInput(text, error), error);
+    const bool accepted = application.session()->textInput(text, error);
+    if (application.snapshot().saving) {
+        require(!accepted && application.session()->takeEvents().empty(),
+            "Disabled pending field accepted input");
+        return;
+    }
+    require(accepted, error);
     require(application.dispatch(application.session()->takeEvents(), error), error);
 }
 
@@ -108,7 +114,7 @@ int main(int argc, char **argv)
         const auto owner = std::this_thread::get_id();
         auto gate = std::make_shared<Gate>();
         auto application = Application::create(root / "gate.data", error,
-            [gate](auto value) { return gate->persist(std::move(value)); });
+            [gate](auto value, auto) { return gate->persist(std::move(value)); });
         require(bool(application), error);
         Release release{gate};
         edit(*application, "X");
@@ -127,8 +133,8 @@ int main(int argc, char **argv)
         click(*application, "volume-stepper");
         click(*application, "save-button");
         click(*application, "revert-button");
-        require(std::get<std::string>(application->snapshot().draft.at("playerName")) == "RiderX", "Busy input changed capture");
-        require(std::get<std::int64_t>(application->snapshot().draft.at("volume")) == 99, "Busy volume input changed capture");
+        require(application->snapshot().draft.playerName == "RiderX", "Busy input changed capture");
+        require(application->snapshot().draft.volume == 99, "Busy volume input changed capture");
         auto foreign = std::async(std::launch::async, [&] {
             std::string failure;
             return !application->pumpSave(failure) && !application->dispatch({}, failure);
@@ -146,18 +152,18 @@ int main(int argc, char **argv)
         for (int mode = 0; mode < 5; ++mode) {
             auto calls = std::make_shared<std::atomic<int>>(0);
             auto retry = Application::create(root / ("retry" + std::to_string(mode)), error,
-                [calls, mode](auto) -> pipeview_settings::SaveResult {
+                [calls, mode](auto, auto) -> pipeview_settings::SaveResult {
                     if (++*calls > 1)
-                        return {Outcome::Success, {}};
+                        return pipeview_settings::SaveResult::Success();
                     if (mode == 0)
-                        return {Outcome::Failure, "Expected storage refusal"};
+                        return pipeview_settings::SaveResult::Failure("Expected storage refusal");
                     if (mode == 1)
                         throw std::runtime_error("Unexpected fixture failure");
                     if (mode == 2)
                         throw 7;
                     if (mode == 3)
-                        return {static_cast<Outcome>(999), "Invalid fixture outcome"};
-                    return {Outcome::Cancelled, {}};
+                        return pipeview_settings::SaveResult::Failure("Explicit typed storage failure");
+                    return pipeview_settings::SaveResult::Cancelled();
                 });
             require(bool(retry), error);
             edit(*retry, "X");
@@ -180,7 +186,7 @@ int main(int argc, char **argv)
         closingOwner = std::async(std::launch::async, [=] {
             std::string failure;
             auto owned = Application::create(root / "closing.data", failure,
-                [closingGate](auto value) { return closingGate->persist(std::move(value)); });
+                [closingGate](auto value, auto) { return closingGate->persist(std::move(value)); });
             require(bool(owned), failure);
             edit(*owned, "X");
             click(*owned, "save-button");

@@ -118,6 +118,10 @@ LexResult failure(std::string code, std::string message,
 }
 
 LexResult lex(const std::string& source) {
+    return lex(source, NumericSyntax::Legacy);
+}
+
+LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
     LexResult result;
     result.tokens.reserve(128);
     std::size_t offset = 0;
@@ -155,6 +159,17 @@ LexResult lex(const std::string& source) {
                 ++offset;
                 if (offset == source.size() || !isDigit(source[offset]))
                     return failure("PL1002", "invalid float literal", start, offset);
+                while (offset < source.size() && isDigit(source[offset]))
+                    ++offset;
+            }
+            if (numericSyntax == NumericSyntax::Binary64 && offset < source.size() &&
+                (source[offset] == 'e' || source[offset] == 'E')) {
+                floatingPoint = true;
+                ++offset;
+                if (offset < source.size() && (source[offset] == '+' || source[offset] == '-'))
+                    ++offset;
+                if (offset == source.size() || !isDigit(source[offset]))
+                    return failure("PL1002", "invalid float exponent", start, offset);
                 while (offset < source.size() && isDigit(source[offset]))
                     ++offset;
             }

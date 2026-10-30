@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Legacy scalar/source-v2 compatibility fixture. Current applications use the installed native model SDK.
 """Compare native inspection frames with the independent Go reference report."""
 
 import json

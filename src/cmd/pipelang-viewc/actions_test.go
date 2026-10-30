@@ -16,7 +16,7 @@ import (
 
 func settingsActionFixture(t *testing.T) []byte {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "examples", "settings", "SettingsView.pipe")
+	path := filepath.Join("..", "..", "..", "tests", "pipeview", "fixtures", "legacy-settings", "SettingsView.pipe")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

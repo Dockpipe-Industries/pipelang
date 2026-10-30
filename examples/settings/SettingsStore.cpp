@@ -126,7 +126,14 @@ bool SettingsStore::load(std::optional<SettingsValue> &value, std::string &error
             return false;
         }
     }
-    value = SettingsValue{data.substr(separator + 1, size), data[tail + 1] == '1', volume};
+    auto playerName = data.substr(separator + 1, size);
+    try {
+        pipelang::model::validate(playerName);
+    } catch (const pipelang::model::ExecutionFailure &failure) {
+        error = "Invalid saved player name: " + std::string(failure.what());
+        return false;
+    }
+    value = SettingsValue{std::move(playerName), data[tail + 1] == '1', volume};
     error.clear();
     return true;
 }
@@ -138,6 +145,12 @@ bool SettingsStore::save(const SettingsValue &value, std::string &error) const
         return false;
     if (value.playerName.size() > 4096) {
         error = "Player name exceeds settings capacity";
+        return false;
+    }
+    try {
+        pipelang::model::validate(value.playerName);
+    } catch (const pipelang::model::ExecutionFailure &failure) {
+        error = "Invalid saved player name: " + std::string(failure.what());
         return false;
     }
     if (value.volume < 0 || value.volume > 100) {

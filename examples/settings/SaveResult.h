@@ -1,10 +1,8 @@
 #pragma once
-#include "PipeViewDocument.hpp"
+
+#include <pipelang/model/runtime.hpp>
 #include <string>
 
 namespace pipeview_settings {
-struct SaveResult {
-    pipelang::pipeview::state::Outcome outcome = pipelang::pipeview::state::Outcome::Failure;
-    std::string error;
-};
+using SaveResult = pipelang::model::Result<void, std::string>;
 }

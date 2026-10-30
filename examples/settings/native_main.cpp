@@ -66,9 +66,9 @@ bool exercise(Application &application, std::string &error)
 bool expected(const Application &application, const std::string &mode)
 {
     const auto state = application.snapshot();
-    return std::get<std::string>(state.draft.at("playerName")) == "RiderX"
-        && !std::get<bool>(state.draft.at("vsync"))
-        && std::get<std::int64_t>(state.draft.at("volume")) == 99 && !state.saving
+    return state.draft.playerName == "RiderX"
+        && !state.draft.vsync
+        && state.draft.volume == 99 && !state.saving
         && (mode == "failure" ? state.dirty && state.status == "Save failed"
                               : !state.dirty && state.status == "Saved");
 }

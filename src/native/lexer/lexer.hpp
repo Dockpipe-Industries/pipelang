@@ -26,6 +26,9 @@ struct LexResult {
     std::optional<LexicalFailure> failure;
 };
 
+enum class NumericSyntax { Legacy, Binary64 };
+
 LexResult lex(const std::string& source);
+LexResult lex(const std::string& source, NumericSyntax numericSyntax);
 
 }

@@ -68,7 +68,7 @@ func compileWithComponents(source []byte, sourceName, packageName, moduleName st
 
 func compileWithProfileComponents(source []byte, sourceName, packageName, moduleName, profile string,
 	generate func(coreir.Program) (cppbackend.Generated, error), sourceLexer pipelang.SourceLexer) ([]byte, metadata, error) {
-	if profile != cppbackend.Capability && profile != cppbackend.Float64ComparisonCapability {
+	if profile != cppbackend.Capability && profile != cppbackend.Float64ComparisonCapability && profile != cppbackend.Float64ConditionalCapability && profile != cppbackend.Float64CallsCapability {
 		return nil, metadata{}, fmt.Errorf("unsupported C++ profile %q", profile)
 	}
 	if len(source) == 0 || len(source) > maximumSourceBytes {
@@ -127,7 +127,7 @@ func compileWithProfileComponents(source []byte, sourceName, packageName, module
 	sort.Slice(program.Functions, func(first, second int) bool {
 		return program.Functions[first].Identity.Path < program.Functions[second].Identity.Path
 	})
-	if profile == cppbackend.Float64ComparisonCapability {
+	if profile == cppbackend.Float64ComparisonCapability || profile == cppbackend.Float64ConditionalCapability || profile == cppbackend.Float64CallsCapability {
 		if err := cppbackend.ValidateProfile(program, profile); err != nil {
 			return nil, metadata{}, err
 		}
@@ -207,11 +207,14 @@ func run() error {
 	if flag.NArg() != 0 || *sourcePath == "" || !filepath.IsAbs(*output) {
 		return errors.New("--source and absolute --output-dir are required; positional arguments are unsupported")
 	}
-	if *profile != cppbackend.Capability && *profile != cppbackend.Float64ComparisonCapability {
+	if *profile != cppbackend.Capability && *profile != cppbackend.Float64ComparisonCapability && *profile != cppbackend.Float64ConditionalCapability && *profile != cppbackend.Float64CallsCapability {
 		return fmt.Errorf("unsupported C++ profile %q", *profile)
 	}
 	if (*emitterPath == "") != (*emitterSHA256 == "") {
 		return errors.New("--cpp-emitter and --cpp-emitter-sha256 must be supplied together")
+	}
+	if *profile == cppbackend.Float64CallsCapability && *emitterPath == "" {
+		return errors.New("typed float64 calls require an explicitly selected native C++ emitter")
 	}
 	if (*lexerPath == "") != (*lexerSHA256 == "") {
 		return errors.New("--cpp-lexer and --cpp-lexer-sha256 must be supplied together")

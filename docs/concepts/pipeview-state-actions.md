@@ -1,5 +1,10 @@
 # Experimental PipeView typed state and actions
 
+Compatibility scope: this source-v2/state-v1 API remains supported reference
+evidence. Current Counter/settings consumers use the explicitly selected native
+ordinary-model SDK; see [the native model record](../research/pipelang-native-models-20261030.md).
+This document does not describe the current application controller.
+
 Status: locally implemented settings slice, 2026-10-28. Source profile v2 adds
 closed typed action handlers to the explicit PipeLang view entrypoint. It does
 not implement arbitrary action bodies, ordinary language mutation/effects/tasks,

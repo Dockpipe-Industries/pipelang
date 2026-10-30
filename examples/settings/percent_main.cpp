@@ -50,15 +50,15 @@ void setVolume(Application &application, std::int64_t value)
     forgepipe::ui::Event event;
     event.type = forgepipe::ui::EventType::ValueChanged;
     event.control = "volume-stepper";
-    event.action = "volumeEdited";
-    event.binding = "volume";
+    event.action = "ChangeVolume";
+    event.binding = "model.draft.volume";
     event.value = value;
     require(application.dispatch({event}, error), error);
 }
 
 std::int64_t volume(const Application &application)
 {
-    return std::get<std::int64_t>(application.snapshot().draft.at("volume"));
+    return application.snapshot().draft.volume;
 }
 
 void finishSave(Application &application)
@@ -135,7 +135,7 @@ int main(int argc, char **argv)
             setVolume(*application, invalid);
             require(volume(*application) == invalid && !application->snapshot().valid
                 && !application->snapshot().canSave && application->snapshot().status == "Invalid settings", "Invalid draft was clamped or admitted");
-            require(std::get<std::int64_t>(*application->session()->value("volume")) == invalid, "Invalid raw draft was not projected");
+            require(std::get<std::int64_t>(*application->session()->value("model.draft.volume")) == invalid, "Invalid raw draft was not projected");
             click(*application, "save-button");
             require(!application->snapshot().saving && read(path) == legacy, "Invalid Save changed storage");
             click(*application, "volume-stepper");
@@ -156,8 +156,8 @@ int main(int argc, char **argv)
         forgepipe::ui::Event forged;
         forged.type = forgepipe::ui::EventType::ValueChanged;
         forged.control = "name-field";
-        forged.action = "volumeEdited";
-        forged.binding = "volume";
+        forged.action = "ChangeVolume";
+        forged.binding = "model.draft.volume";
         forged.value = std::int64_t{55};
         require(!reopened->dispatch({forged}, error) && volume(*reopened) == 37, "Forged control edited volume");
         std::puts("percent_stepper: strict_storage_legacy_no_write_invalid_draft_recovery_save_reload_revert=passed");

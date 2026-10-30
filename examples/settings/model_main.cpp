@@ -10,15 +10,23 @@
 #include <sys/stat.h>
 
 namespace {
+class StorageStub final : public settings_models::SettingsStorage {
+public:
+    pipeview_settings::SaveResult Save(settings_models::SettingsValues,
+        pipelang::model::CancellationToken) override
+    {
+        return pipeview_settings::SaveResult::Success();
+    }
+};
 void require(bool condition, const std::string &message)
 {
     if (!condition)
         throw std::runtime_error(message);
 }
 
-std::string playerName(const pipeview_settings::model::Snapshot &snapshot)
+std::string playerName(const settings_models::SettingsSnapshot &snapshot)
 {
-    return std::get<std::string>(snapshot.draft.at("playerName"));
+    return snapshot.draft.playerName;
 }
 
 void click(pipeview_settings::Application &application, const std::string &identity)
@@ -46,7 +54,13 @@ void editName(pipeview_settings::Application &application, const std::string &te
 {
     std::string error;
     click(application, "name-field");
-    require(application.session()->textInput(text, error), error);
+    const bool accepted = application.session()->textInput(text, error);
+    if (application.snapshot().saving) {
+        require(!accepted && application.session()->takeEvents().empty(),
+            "Disabled pending field accepted input");
+        return;
+    }
+    require(accepted, error);
     require(application.dispatch(application.session()->takeEvents(), error), error);
 }
 }
@@ -63,6 +77,13 @@ int main(int argc, char **argv)
         const std::filesystem::path root(directory.data());
         const auto path = root / "settings.data";
         std::string error;
+        settings_models::SettingsModel domain(std::make_shared<StorageStub>(), settings_models::SettingsValues{});
+        require(domain.ChangeVolume(101).is_success()
+            && domain.snapshot().status == settings_models::SaveStatus::Invalid,
+            "Typed model status did not reflect an invalid draft");
+        require(domain.ChangeVolume(100).is_success()
+            && domain.snapshot().status == settings_models::SaveStatus::Saved,
+            "Editing back to baseline left a stale unsaved status");
         auto application = pipeview_settings::Application::create(path, error);
         require(bool(application), error);
         require(!application->snapshot().dirty && !application->snapshot().canSave, "Initial flags differ");
@@ -81,15 +102,15 @@ int main(int argc, char **argv)
         auto reopened = pipeview_settings::Application::create(path, error);
         require(bool(reopened), error);
         require(playerName(reopened->snapshot()) == "RiderX"
-            && !std::get<bool>(reopened->snapshot().draft.at("vsync")), "Reload did not preserve typed values");
+            && !reopened->snapshot().draft.vsync, "Reload did not preserve typed values");
         editName(*reopened, "Z");
         click(*reopened, "revert-button");
         require(playerName(reopened->snapshot()) == "RiderX", "Revert used defaults instead of saved baseline");
         // Presentation staging cannot bypass the authoritative model.
-        require(reopened->session()->setValue("playerName", std::string("Injected"), error), error);
+        require(reopened->session()->setValue("model.draft.playerName", std::string("Injected"), error), error);
         click(*reopened, "save-button");
         require(playerName(reopened->snapshot()) == "RiderX"
-            && std::get<std::string>(*reopened->session()->value("playerName")) == "RiderX", "View staging bypassed actions");
+            && std::get<std::string>(*reopened->session()->value("model.draft.playerName")) == "RiderX", "View staging bypassed actions");
         click(*reopened, "name-field");
         for (int index = 0; index < 6; ++index) {
             require(reopened->session()->key(forgepipe::ui::Key::Backspace, false, error), error);
@@ -115,6 +136,13 @@ int main(int argc, char **argv)
         const auto corrupt = root / "corrupt.data";
         { std::ofstream file(corrupt); file << "invalid"; }
         require(!pipeview_settings::Application::create(corrupt, error), "Malformed saved data silently became defaults");
+        const auto malformedText = root / "malformed-text.data";
+        {
+            std::ofstream file(malformedText, std::ios::binary);
+            file << "pipeview.settings.v1\n2\n" << std::string("\xc0\xaf", 2) << "\n1\n";
+        }
+        require(!pipeview_settings::Application::create(malformedText, error) && !error.empty(),
+            "Malformed stored Unicode bypassed codec admission");
         const auto link = root / "link.data";
         std::filesystem::create_symlink(path, link);
         require(!pipeview_settings::Application::create(link, error), "Symlink store was accepted");

@@ -1,11 +1,36 @@
 # PipeLang/PipeView and ForgePipe first-consumer work
 
-Objective: `pipelang-forgepipe-first-consumer-20261030`  
-State: closed at the requested deadline; implementation accepted, full conformance incomplete  
-Authority: the user requested continued work in this chat until **10 AM Toronto on 2026-10-30 (14:00 UTC)**, with a recovery monitor.  
+Objective: `pipelang-forgepipe-first-consumer-20261030`
+Overnight run state: closed at its requested deadline; full conformance incomplete
+Overnight authority: the user requested continued work in that run until **10 AM Toronto on 2026-10-30 (14:00 UTC)**, with a recovery monitor.
 Execution skill: `dorkpipe-objective-execution`
 
-## Current boundary
+## Renewed continuation
+
+The owner explicitly renewed this objective after the overnight closeout and
+requested fresh-chat continuation in the original checkouts. The former 10 AM
+deadline and deleted monitor belong only to the historical run below.
+
+Current checkpoint: additive binary64 conditional values/returns with ForgePipe
+contact restitution as the first installed consumer. Contract, exclusions and
+focused evidence live in the
+[conditional capability record](../../research/pipelang-cpp-float64-conditional-profile.md).
+State: conditional-value checkpoint accepted at focused Linux compiler/installed-SDK scope;
+final root checks recorded with its proof. No further publication authorized.
+PR11 remains open for owner review; its two Linux checks passed at head
+`0c9157cf00cc3bceb2372c7ae769aab1d1c8e24c` on 2026-10-30.
+
+The owner also requested the language-direction guidance and
+[existing-consumer architecture audit](../../research/pipelang-consumer-architecture-audit-20261030.md).
+Those documentation changes are local. The owner authorized the audit remediation as the next objective. Ordinary
+models/async, generated typed bridges/properties and helper calls are implemented
+with focused proof; terminal root checks are tracked in
+[the remediation objective](consumer-architecture-remediation-20261030.md).
+Broader roadmap work remains paused until that objective is accepted. Preserve original heads/indexes and unrelated
+bytes; MesaMoto is untouched. No commits, pushes, merges or UI startup follow
+from this continuation.
+
+## Overnight closeout boundary
 
 The second full compiler campaign has stopped at its storage guard. **8,504 of
 8,914 planned units passed; no completed unit failed. The remaining 410 are
@@ -210,16 +235,3 @@ full-suite or storage-budget acceptance. Native UI was compiled but not run.
 Changes remain local and uncommitted. Original branches, HEADs, index hashes and
 unrelated work were preserved by the final review. Further work or publication
 requires a new user instruction; this record conveys no continuing authority.
-
-## Publication authorized — 2026-10-30
-
-After deadline closeout, the user explicitly requested committing and pushing
-the PipeLang/PipeView and ForgePipe changes to `dev`, preserving unrelated
-uncommitted work. Publication uses isolated dev-based checkouts so the original
-working trees, branches and indexes remain untouched. This authorizes scoped
-Git publication; it does not restart the exhausted conformance campaign.
-
-The isolated compiler checkout passed its declared repository check and baseline
-build. Existing source-bound parser, model, installed-SDK and 49-stage native
-pilot evidence above remains applicable. Full compiler conformance is still
-8,504/8,914 units with 410 unqualified after the storage stop.

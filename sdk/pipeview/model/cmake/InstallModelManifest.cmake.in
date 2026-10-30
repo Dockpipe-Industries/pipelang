@@ -1,0 +1,14 @@
+set(model_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+execute_process(COMMAND "@Python3_EXECUTABLE@" -B
+    "${model_prefix}/@CMAKE_INSTALL_DATADIR@/pipelang-model/tooling/sdk_manifest.py"
+    --prefix "${model_prefix}"
+    --manifest "${model_prefix}/@CMAKE_INSTALL_DATADIR@/pipelang-model/sdk-manifest.json"
+    --roots "@CMAKE_INSTALL_BINDIR@/pipelang-modelc@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-model-viewc@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_INCLUDEDIR@/pipelang/model"
+        "@CMAKE_INSTALL_LIBDIR@/cmake/PipeLangModel"
+        "@CMAKE_INSTALL_DATADIR@/pipelang-model"
+    RESULT_VARIABLE model_manifest_status)
+if(NOT model_manifest_status EQUAL 0)
+    message(FATAL_ERROR "Failed to record installed PipeLangModel SDK identities")
+endif()

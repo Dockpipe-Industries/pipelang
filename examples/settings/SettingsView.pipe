@@ -1,0 +1,24 @@
+view SettingsView {
+    state playerName: string = "Rider";
+    state vsync: bool = true;
+    state volume: int = 100;
+
+    action nameEdited(string) => set playerName;
+    action vsyncEdited(bool) => set vsync;
+    action volumeEdited(int) => set volume;
+    action save() => save;
+    action revert() => revert;
+
+    Column(id: "root") {
+        Label(id: "title", text: "Settings");
+        Label(id: "name-label", text: "Player name");
+        TextField(id: "name-field", value: bind playerName, changed: nameEdited);
+        Toggle(id: "vsync-toggle", label: "VSync", value: bind vsync, changed: vsyncEdited);
+        PercentStepper(id: "volume-stepper", label: "Volume", value: bind volume, changed: volumeEdited);
+        Label(id: "save-status", value: bind save.status);
+        Row(id: "actions") {
+            Button(id: "save-button", label: "Save", clicked: save);
+            Button(id: "revert-button", label: "Revert", clicked: revert);
+        }
+    }
+}

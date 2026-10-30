@@ -2,11 +2,11 @@ package pipelang
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreeval"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreir"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/gobackend"
-	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"

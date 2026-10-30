@@ -1,0 +1,8 @@
+name: pipelang-check
+description: Validate repository formatting, workflow declarations and controlled toolchain contracts.
+docker_preflight: false
+steps:
+  - id: check
+    kind: host
+    cwd: repo
+    run: assets/scripts/check.py

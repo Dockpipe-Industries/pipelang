@@ -1,10 +1,10 @@
 package pipelang
 
 import (
-	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreeval"
-	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/gobackend"
 	"encoding/json"
 	"fmt"
+	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreeval"
+	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/gobackend"
 	"regexp"
 	"strings"
 	"testing"

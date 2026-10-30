@@ -1,8 +1,8 @@
 package coreeval
 
 import (
-	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreir"
 	"fmt"
+	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreir"
 )
 
 func evalBlock(b *coreir.Block, args *argumentFrame, functions map[string]coreir.Function) (Outcome, bool, error) {

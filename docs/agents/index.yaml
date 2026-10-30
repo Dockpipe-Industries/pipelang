@@ -6,3 +6,5 @@ routes:
     read: [docs/agents/workflows/authoring.md, docs/agents/core/validation.md]
   - task: migration
     read: [docs/agents/backlog.md, docs/agents/core/architecture.md]
+  - task: pipeview-or-modular-packages
+    read: [docs/agents/backlog.md, docs/agents/core/architecture.md, docs/agents/core/validation.md, docs/concepts/pipelang-qt-boundary.md]

@@ -10,7 +10,22 @@ from estate import CampaignBudget
 
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--prepared',type=Path,required=True);ap.add_argument('--output',type=Path,required=True);ap.add_argument('--cache',type=Path,required=True);ap.add_argument('--go',type=Path,required=True);ap.add_argument('--roots',type=Path,required=True);ap.add_argument('--mode',choices=['fresh','resume'],default='fresh');ap.add_argument('--interrupt-after',type=int,default=0);ap.add_argument('--repetitions',type=int,default=1);a=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--prepared',type=Path,required=True);ap.add_argument('--output',type=Path,required=True);ap.add_argument('--cache',type=Path,required=True);ap.add_argument('--go',type=Path,required=True);ap.add_argument('--roots',type=Path,required=True);ap.add_argument('--mode',choices=['fresh','resume'],default='fresh');ap.add_argument('--interrupt-after',type=int,default=0);ap.add_argument('--repetitions',type=int,default=1)
+    ap.add_argument('--emitter', type=Path, help='Explicit checksum-bound experimental native emitter')
+    ap.add_argument('--emitter-sha256', help='Exact native emitter digest')
+    ap.add_argument('--core-only', action='store_true', help='Skip optional Qt dependency discovery')
+    a=ap.parse_args()
+    emitter_inputs = []
+    emitter_environment = []
+    if bool(a.emitter) != bool(a.emitter_sha256):
+        ap.error('--emitter and --emitter-sha256 must be selected together')
+    if a.emitter:
+        if not a.emitter.is_absolute() or file_identity(a.emitter)['sha256'] != a.emitter_sha256:
+            ap.error('native emitter identity mismatch')
+        emitter_inputs = [a.emitter, R / 'src/native']
+        emitter_environment = ['PIPELANG_CPP_EMITTER=' + str(a.emitter),
+                               'PIPELANG_CPP_EMITTER_SHA256=' + a.emitter_sha256]
+    discovery_arguments = ['--core-only'] if a.core_only else []
     verify_job();out=a.output.resolve();out.mkdir(exist_ok=True,mode=0o700);(out/'storage').mkdir(exist_ok=True,mode=0o700)
     roots=[Path(x) for x in json.loads(a.roots.read_text())]
     # The preparation inventory includes the complete task tree and shared cache.
@@ -27,14 +42,14 @@ def main():
             while not stop.wait(.1):budget.memory.check()
         thread=threading.Thread(target=reclaim,daemon=True);thread.start()
         producer=out/('producer-'+str(os.getpid()));producer.mkdir(mode=0o700)
-        source_guard=InputGuard(source_paths())
+        source_guard=InputGuard(source_paths() + emitter_inputs)
         def producer_unit(name,cmd):
             prefix=producer/name
             with (producer/(name+'.runner.log')).open('w') as log:
                 rc=subprocess.run([sys.executable,'-B',str(R/'tests/containedexec/run.py'),'--output',str(prefix),'--cache',str(a.cache),'--timeout','30','--memory-high-mib','700','--',*cmd],cwd=R,stdout=log,stderr=subprocess.STDOUT).returncode
             assert rc==0 and resource_accepted(json.loads(Path(str(prefix)+'.json').read_text())),name
         producer_unit('build',[str(a.go),'test','-p=1','-c','-o',str(producer/'pilot.test'),'./src/lib/pipelang'])
-        producer_unit('export',['env','PIPELANG_CPP_PILOT_OUTPUT='+str(producer/'corpus'),str(producer/'pilot.test'),'-test.run','^TestCPPPilot(Export|CoreRefusals)$','-test.v','-test.timeout=25s'])
+        producer_unit('export',['env', *emitter_environment, 'PIPELANG_CPP_PILOT_OUTPUT='+str(producer/'corpus'),str(producer/'pilot.test'),'-test.run','^TestCPPPilot(Export|CoreRefusals)$','-test.v','-test.timeout=25s'])
         def inventory(root):return {str(p.relative_to(root)):file_identity(p) for p in root.rglob('*') if p.is_file()}
         fresh=inventory(producer/'corpus');assert fresh==inventory(a.prepared),'fresh frontend/Core/oracle/emitter output disagrees with frozen corpus'
         source_guard.check();source_guard.close()
@@ -43,11 +58,11 @@ def main():
         source_files += [p.resolve() for p in (R/'tests/pipelang-native-pilot').rglob('*') if p.is_file() and '__pycache__' not in p.parts]
         discovery=out/('toolchain-'+str(os.getpid())+'.json')
         with (out/'discovery.log').open('w') as log:
-            rc=subprocess.run([sys.executable,'-B',str(R/'tests/containedexec/run.py'),'--output',str(out/('discovery-'+str(os.getpid()))),'--cache',str(a.cache),'--timeout','30','--memory-high-mib','700','--',sys.executable,'-B',str(R/'tests/pipelang-native-pilot/toolchain.py'),str(discovery)],stdout=log,stderr=subprocess.STDOUT).returncode
+            rc=subprocess.run([sys.executable,'-B',str(R/'tests/containedexec/run.py'),'--output',str(out/('discovery-'+str(os.getpid()))),'--cache',str(a.cache),'--timeout','30','--memory-high-mib','700','--',sys.executable,'-B',str(R/'tests/pipelang-native-pilot/toolchain.py'),str(discovery),*discovery_arguments],stdout=log,stderr=subprocess.STDOUT).returncode
         assert rc==0 and resource_accepted(json.loads((out/('discovery-'+str(os.getpid())+'.json')).read_text())),'toolchain discovery'
         pre.check()
         tool_files=[Path(p) for p in json.loads(discovery.read_text())['files']]
-        guard=InputGuard(source_paths()+source_files+tool_files+[a.go.parent.parent],settings=dict(capability='pipelang.cpp.pilot.v1',repetitions=a.repetitions),watch_directories=watch)
+        guard=InputGuard(source_paths()+source_files+tool_files+[a.go.parent.parent]+emitter_inputs,settings=dict(capability='pipelang.cpp.pilot.v1',repetitions=a.repetitions,emitter_sha256=a.emitter_sha256,core_only=a.core_only),watch_directories=watch)
         pre.check();pre.close()
         try:
             with Campaign(out/'campaign',mode=a.mode) as campaign:

@@ -3,11 +3,11 @@ package pipelang
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreeval"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreir"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/gobackend"
-	"encoding/json"
-	"fmt"
 	"os"
 	"reflect"
 	"strings"

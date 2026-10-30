@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreir"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/cppbackend"
+	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/nativelexer"
 )
 
 const toolContract = "pipelang.native-cpp-export.v1"
@@ -41,6 +43,8 @@ type metadata struct {
 	GeneratedSHA256          string            `json:"generated_sha256"`
 	CompilerExecutableSHA256 string            `json:"compiler_executable_sha256"`
 	Functions                []bindingMetadata `json:"functions"`
+	EmitterExecutableSHA256  string            `json:"emitter_executable_sha256,omitempty"`
+	LexerExecutableSHA256    string            `json:"lexer_executable_sha256,omitempty"`
 }
 
 func digest(data []byte) string {
@@ -49,6 +53,24 @@ func digest(data []byte) string {
 }
 
 func compile(source []byte, sourceName, packageName, moduleName string) ([]byte, metadata, error) {
+	return compileWithEmitter(source, sourceName, packageName, moduleName, cppbackend.GenerateWithNames)
+}
+
+func compileWithEmitter(source []byte, sourceName, packageName, moduleName string,
+	generate func(coreir.Program) (cppbackend.Generated, error)) ([]byte, metadata, error) {
+	return compileWithComponents(source, sourceName, packageName, moduleName, generate, nil)
+}
+
+func compileWithComponents(source []byte, sourceName, packageName, moduleName string,
+	generate func(coreir.Program) (cppbackend.Generated, error), sourceLexer pipelang.SourceLexer) ([]byte, metadata, error) {
+	return compileWithProfileComponents(source, sourceName, packageName, moduleName, cppbackend.Capability, generate, sourceLexer)
+}
+
+func compileWithProfileComponents(source []byte, sourceName, packageName, moduleName, profile string,
+	generate func(coreir.Program) (cppbackend.Generated, error), sourceLexer pipelang.SourceLexer) ([]byte, metadata, error) {
+	if profile != cppbackend.Capability && profile != cppbackend.Float64ComparisonCapability {
+		return nil, metadata{}, fmt.Errorf("unsupported C++ profile %q", profile)
+	}
 	if len(source) == 0 || len(source) > maximumSourceBytes {
 		return nil, metadata{}, errors.New("source must contain 1..65536 bytes")
 	}
@@ -71,7 +93,7 @@ func compile(source []byte, sourceName, packageName, moduleName string) ([]byte,
 			SemanticSHA256: pipelang.ModuleSemanticSHA256(packageID, module.Namespace, nil),
 		}}},
 	}
-	analysis := pipelang.AnalyzeSemanticModuleSet(input)
+	analysis := pipelang.AnalyzeSemanticModuleSetWithLexer(input, sourceLexer)
 	if err := analysis.Error(); err != nil {
 		return nil, metadata{}, err
 	}
@@ -105,7 +127,12 @@ func compile(source []byte, sourceName, packageName, moduleName string) ([]byte,
 	sort.Slice(program.Functions, func(first, second int) bool {
 		return program.Functions[first].Identity.Path < program.Functions[second].Identity.Path
 	})
-	generated, err := cppbackend.GenerateWithNames(program)
+	if profile == cppbackend.Float64ComparisonCapability {
+		if err := cppbackend.ValidateProfile(program, profile); err != nil {
+			return nil, metadata{}, err
+		}
+	}
+	generated, err := generate(program)
 	if err != nil {
 		return nil, metadata{}, err
 	}
@@ -114,7 +141,7 @@ func compile(source []byte, sourceName, packageName, moduleName string) ([]byte,
 	}
 	result := metadata{
 		Contract:         toolContract,
-		Profile:          cppbackend.Capability,
+		Profile:          profile,
 		LanguageContract: program.LanguageContract,
 		CompilerContract: program.CompilerContract,
 		SourceSHA256:     digest(source),
@@ -171,9 +198,23 @@ func run() error {
 	packageName := flag.String("package", "example.native", "Stable semantic package identity")
 	moduleName := flag.String("module", "app.root", "Stable semantic module identity")
 	expected := flag.String("source-sha256", "", "Optional exact source byte digest")
+	profile := flag.String("profile", cppbackend.Capability, "Explicit C++ capability profile")
+	emitterPath := flag.String("cpp-emitter", "", "Explicit absolute experimental C++ emitter executable")
+	emitterSHA256 := flag.String("cpp-emitter-sha256", "", "Exact SHA-256 of the selected C++ emitter")
+	lexerPath := flag.String("cpp-lexer", "", "Explicit absolute experimental C++ lexer executable")
+	lexerSHA256 := flag.String("cpp-lexer-sha256", "", "Exact SHA-256 of the selected C++ lexer")
 	flag.Parse()
 	if flag.NArg() != 0 || *sourcePath == "" || !filepath.IsAbs(*output) {
 		return errors.New("--source and absolute --output-dir are required; positional arguments are unsupported")
+	}
+	if *profile != cppbackend.Capability && *profile != cppbackend.Float64ComparisonCapability {
+		return fmt.Errorf("unsupported C++ profile %q", *profile)
+	}
+	if (*emitterPath == "") != (*emitterSHA256 == "") {
+		return errors.New("--cpp-emitter and --cpp-emitter-sha256 must be supplied together")
+	}
+	if (*lexerPath == "") != (*lexerSHA256 == "") {
+		return errors.New("--cpp-lexer and --cpp-lexer-sha256 must be supplied together")
 	}
 	file, err := os.Open(*sourcePath)
 	if err != nil {
@@ -187,7 +228,21 @@ func run() error {
 	if *expected != "" && *expected != digest(bytes) {
 		return errors.New("source SHA-256 differs from the explicitly selected identity")
 	}
-	generated, receipt, err := compile(bytes, filepath.Base(*sourcePath), *packageName, *moduleName)
+	generate := func(program coreir.Program) (cppbackend.Generated, error) {
+		return cppbackend.GenerateWithProfile(program, *profile)
+	}
+	if *emitterPath != "" {
+		emitter := cppbackend.NativeEmitter{Path: *emitterPath, SHA256: *emitterSHA256}
+		generate = func(program coreir.Program) (cppbackend.Generated, error) {
+			return emitter.GenerateWithProfile(context.Background(), program, *profile)
+		}
+	}
+	var sourceLexer pipelang.SourceLexer
+	if *lexerPath != "" {
+		lexer := nativelexer.Lexer{Path: *lexerPath, SHA256: *lexerSHA256}
+		sourceLexer = lexer.Tokenize
+	}
+	generated, receipt, err := compileWithProfileComponents(bytes, filepath.Base(*sourcePath), *packageName, *moduleName, *profile, generate, sourceLexer)
 	if err != nil {
 		return err
 	}
@@ -209,6 +264,8 @@ func run() error {
 		return errors.New("compiler executable exceeds its identity hashing capacity")
 	}
 	receipt.CompilerExecutableSHA256 = hex.EncodeToString(hash.Sum(nil))
+	receipt.EmitterExecutableSHA256 = *emitterSHA256
+	receipt.LexerExecutableSHA256 = *lexerSHA256
 	metadata, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil || len(metadata) > maximumOutputBytes {
 		return errors.New("native C++ identity metadata exceeded its output contract")

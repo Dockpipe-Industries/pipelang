@@ -35,7 +35,21 @@ func parseSourceFile(sources *SourceSet, file *SourceFile) (*Program, error) {
 }
 
 func parseSourceFileWithLanguageContract(sources *SourceSet, file *SourceFile, languageContract LanguageContract) (*Program, error) {
-	toks, err := lex(sources, file)
+	return parseSourceFileWithLexer(sources, file, languageContract, nil)
+}
+
+func parseSourceFileWithLexer(sources *SourceSet, file *SourceFile, languageContract LanguageContract, sourceLexer SourceLexer) (*Program, error) {
+	var toks []token
+	var err error
+	if sourceLexer == nil {
+		toks, err = lex(sources, file)
+	} else {
+		var result LexicalResult
+		result, err = sourceLexer(file)
+		if err == nil {
+			toks, err = tokensFromLexicalResult(sources, file, result)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

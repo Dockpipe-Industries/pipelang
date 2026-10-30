@@ -1,0 +1,4 @@
+public Class Settings {
+    public bool IsValidVolume(int value) => value >= 0 && value <= 100;
+    public bool IsValidName(string value) => value != "";
+}

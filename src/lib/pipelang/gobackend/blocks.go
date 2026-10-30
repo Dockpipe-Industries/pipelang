@@ -1,8 +1,8 @@
 package gobackend
 
 import (
-	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreir"
 	"fmt"
+	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreir"
 	"strings"
 )
 

@@ -49,3 +49,9 @@ inheritance and exception/finally syntax remain unsupported. Those limits must n
 be worked around with application opcodes or manually replicated model schemas.
 The current consumer audit is closed at its recorded focused scope. Broader
 language work requires a separately selected next capability and proof.
+
+The native view compiler additionally supports explicitly selected, view-scoped
+[typed styles](../../../docs/concepts/pipeview-styles.md): typed tokens, bounded
+inheritance and explicit overrides lower to existing adapter style properties.
+This does not add renderer dependencies to the compiler/runtime or change model
+and action semantics. Unstyled source retains its prior generated artifacts.

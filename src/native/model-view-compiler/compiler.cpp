@@ -90,6 +90,7 @@ public:
     Parser(std::vector<Token> tokens, const Json &manifest) : tokens_(std::move(tokens)), manifest_(manifest) {}
     View parse(std::string nameSpace, std::string modelHeader)
     {
+        const auto styleDeclarations = styles::parse(tokens_, index_);
         word("view");
         View view;
         view.name = identifier();
@@ -106,6 +107,7 @@ public:
             }
         }
         take("rparen");
+        view.style = styles::selection(styleDeclarations, tokens_, index_);
         for (const auto &item : manifest_.at("classes")) {
             if (item.at("name") == view.model)
                 model_ = &item;
@@ -494,6 +496,10 @@ Json compile(const Json &request)
         return {{"protocol", "pipelang.native-model-view.v1"}, {"ok", true}, {"header", emit(view)},
             {"manifest", {{"protocol", "pipelang.native-model-view-manifest.v1"}, {"name", view.name},
                 {"adapter", view.name + "Adapter"}, {"model", view.model}, {"namespace", nameSpace}}}};
+    } catch (const styles::Failure &failure) {
+        return {{"protocol", "pipelang.native-model-view.v1"}, {"ok", false},
+            {"diagnostics", Json::array({{{"code", "PMV2001"}, {"message", failure.message},
+                {"start", failure.start}, {"end", failure.end}}})}};
     } catch (const Failure &failure) {
         return {{"protocol", "pipelang.native-model-view.v1"}, {"ok", false},
             {"diagnostics", Json::array({{{"code", "PMV1001"}, {"message", failure.message},

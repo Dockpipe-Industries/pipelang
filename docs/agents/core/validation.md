@@ -24,3 +24,13 @@ Generated execution and memory tests fail closed without verified containment.
 Use `tests/containedexec/run.py` and its documented limits for those tests. A
 focused baseline pass is not full compiler conformance or performance proof.
 Any Go cache override used for sandbox constraints must point outside sources.
+
+The native ordinary-model regression subset is explicitly selected from the
+same declared test workflow with `PIPELANG_TEST_NATIVE_MODELS=1` and an absolute,
+fresh `PIPELANG_NATIVE_MODEL_PROOF` outside the checkout. It builds and installs a
+fresh native SDK before running protocol, semantic/lifecycle, sanitizer, view
+interoperability and SDK tooling checks. The source-owned
+[`tests/native-models/qualify.py`](../../../tests/native-models/README.md) also runs
+independently without Go or ForgePipe. It verifies/reuses aggregate containment;
+no generated compiler or fixture may execute outside the existing capped harness.
+This subset does not replace the incomplete full compiler campaign.

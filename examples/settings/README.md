@@ -44,3 +44,8 @@ current application's compiler or controller. General local async composition,
 Optional, loops, arbitrary generics and XML authoring for the new model profile
 remain separate language work. This example does not claim those features, GPU
 qualification, native input qualification, performance or release readiness.
+
+`SettingsView.pipe` selects a typed `SettingsTheme`. Its length/color tokens and
+explicit properties compile to the existing ForgePipe style contract; application
+state and async Save remain in the unchanged `Settings.pipe`. This consumer's
+style qualification is headless layout/draw and model behavior only.

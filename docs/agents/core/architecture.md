@@ -37,3 +37,8 @@ adds an explicit compiler parser entrypoint and optional SDK checker; ordinary
 class/module grammar and Core/Application IR contracts remain unchanged.
 The [existing Qt boundary](../../concepts/pipelang-qt-boundary.md) remains the
 current contract until explicitly extended and qualified.
+
+The native model-view compiler owns typed view-scoped style resolution in
+`styles.cpp`, independently of renderers and model/action semantics. The
+[style capability](../../concepts/pipeview-styles.md) maps resolved values to the
+existing optional adapter contract; broader selectors/parts/reload remain planned.

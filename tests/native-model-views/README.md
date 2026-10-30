@@ -21,3 +21,16 @@ passes its actual emitted manifest to the view compiler. It checks both an
 explicit constructor and the model compiler's synthesized default constructor,
 plus malformed constructor refusal. This is the cross-tool schema oracle;
 `test_protocol.py` retains its independent manifest for focused hostile inputs.
+
+## Typed style oracle
+
+`test_styles.py --compiler /absolute/pipelang-model-viewc --output /tmp/style-oracle`
+checks style types, boundaries, reference/inheritance/work limits, authored
+refusal spans and unchanged model/action generation. Optional
+`--baseline-compiler /absolute/prior/pipelang-model-viewc` compares the complete
+unstyled response byte identities with the prior compiler. The output includes
+an independent C++ model, plain/styled adapters and a CMake project. Inside the
+existing contained harness, configure it with exact `ForgePipe_DIR` and
+`PipeLangModel_DIR`, build with one worker and run CTest. It checks resolved
+metrics/colors, geometry, focus/disabled draw commands and equivalent model/action
+projections. This is headless adapter proof, not visible rendering or input proof.

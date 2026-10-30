@@ -252,7 +252,13 @@ acceptance evidence and updated capability documentation before expansion.
   failure, cancellation, teardown and stale completion. Replace hand-authored JSON
   at the authoring boundary with compiler-checked components/bindings; retain any
   necessary serialized backend artifact as generated transport.
-- [ ] **PV-03 — PipeView styles.** Specify grammar, property/unit types, theme
+- [ ] **PV-03 — PipeView styles.** The initial native view-scoped typed style
+  foundation now supports named themes, length/color tokens, inheritance and
+  explicit overrides against the existing ForgePipe style profile; see the
+  [capability contract](../concepts/pipeview-styles.md). Focused headless
+  settings/draw-layout and compatibility proof is recorded in the
+  [task](tasks/pipeview-styles-20261030.md). Full acceptance remains pending.
+  Continue grammar, property/unit types, theme
   tokens, scoped reuse, explicit overrides, component parts, interaction states
   and layout capabilities. Prove small visual edits without changing actions or
   state, and clear diagnostics for misspelled/unsupported properties and states.

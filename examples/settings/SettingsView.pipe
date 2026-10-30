@@ -1,4 +1,15 @@
-view SettingsView(model: SettingsModel) {
+style SettingsTheme {
+    token inset: length = 16px;
+    token ink: color = "#EAF1F8FF";
+    padding: inset;
+    gap: 10px;
+    controlHeight: 42px;
+    text: ink;
+    background: "#142434FF";
+    focus: "#66CCFFFF";
+}
+
+view SettingsView(model: SettingsModel) style SettingsTheme {
     Column(id: "root") {
         Label(id: "title", text: "Settings");
         Label(id: "name-label", text: "Player name");

@@ -1,6 +1,7 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <nlohmann/json.hpp>
+#include "styles.hpp"
 #include <string>
 #include <vector>
 
@@ -37,6 +38,7 @@ struct View {
     std::string nameSpace;
     std::string modelHeader;
     Node root;
+    std::optional<styles::ResolvedStyle> style;
 };
 Json compile(const Json &request);
 std::string emit(const View &view);

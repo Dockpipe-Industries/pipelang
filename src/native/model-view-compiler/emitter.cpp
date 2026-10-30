@@ -1,6 +1,7 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "compiler.hpp"
 #include <sstream>
+#include <iomanip>
 
 namespace pipelang::model_view {
 namespace {
@@ -203,6 +204,16 @@ std::string emit(const View &view)
         << "        if (result.is_cancelled())\n            return InvocationResult::Cancelled(result.error());\n"
         << "        return InvocationResult::Failure(result.error());\n    }\n"
         << "    static forgepipe::ui::Document makeDocument()\n    {\n        forgepipe::ui::Document document;\n";
+    if (view.style) {
+        for (const auto &[property, value] : view.style->properties) {
+            output << "        document.style." << property << " = ";
+            if (value.kind == styles::ValueKind::Length)
+                output << std::setprecision(17) << value.length;
+            else
+                output << "0x" << value.color.substr(1) << 'U';
+            output << ";\n";
+        }
+    }
     std::size_t next = 0;
     documentNode(view.root, output, next);
     output << "        document.root = std::move(node0);\n        return document;\n    }\n"

@@ -739,7 +739,18 @@ func AnalyzeSemanticModuleSet(input ModuleSetInput) *Analysis {
 	return analyzeModuleSet(input, true)
 }
 
+// AnalyzeSemanticModuleSetWithLexer explicitly selects an experimental source
+// tokenizer. Parsing, source identities and semantic admission remain unchanged.
+// A selected component failure is reported; the Go lexer is never substituted.
+func AnalyzeSemanticModuleSetWithLexer(input ModuleSetInput, sourceLexer SourceLexer) *Analysis {
+	return analyzeModuleSetWithLexer(input, true, sourceLexer)
+}
+
 func analyzeModuleSet(input ModuleSetInput, requireSemanticIDs bool) *Analysis {
+	return analyzeModuleSetWithLexer(input, requireSemanticIDs, nil)
+}
+
+func analyzeModuleSetWithLexer(input ModuleSetInput, requireSemanticIDs bool, sourceLexer SourceLexer) *Analysis {
 	allSources := make([]SourceInput, 0)
 	for _, module := range input.Modules {
 		allSources = append(allSources, module.Sources...)
@@ -755,7 +766,7 @@ func analyzeModuleSet(input ModuleSetInput, requireSemanticIDs bool) *Analysis {
 		program.Span = Span{File: files[0].ID, Start: 0, End: len(files[0].Text)}
 	}
 	for _, file := range files {
-		parsed, err := parseSourceFileWithLanguageContract(sources, file, input.LanguageContract)
+		parsed, err := parseSourceFileWithLexer(sources, file, input.LanguageContract, sourceLexer)
 		if err != nil {
 			if parsedDiagnostics, ok := AsDiagnostics(err); ok {
 				analysis.Diagnostics = append(analysis.Diagnostics, parsedDiagnostics...)

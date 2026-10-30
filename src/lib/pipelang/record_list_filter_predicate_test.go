@@ -87,7 +87,9 @@ func TestV310NamedRecordPredicateFilterPipeline(t *testing.T) {
 	}
 	invalidQuery := query
 	invalidQuery.String = string([]byte{0xff})
-	if _, err := coreeval.EvaluateProgram(core, core.Functions[1].Identity, []coreeval.Value{empty, invalidQuery}); err == nil { t.Fatal("empty filter hid an invalid predicate argument") }
+	if _, err := coreeval.EvaluateProgram(core, core.Functions[1].Identity, []coreeval.Value{empty, invalidQuery}); err == nil {
+		t.Fatal("empty filter hid an invalid predicate argument")
+	}
 	if _, err := coreeval.Evaluate(core.Functions[1], []coreeval.Value{rows, query}); err == nil {
 		t.Fatal("single-function evaluator bypassed predicate program resolution")
 	}
@@ -166,18 +168,28 @@ func TestV310NamedPredicateUsesOrdinalTextComparison(t *testing.T) {
 	input := semanticTestModuleSet("app.root", []ModuleInput{testModule("app.root", "ordinal-predicate.pipe", source)}, nil)
 	input.LanguageContract = PipeLangLanguageContractV310
 	analysis := AnalyzeSemanticModuleSet(input)
-	if err := analysis.Error(); err != nil { t.Fatal(err) }
+	if err := analysis.Error(); err != nil {
+		t.Fatal(err)
+	}
 	typed, err := LowerSemanticMethodToHIR(analysis, semanticMethodNamed(t, analysis, "Search").Identity)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	core, err := LowerHIRToCore(typed)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	listType := core.Functions[1].Parameters[0].Type
 	rowType := listType.List.Element
 	rows := coreeval.Value{Type: listType, List: []coreeval.Value{v310PredicateRow(rowType, "a"), v310PredicateRow(rowType, "B"), v310PredicateRow(rowType, "b")}}
 	floor := coreeval.Value{Type: core.Functions[1].Parameters[1].Type, String: "a"}
 	outcome, err := coreeval.EvaluateProgram(core, core.Functions[1].Identity, []coreeval.Value{rows, floor})
-	if err != nil || len(outcome.Value.List) != 2 || outcome.Value.List[0].Record[0].String != "a" || outcome.Value.List[1].Record[0].String != "b" { t.Fatalf("ordinal predicate = %#v (%v)", outcome, err) }
-	if _, err := gobackend.Generate(core); err != nil { t.Fatal(err) }
+	if err != nil || len(outcome.Value.List) != 2 || outcome.Value.List[0].Record[0].String != "a" || outcome.Value.List[1].Record[0].String != "b" {
+		t.Fatalf("ordinal predicate = %#v (%v)", outcome, err)
+	}
+	if _, err := gobackend.Generate(core); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func v310PredicateRow(rowType coreir.Type, values ...string) coreeval.Value {

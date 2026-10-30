@@ -1324,7 +1324,6 @@ func compileAndRunNumericConformanceGo(t *testing.T, generated []byte, names map
 	testSource := fmt.Sprintf(`package %s
 
 import (
- "github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"math"
 	"testing"
 )
@@ -1420,7 +1419,6 @@ func compileAndRunResultTransportGo(t *testing.T, generated []byte, functionName
 	testSource := fmt.Sprintf(`package %s
 
 import (
- "github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"math"
 	"testing"
 )
@@ -1526,7 +1524,6 @@ func compileAndRunCheckedArithmeticGo(t *testing.T, generated []byte, names map[
 	testSource := fmt.Sprintf(`package %s
 
 import (
- "github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"math"
 	"testing"
 )
@@ -1569,7 +1566,6 @@ func compileAndRunCheckedAddGo(t *testing.T, generated []byte, name string) {
 	testSource := fmt.Sprintf(`package %s
 
 import (
- "github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"math"
 	"testing"
 )
@@ -1591,7 +1587,6 @@ func compileAndRunCheckedSubtractGo(t *testing.T, generated []byte, name string)
 	testSource := fmt.Sprintf(`package %s
 
 import (
- "github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"math"
 	"testing"
 )
@@ -1616,7 +1611,6 @@ func compileAndRunCheckedMultiplyGo(t *testing.T, generated []byte, name string)
 	testSource := fmt.Sprintf(`package %s
 
 import (
- "github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"math"
 	"testing"
 )
@@ -1647,7 +1641,6 @@ func compileAndRunCheckedNegateGo(t *testing.T, generated []byte, name string) {
 	testSource := fmt.Sprintf(`package %s
 
 import (
- "github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"math"
 	"testing"
 )
@@ -1675,7 +1668,6 @@ func compileAndRunCheckedDivideGo(t *testing.T, generated []byte, name string) {
 	testSource := fmt.Sprintf(`package %s
 
 import (
- "github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"math"
 	"testing"
 )

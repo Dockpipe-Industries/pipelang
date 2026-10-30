@@ -1,5 +1,6 @@
 """Check the narrow CI transition without requiring a fake published CLI pin."""
 import json
+import re
 from pathlib import Path
 import unittest
 
@@ -36,6 +37,18 @@ class ReleaseFollowupTests(unittest.TestCase):
         lock = json.loads((ROOT / 'dockpipe.lock.json').read_text())
         self.assertEqual(config['dockpipe_version'], lock['dockpipe']['version'])
         self.assertEqual(len(lock['dockpipe']['artifacts']), 5)
+
+    def test_remote_actions_use_full_commit_shas(self):
+        for workflow in sorted((ROOT / '.github/workflows').glob('*.yml')):
+            for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
+                reference = re.search(r"\buses:\s*([^\s#]+)", line)
+                if reference is None:
+                    continue
+                action = reference.group(1)
+                if action.startswith('./') or action.startswith('docker://'):
+                    continue
+                with self.subTest(workflow=workflow.name, line=line_number):
+                    self.assertRegex(action, r'^[^@]+@[0-9a-f]{40}$')
 
     def test_old_tag_cannot_be_published_again_by_replacement(self):
         workflow = (ROOT / 'workflows/release/assets/scripts/publish.py').read_text()

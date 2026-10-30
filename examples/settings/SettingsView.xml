@@ -1,0 +1,22 @@
+<View name="SettingsView" profile="pipelang.pipeview.source.v2">
+    <State name="playerName" type="string" value="Rider"></State>
+    <State name="vsync" type="bool" value="true"></State>
+    <State name="volume" type="int" value="100"></State>
+    <Action name="nameEdited" payload="string" operation="set" target="playerName"></Action>
+    <Action name="vsyncEdited" payload="bool" operation="set" target="vsync"></Action>
+    <Action name="volumeEdited" payload="int" operation="set" target="volume"></Action>
+    <Action name="save" payload="" operation="save"></Action>
+    <Action name="revert" payload="" operation="revert"></Action>
+    <Column id="root">
+        <Label id="title" text="Settings"></Label>
+        <Label id="name-label" text="Player name"></Label>
+        <TextField id="name-field" value="{bind playerName}" changed="{nameEdited}"></TextField>
+        <Toggle id="vsync-toggle" label="VSync" value="{bind vsync}" changed="{vsyncEdited}"></Toggle>
+        <PercentStepper id="volume-stepper" label="Volume" value="{bind volume}" changed="{volumeEdited}"></PercentStepper>
+        <Label id="save-status" value="{bind save.status}"></Label>
+        <Row id="actions">
+            <Button id="save-button" label="Save" clicked="{save}"></Button>
+            <Button id="revert-button" label="Revert" clicked="{revert}"></Button>
+        </Row>
+    </Column>
+</View>

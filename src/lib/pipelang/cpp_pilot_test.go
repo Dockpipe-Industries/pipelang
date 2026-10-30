@@ -2,6 +2,7 @@ package pipelang
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -306,6 +307,21 @@ func TestCPPPilotExport(t *testing.T) {
 			if e != nil || !bytes.Equal(again, generated.Source) {
 				t.Fatal("nondeterministic C++")
 			}
+			referenceSource := generated.Source
+			if emitterPath := os.Getenv("PIPELANG_CPP_EMITTER"); emitterPath != "" {
+				emitter := cppbackend.NativeEmitter{
+					Path:   emitterPath,
+					SHA256: os.Getenv("PIPELANG_CPP_EMITTER_SHA256"),
+				}
+				native, err := emitter.Generate(context.Background(), p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(native.Source, generated.Source) || !reflect.DeepEqual(native.Functions, generated.Functions) {
+					t.Fatal("native emitter differs from the Go reference")
+				}
+				generated = native
+			}
 			goGenerated, e := gobackend.GenerateWithNames(p)
 			if e != nil {
 				t.Fatal(e)
@@ -323,6 +339,9 @@ func TestCPPPilotExport(t *testing.T) {
 			write("core.json", co)
 			write("source.pipe", []byte(c.Source))
 			write("generated.hpp", generated.Source)
+			if os.Getenv("PIPELANG_CPP_EMITTER") != "" {
+				write("reference.hpp", referenceSource)
+			}
 			write("generated.go", bytes.Replace(goGenerated.Source, []byte("package pipelanggenerated"), []byte("package main"), 1))
 			goNames, cppNames := map[string]string{}, map[string]string{}
 			for _, f := range p.Functions {
@@ -607,6 +626,13 @@ func TestCPPPilotCoreRefusals(t *testing.T) {
 		source, e := cppbackend.Generate(p)
 		if e == nil || len(source) != 0 {
 			t.Fatalf("negative Core %d was emitted", i)
+		}
+		if emitterPath := os.Getenv("PIPELANG_CPP_EMITTER"); emitterPath != "" {
+			emitter := cppbackend.NativeEmitter{Path: emitterPath, SHA256: os.Getenv("PIPELANG_CPP_EMITTER_SHA256")}
+			native, err := emitter.Generate(context.Background(), p)
+			if err == nil || len(native.Source) != 0 {
+				t.Fatalf("negative Core %d was emitted by the native path", i)
+			}
 		}
 	}
 	// The pilot plan's integer division was outside the accepted source contract.

@@ -9,8 +9,9 @@ Keep compiler semantics in `src/lib/pipelang`, application IR in
 materialization support in `sdk/materialize`. Workflow-specific scripts belong
 beside their workflow in `workflows/<name>/assets/scripts`.
 
-Use `DOCKPIPE_BIN=/absolute/path/to/dockpipe` and invoke `workflows/build` and
-`workflows/test`. These run bounded baseline checks. Generated compiler tests and
+Use `DOCKPIPE_BIN=/absolute/path/to/dockpipe` and invoke `workflows/check`,
+`workflows/build` and `workflows/test` through explicit `--workflow-file` paths.
+These run repository hygiene and bounded baseline checks. Generated compiler tests and
 resource campaigns require `tests/containedexec/run.py`; never claim full-suite
 coverage from the baseline workflow. Preserve frozen compatibility goldens.
 

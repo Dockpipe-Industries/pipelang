@@ -171,7 +171,7 @@ def dependency_guard(go, cache, output, stage='suite', extra=(), support_manifes
     command = [sys.executable, '-B', str(RUNNER), '--output', str(prefix), '--cache', str(cache),
                '--timeout', '30', '--memory-high-mib', '700', '--', 'env', 'GOENV=off', str(go),
                'list', '-deps', '-test', '-f', '{{if .Module}}{{.Module.Dir}}{{end}}',
-               './src/lib/pipelang/...', './src/lib/applicationir', './src/lib/application', './src/cmd', './tests/pipelangcompat']
+               './src/lib/pipelang/...', './src/lib/applicationir', './src/lib/application', './src/cmd/...', './tests/pipelangcompat']
     with Path(str(prefix) + '.runner.log').open('w') as log:
         rc = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT).returncode
     if rc or not resource_accepted(json.loads(Path(str(prefix) + '.json').read_text())):

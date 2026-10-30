@@ -1,0 +1,5 @@
+#pragma once
+
+namespace pipelang::native {
+inline constexpr char runtimeSupport[] = R"PL_RUNTIME(@PIPELANG_RUNTIME_SUPPORT@)PL_RUNTIME";
+}

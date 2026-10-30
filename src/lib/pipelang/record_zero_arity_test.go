@@ -1,8 +1,8 @@
 package pipelang
 
 import (
-	"github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"fmt"
+	"github.com/Dockpipe-Industries/pipelang/tests/containedexec"
 	"os"
 	"os/exec"
 	"path/filepath"

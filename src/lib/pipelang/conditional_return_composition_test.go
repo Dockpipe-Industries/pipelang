@@ -1,9 +1,9 @@
 package pipelang
 
 import (
+	"encoding/json"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/coreir"
 	"github.com/Dockpipe-Industries/pipelang/src/lib/pipelang/gobackend"
-	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"

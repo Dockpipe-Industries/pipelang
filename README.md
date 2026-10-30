@@ -38,6 +38,7 @@ Build and run baseline tests with an installed Dockpipe:
 
 ```sh
 export DOCKPIPE_BIN=/absolute/path/to/dockpipe
+"$DOCKPIPE_BIN" --workflow-file workflows/check/config.yml --
 "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml --
 "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml --
 ```
@@ -60,5 +61,73 @@ Dockpipe is pinned with `dockpipe_version` in `dockpipe.config.json`.
 `dockpipe.lock.json` records the exact release archives and SHA-256 checksums.
 Run `python3 tooling/bootstrap_dockpipe.py --output /your/tool-directory` to install
 that version; CI uses the same lock. Update the config and lock together.
-This initial pin uses the published 0.6.25 staging release because the stable
-release predates the required workflow features. The lock adds no cache service.
+The controlled toolchain uses the released Dockpipe 0.6.33 CLI. Each platform
+archive and extracted executable size is verified against the lock. The lock
+adds no cache service.
+
+
+## Experimental C++ emitter port
+
+The parser, type checker, HIR/Core lowering and default emitter remain Go. The
+ported C++17 emitter consumes an internal, bounded admitted-Core protocol after
+the same authoritative validation. It is explicitly selected and does not widen
+the `pipelang.cpp.pilot.v1` profile or establish a public C++ ABI.
+
+The build workflow enables the native target explicitly and requires an existing
+C++17/CMake toolchain. Run it with an installed CLI admitted by the project config:
+
+```sh
+DOCKPIPE_BIN=/usr/bin/dockpipe PIPELANG_BUILD_CPP_EMITTER=1 \
+  /usr/bin/dockpipe --workflow-file workflows/build/config.yml
+bin/pipelang-native-cpp --source /absolute/Counter.pipe --output-dir /absolute/generated \
+  --package forgepipe.ui.demo --module app.root \
+  --cpp-emitter /absolute/pipelang-cpp-emitter --cpp-emitter-sha256 EXACT_LOWERCASE_SHA256
+```
+
+Omitting the emitter flags preserves the Go reference path. Supplying either
+requires both; identity, protocol, unsupported-input and execution failures do
+not fall back. Native output includes the emitter executable digest alongside
+the frontend and generated-code identities. The existing runtime support header
+is embedded from its single owner; the private JSON codec is pinned under
+`src/native/third_party/nlohmann` with its MIT license and provenance.
+
+For equivalence, run the existing contained native pilot exporter with
+`PIPELANG_CPP_EMITTER` and `PIPELANG_CPP_EMITTER_SHA256`. Every exported program
+must match Go source bytes and semantic bindings before native output is used
+by the existing independent value/trace harness. Keep generated execution inside
+`tests/containedexec/run.py`; baseline tests alone are not native conformance.
+The ForgePipe installed UI example accepts the same explicit emitter selection
+and validates its metadata independently.
+
+
+Root workflows now use the verified 0.6.33 config and release lock directly,
+without omitting the CLI gate. Historical port verification records retain their
+original temporary-snapshot exceptions. Minimum-version consumer compatibility
+remains a separate DockPipe contract.
+
+The [port verification record](docs/research/pipelang-cpp-emitter-port.md) describes
+the matched corpus, native UI evidence and remaining limits.
+
+
+## Experimental C++ lexer slice
+
+The next native compiler component is the lexer. Set `PIPELANG_BUILD_CPP_LEXER=1`
+for the declared build workflow to produce `bin/pipelang-cpp-lexer`. The frontend
+selects it only with both `--cpp-lexer /absolute/pipelang-cpp-lexer` and
+`--cpp-lexer-sha256 EXACT_LOWERCASE_SHA256`. It can be combined with the existing
+native emitter flags. Omitting either component's selection keeps its Go
+implementation; a selected component failure never falls back.
+
+`AnalyzeSemanticModuleSetWithLexer` accepts an explicit source-token function.
+The native adapter implements that value boundary while the existing Go parser,
+source admission, type checking, semantic IDs and lowering remain authoritative.
+Token bytes, decoded text, EOF, lexical errors and source byte spans retain the Go
+reference behavior, including its existing limited escape rules. Native lexing
+is bounded to 64 KiB per source and does not expand the accepted language.
+
+Native lexer tests compare complete token/failure values with `TokenizeSource`,
+which wraps the unchanged Go lexer. Opt-in fixture and frozen-pilot comparisons
+run inside the existing contained lane. The ForgePipe example pins the native
+lexer separately and checks its identity in the generated metadata.
+
+See [the lexer slice verification record](docs/research/pipelang-cpp-lexer-port.md) for acceptance evidence and limits.

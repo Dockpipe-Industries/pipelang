@@ -2,6 +2,8 @@
 #include "syntax.hpp"
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <charconv>
 #include <cstdint>
 #include <functional>
@@ -12,8 +14,10 @@ namespace {
 
 const Type booleanType{"bool", {}};
 const Type integerType{"int", {}};
+const Type floatType{"float", {}};
 const Type stringType{"string", {}};
 const Type voidType{"void", {}};
+const Type errorType{"Error", {}};
 
 class Checker {
 public:
@@ -22,7 +26,7 @@ public:
         for (auto& declaration : program_.declarations) {
             if (types_.contains(declaration.name) || primitive(declaration.name) ||
                 declaration.name == "Result" || declaration.name == "Task" ||
-                declaration.name == "Optional" || declaration.name == "CancellationToken")
+                declaration.name == "Optional" || declaration.name == "List" || declaration.name == "CancellationToken")
                 fail("duplicate or reserved type '" + declaration.name + "'", declaration.offset);
             types_[declaration.name] = &declaration;
         }
@@ -59,9 +63,9 @@ public:
                             same(expression(field.initializer), field.type, field.offset);
                     }
                 }
-                const bool returns = statements(method.body);
+                const auto flow = statements(method.body);
                 const Type expected = method.asynchronous ? method.result.arguments[0] : method.result;
-                if (expected != voidType && !returns)
+                if (expected != voidType && (flow & Fallthrough) != 0)
                     fail("method must return on every path", method.offset);
             }
             checkCallCycles(declaration);
@@ -72,7 +76,7 @@ private:
         throw Diagnostic(message, offset);
     }
     static bool primitive(const std::string& name) {
-        return name == "void" || name == "bool" || name == "int" || name == "string";
+        return name == "void" || name == "bool" || name == "int" || name == "float" || name == "string" || name == "Error";
     }
     Declaration* declaration(const std::string& name) const {
         auto found = types_.find(name);
@@ -82,6 +86,22 @@ private:
         if (value.name == "void") {
             if (!allowVoid || !value.arguments.empty())
                 fail("void is not a value type", offset);
+            return;
+        }
+        if (value.name == "List") {
+            if (value.arguments.size() != 1)
+                fail("List requires one owned value type", offset);
+            type(value.arguments[0], offset);
+            if (!plainValue(value.arguments[0]))
+                fail("List requires an owned value payload", offset);
+            return;
+        }
+        if (value.name == "Optional") {
+            if (value.arguments.size() != 1)
+                fail("Optional requires one owned value type", offset);
+            type(value.arguments[0], offset);
+            if (!plainValue(value.arguments[0]))
+                fail("Optional requires an owned value payload", offset);
             return;
         }
         if (value.name == "Result") {
@@ -212,6 +232,13 @@ private:
             if (conversion.ec != std::errc{} || conversion.ptr != node->text.data() + node->text.size())
                 fail("integer literal outside signed64 range", node->offset);
             result = integerType;
+        } else if (node->kind == "float") {
+            double parsed = 0;
+            const auto conversion = std::from_chars(node->text.data(), node->text.data() + node->text.size(), parsed);
+            if (conversion.ec != std::errc{} || conversion.ptr != node->text.data() + node->text.size() || !std::isfinite(parsed))
+                fail("float literal outside finite binary64 range", node->offset);
+            node->resolution = std::to_string(std::bit_cast<std::uint64_t>(parsed));
+            result = floatType;
         } else if (node->kind == "text") {
             result = stringType;
         } else if (node->kind == "boolean") {
@@ -234,7 +261,10 @@ private:
                 result = integerType;
             } else {
                 result = expression(node->children[0]);
-                same(result, node->text == "!" ? booleanType : integerType, node->offset);
+                if (node->text == "!")
+                    same(result, booleanType, node->offset);
+                else if (result != integerType && result != floatType)
+                    fail("negation requires int or float", node->offset);
             }
         } else if (node->kind == "binary") {
             const auto left = expression(node->children[0]);
@@ -251,9 +281,10 @@ private:
             } else if (operation == "+" && left == stringType) {
                 result = stringType;
             } else {
-                same(left, integerType, node->offset);
+                if (left != integerType && left != floatType)
+                    fail("numeric operation requires int or float", node->offset);
                 result = operation == "+" || operation == "-" || operation == "*" || operation == "/"
-                    ? integerType : booleanType;
+                    ? left : booleanType;
             }
         } else if (node->kind == "conditional") {
             same(expression(node->children[0]), booleanType, node->children[0]->offset);
@@ -271,7 +302,25 @@ private:
                 node->resolution = "enum";
             } else {
                 const auto receiverType = expression(receiver);
-                if (receiverType.name == "Result") {
+                if (receiverType == errorType) {
+                    if (node->text != "Message")
+                        fail("unknown Error property", node->offset);
+                    result = stringType;
+                    node->resolution = "error";
+                } else if (receiverType.name == "List") {
+                    if (node->text != "Count")
+                        fail("unknown List property", node->offset);
+                    result = integerType;
+                    node->resolution = "list";
+                } else if (receiverType.name == "Optional") {
+                    if (node->text == "HasValue")
+                        result = booleanType;
+                    else if (node->text == "Value")
+                        result = receiverType.arguments[0];
+                    else
+                        fail("unknown Optional property", node->offset);
+                    node->resolution = "optional";
+                } else if (receiverType.name == "Result") {
                     if (node->text == "IsSuccess" || node->text == "IsFailure" || node->text == "IsCancelled")
                         result = booleanType;
                     else if (node->text == "Error")
@@ -308,11 +357,13 @@ private:
         } else if (node->kind == "call") {
             result = call(node, allowServiceCall);
         } else if (node->kind == "await") {
+            if (finallyDepth_ != 0)
+                fail("finally cannot suspend", node->offset);
             if (!allowAwait || !method_->asynchronous)
                 fail("await must be a complete local initializer or assignment in an async method", node->offset);
             result = expression(node->children[0], false, true);
             if (result.name != "Task")
-                fail("await requires a host Task<Result<T,string>> call", node->offset);
+                fail("await requires a host or local Task<Result<T,string>> call", node->offset);
             const auto awaited = result.arguments[0];
             result = awaited;
         } else {
@@ -330,6 +381,11 @@ private:
     Type call(const Expr& node, bool allowServiceCall) {
         const auto& target = node->children[0];
         if (target->kind == "name") {
+            if (target->text == "Error") {
+                arguments(node, {{stringType, "message", true, node->offset}});
+                node->resolution = "error_construct";
+                return errorType;
+            }
             const auto* record = declaration(target->text);
             if (record && record->kind == "Record") {
                 arguments(node, record->fields);
@@ -337,18 +393,47 @@ private:
                 return {record->name, {}};
             }
             const auto* found = method(target->text);
-            if (!found || found->constructor || found->asynchronous)
-                fail("local calls require synchronous methods; local Task composition is not admitted", target->offset);
+            if (!found || found->constructor)
+                fail("unknown local method", target->offset);
+            if (found->asynchronous && (!allowServiceCall || !method_->asynchronous))
+                fail("local async calls must be directly awaited in an async method", target->offset);
             if (method_->pure && !found->pure)
                 fail("pure methods cannot call mutating helpers", target->offset);
             arguments(node, found->parameters);
-            node->resolution = found->pure ? "pure" : "effect";
+            node->resolution = found->asynchronous ? "local_async" : (found->pure ? "pure" : "effect");
             method_->calls.insert(found->name);
             return found->result;
         }
         if (target->kind != "member")
             fail("unsupported call target", node->offset);
         const auto& receiver = target->children[0];
+        if (receiver->kind == "type" && receiver->type.name == "List") {
+            type(receiver->type, receiver->offset);
+            if (target->text != "Empty")
+                fail("unknown List constructor", target->offset);
+            arguments(node, {});
+            node->resolution = "list_construct";
+            return receiver->type;
+        }
+        if (receiver->kind == "type" && receiver->type == floatType) {
+            if (target->text != "IsFinite" && target->text != "Abs" &&
+                target->text != "Sqrt" && target->text != "Log")
+                fail("unknown float operation", target->offset);
+            arguments(node, {{floatType, "value", true, node->offset}});
+            node->resolution = "float_math";
+            return target->text == "IsFinite" ? booleanType : floatType;
+        }
+        if (receiver->kind == "type" && receiver->type.name == "Optional") {
+            type(receiver->type, receiver->offset);
+            std::vector<Field> parameters;
+            if (target->text == "Some")
+                parameters.push_back({receiver->type.arguments[0], "value", true, node->offset});
+            else if (target->text != "None")
+                fail("unknown Optional constructor", target->offset);
+            arguments(node, parameters);
+            node->resolution = "optional_construct";
+            return receiver->type;
+        }
         if (receiver->kind == "type" && receiver->type.name == "Result") {
             type(receiver->type, receiver->offset);
             const auto& result = receiver->type;
@@ -367,6 +452,20 @@ private:
             return result;
         }
         const auto receiverType = expression(receiver);
+        if (receiverType.name == "List") {
+            if (target->text == "At") {
+                arguments(node, {{integerType, "index", true, node->offset}});
+                node->resolution = "list_at";
+                return receiverType.arguments[0];
+            }
+            if (target->text == "Add") {
+                assignmentTarget(receiver);
+                arguments(node, {{receiverType.arguments[0], "value", true, node->offset}});
+                node->resolution = "list_add";
+                return voidType;
+            }
+            fail("unknown List method", target->offset);
+        }
         const auto* host = declaration(receiverType.name);
         if (!host || host->kind != "Interface" || !allowServiceCall || method_->pure)
             fail("host calls must be directly awaited in an async method", node->offset);
@@ -389,16 +488,27 @@ private:
         }
         if (root->kind != "name" || (root->resolution != "field" && root->resolution != "local" && root->resolution != "service"))
             fail("invalid assignment target", root->offset);
+        if (root->resolution == "local" &&
+            std::find(caughtErrors_.begin(), caughtErrors_.end(), root->text) != caughtErrors_.end())
+            fail("catch Error bindings are read-only", root->offset);
         if (method_->pure && root->resolution != "local")
             fail("pure methods cannot mutate model fields", root->offset);
         if (root->resolution == "service" && !method_->constructor)
             fail("service identity is fixed by the constructor", root->offset);
     }
-    bool statements(std::vector<Statement>& body) {
-        bool returned = false;
+    enum Flow : unsigned {
+        Fallthrough = 1,
+        Returned = 2,
+        Thrown = 4,
+        Broken = 8,
+        Continued = 16
+    };
+    unsigned statements(std::vector<Statement>& body) {
+        unsigned flow = Fallthrough;
         for (auto& statement : body) {
-            if (returned)
+            if ((flow & Fallthrough) == 0)
                 fail("unreachable statement", statement.offset);
+            unsigned next = Fallthrough;
             if (statement.kind == "local") {
                 type(statement.type, statement.offset);
                 if (!plainValue(statement.type) || locals_.contains(statement.name) || field(*owner_, statement.name))
@@ -413,23 +523,96 @@ private:
                 assignmentTarget(statement.target);
                 same(expression(statement.expression, true), statement.target->type, statement.offset);
             } else if (statement.kind == "return") {
+                if (finallyDepth_ != 0)
+                    fail("finally cannot return", statement.offset);
                 if (method_->constructor)
                     fail("constructor returns are not supported; initialize all services and fields", statement.offset);
                 const Type expected = method_->asynchronous ? method_->result.arguments[0] : method_->result;
                 const auto actual = statement.expression ? expression(statement.expression) : voidType;
                 same(actual, expected, statement.offset);
-                returned = true;
+                next = Returned;
+            } else if (statement.kind == "throw") {
+                if (statement.expression) {
+                    same(expression(statement.expression), errorType, statement.offset);
+                } else {
+                    if (caughtErrors_.empty())
+                        fail("rethrow requires a lexically enclosing catch", statement.offset);
+                    statement.name = caughtErrors_.back();
+                }
+                next = Thrown;
+            } else if (statement.kind == "break" || statement.kind == "continue") {
+                if (loopDepth_ == 0)
+                    fail("break and continue require a loop in the same cleanup scope", statement.offset);
+                next = statement.kind == "break" ? Broken : Continued;
+            } else if (statement.kind == "while" || statement.kind == "foreach") {
+                auto outer = locals_;
+                if (statement.kind == "while") {
+                    same(expression(statement.expression), booleanType, statement.offset);
+                } else {
+                    type(statement.type, statement.offset);
+                    const Type expected{"List", {statement.type}};
+                    same(expression(statement.expression), expected, statement.offset);
+                    if (!plainValue(statement.type) || locals_.contains(statement.name) || field(*owner_, statement.name))
+                        fail("foreach requires a unique unshadowed owned local", statement.offset);
+                    locals_[statement.name] = statement.type;
+                }
+                ++loopDepth_;
+                const auto loopFlow = statements(statement.body);
+                --loopDepth_;
+                locals_ = std::move(outer);
+                // A loop may execute zero times. Local break/continue are
+                // consumed here rather than proving an enclosing return.
+                next = Fallthrough | (loopFlow & (Returned | Thrown));
+            } else if (statement.kind == "block") {
+                auto outer = locals_;
+                next = statements(statement.body);
+                locals_ = std::move(outer);
             } else if (statement.kind == "if") {
                 same(expression(statement.expression), booleanType, statement.offset);
                 auto outer = locals_;
-                const bool first = statements(statement.body);
+                const auto first = statements(statement.body);
                 locals_ = outer;
-                const bool second = statements(statement.alternative);
+                const auto second = statements(statement.alternative);
                 locals_ = std::move(outer);
-                returned = first && second;
+                next = first | second;
+            } else if (statement.kind == "try") {
+                auto outer = locals_;
+                next = statements(statement.body);
+                statement.bodyFallsThrough = (next & Fallthrough) != 0;
+                locals_ = outer;
+                if (!statement.name.empty()) {
+                    same(statement.type, errorType, statement.offset);
+                    if (locals_.contains(statement.name) || field(*owner_, statement.name))
+                        fail("catch requires a unique unshadowed Error binding", statement.offset);
+                    locals_[statement.name] = errorType;
+                    caughtErrors_.push_back(statement.name);
+                    const auto recovery = statements(statement.alternative);
+                    caughtErrors_.pop_back();
+                    // Every protected expression may fault. A catch path is
+                    // relevant even without an explicit source throw.
+                    next = (next & ~Thrown) | recovery;
+                    locals_ = outer;
+                }
+                if (statement.hasFinally) {
+                    const auto outerLoopDepth = loopDepth_;
+                    loopDepth_ = 0;
+                    ++finallyDepth_;
+                    const auto cleanup = statements(statement.cleanup);
+                    --finallyDepth_;
+                    loopDepth_ = outerLoopDepth;
+                    locals_ = outer;
+                    if ((cleanup & Fallthrough) == 0)
+                        next = Thrown;
+                    else
+                        next |= cleanup & Thrown;
+                }
+                locals_ = std::move(outer);
+            } else {
+                fail("unsupported statement", statement.offset);
             }
+            flow = (flow & ~Fallthrough) | next;
         }
-        return returned;
+        return flow;
     }
     void checkConstantInitializer(const Expr& node) {
         if (node->resolution == "field" || node->resolution == "service" ||
@@ -514,7 +697,7 @@ private:
             std::size_t work = 1;
             for (const auto& child : node->children)
                 work = addCost(work, expressionCost(child), node->offset);
-            if (node->kind == "call" && (node->resolution == "pure" || node->resolution == "effect"))
+            if (node->kind == "call" && (node->resolution == "pure" || node->resolution == "effect" || node->resolution == "local_async"))
                 work = addCost(work, visit(*this->method(node->children[0]->text)).work, node->offset);
             return work;
         };
@@ -526,6 +709,7 @@ private:
                 work = addCost(work, expressionCost(statement.target), statement.offset);
                 work = addCost(work, statementCost(statement.body), statement.offset);
                 work = addCost(work, statementCost(statement.alternative), statement.offset);
+                work = addCost(work, statementCost(statement.cleanup), statement.offset);
             }
             return work;
         };
@@ -558,6 +742,9 @@ private:
     Declaration* owner_ = nullptr;
     Method* method_ = nullptr;
     std::map<std::string, Type> locals_;
+    unsigned loopDepth_ = 0;
+    unsigned finallyDepth_ = 0;
+    std::vector<std::string> caughtErrors_;
 };
 
 }

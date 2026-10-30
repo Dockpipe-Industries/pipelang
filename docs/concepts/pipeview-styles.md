@@ -74,3 +74,8 @@ percentage/em units, imports, XML styles, Qt mappings and reload remain planned;
 unsupported authoring refuses. The settings showcase proves authored style
 changes separately from model/action behavior. Headless draw/layout evidence
 is not visible UI, physical input, GPU, cross-platform or release qualification.
+
+The optional [resolved authored style descriptor](pipeview-style-inspection.md)
+provides typed metadata for build tooling and automation. Its explicit selection
+preserves default compiler artifacts and separates authored values from backend
+defaults and later runtime overrides.

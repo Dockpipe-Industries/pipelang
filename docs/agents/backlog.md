@@ -125,8 +125,14 @@ The current Counter/settings consumers use the C++-first ordinary model SDK
 instead of the old closed Set/Save/Revert runtime. The former source-v2/Go state
 model remains explicit compatibility evidence. New models own their state,
 transactional methods and one authored async/await Save, while generated bridges
-own typed transport/projection. Structured host awaits are implemented; local async
-composition, Optional, loops and exception/finally syntax remain unsupported.
+own typed transport/projection. Structured host awaits were the original boundary. The additive
+[fundamentals checkpoint](tasks/language-fundamentals-20261030.md) now owns
+binary64, Optional/List values, lexical blocks, bounded iteration and local async
+composition. The [structured failure/cleanup continuation](tasks/language-failure-cleanup-20261030.md)
+adds owned Error, throw/rethrow and try/catch/finally, including awaited recovery
+and bounded cleanup. Source resource disposal, asynchronous finally and broader
+task orchestration remain unsupported. Consumer porting stays paused while
+compiler work continues.
 
 ## PipeView: modular typed UI roadmap
 
@@ -262,7 +268,13 @@ acceptance evidence and updated capability documentation before expansion.
   tokens, scoped reuse, explicit overrides, component parts, interaction states
   and layout capabilities. Prove small visual edits without changing actions or
   state, and clear diagnostics for misspelled/unsupported properties and states.
-- [ ] **PV-04 — AI/testing contracts alongside the first controls.** The first
+- [ ] **PV-04 — AI/testing contracts alongside the first controls.** Native
+  tooling now has an explicitly selected [authored style descriptor](../concepts/pipeview-style-inspection.md)
+  with typed resolved values and an atomically published SDK sidecar. Default
+  response/artifact compatibility is retained; this is compile-time metadata,
+  not an effective runtime style or complete semantic-tree acceptance claim.
+  See its [qualification record](tasks/pipeview-style-inspection-20261030.md).
+  The first
   managed-view inspection and typed Go widget-harness slice is locally accepted:
   default value redaction, checked action wiring, explicit completions and native
   conformance are recorded in [the inspection proof](../research/pipeview-inspection-testing.md).

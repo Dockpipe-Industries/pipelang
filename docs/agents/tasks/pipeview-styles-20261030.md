@@ -61,7 +61,8 @@ performance, full PV-03, reload or release qualification is claimed.
 
 ## Authorized local checkpoint
 
-On 2026-10-30 the owner explicitly requested committing the verified style
-foundation and continuing to the next piece. This local checkpoint includes its
-previously verified source-owned regression prerequisite. Original dirty working
-copies are preserved. No push, merge, publication or live startup is authorized.
+The owner subsequently requested committing this verified foundation and
+continuing. It was committed locally as `d1bb9f2` in the existing runtime checkout,
+including its verified regression prerequisite. No push followed; original dirty
+working-copy branches and indexes were preserved. The authored style-inspection
+continuation is recorded separately.

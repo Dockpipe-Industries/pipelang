@@ -93,19 +93,36 @@ template<class T>
 struct Coroutine {
     struct promise_type {
         std::shared_ptr<TaskState<T>> state = std::make_shared<TaskState<T>>();
+        std::optional<T> pendingResult;
         Coroutine get_return_object() {
             return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this));
         }
         std::suspend_always initial_suspend() noexcept { return {}; }
-        std::suspend_always final_suspend() noexcept { return {}; }
-        void return_value(T value) { state->result = std::move(value); }
+        struct FinalAwaiter {
+            bool await_ready() const noexcept { return false; }
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> handle) const noexcept {
+                static_assert(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>,
+                    "owned coroutine results require nonthrowing publication");
+                auto& promise = handle.promise();
+                if (!promise.pendingResult)
+                    std::terminate();
+                // A cleanup fault can be caught by source recovery after an
+                // attempted co_return. Publish only once final cleanup finishes.
+                promise.state->result = std::move(promise.pendingResult);
+                return promise.continuation;
+            }
+            void await_resume() const noexcept {}
+        };
+        FinalAwaiter final_suspend() noexcept { return {}; }
+        std::coroutine_handle<> continuation = std::noop_coroutine();
+        void return_value(T value) { pendingResult = std::move(value); }
         void unhandled_exception() {
             try {
                 throw;
             } catch (const std::exception& error) {
-                state->result = T::Failure(safeErrorMessage(error));
+                pendingResult = T::Failure(safeErrorMessage(error));
             } catch (...) {
-                state->result = T::Failure("unexpected task failure");
+                pendingResult = T::Failure("unexpected task failure");
             }
         }
     };
@@ -117,6 +134,37 @@ struct Coroutine {
     ~Coroutine() {
         if (handle)
             handle.destroy();
+    }
+    class Awaiter {
+    public:
+        explicit Awaiter(Handle child) : child_(child) {}
+        Awaiter(const Awaiter&) = delete;
+        Awaiter& operator=(const Awaiter&) = delete;
+        Awaiter(Awaiter&& other) noexcept : child_(std::exchange(other.child_, {})) {}
+        ~Awaiter() {
+            if (child_)
+                child_.destroy();
+        }
+        bool await_ready() const noexcept { return false; }
+        std::coroutine_handle<> await_suspend(std::coroutine_handle<> parent) noexcept {
+            child_.promise().continuation = parent;
+            return child_;
+        }
+        T await_resume() {
+            if (!child_.promise().state->result)
+                throw ExecutionFailure("child coroutine completed without a result");
+            // The awaiter retains exclusive frame ownership through result
+            // extraction, including an exceptional result move.
+            T result = std::move(*child_.promise().state->result);
+            child_.destroy();
+            child_ = {};
+            return result;
+        }
+    private:
+        Handle child_;
+    };
+    Awaiter operator co_await() && noexcept {
+        return Awaiter(std::exchange(handle, {}));
     }
     void release() noexcept { handle = {}; }
     Handle handle;
@@ -160,11 +208,13 @@ public:
         }
         for (auto& completion : finalCompletions)
             completion();
+        abandoningFrames_ = true;
         for (auto& entry : entries_) {
             entry.abandon();
             entry.handle.destroy();
         }
     }
+    bool abandoningFrames() const noexcept { return abandoningFrames_; }
     void requireOwner() const {
         if (owner_ != std::this_thread::get_id())
             throw ExecutionFailure("model accessed from a different owner thread");
@@ -249,6 +299,7 @@ public:
                         *result = T::Failure("unexpected host service failure");
                     }
                 }, [continuation] { continuation.resume(); });
+                *suspended_ = true;
                 return true;
             } catch (const std::exception& error) {
                 *result_ = T::Failure(safeErrorMessage(error));
@@ -261,11 +312,13 @@ public:
             return false;
         }
         T await_resume() { return std::move(**result_); }
+        std::shared_ptr<const bool> suspensionState() const { return suspended_; }
     private:
         TaskScope& scope_;
         std::function<T()> function_;
         CancellationToken cancellation_;
         std::shared_ptr<std::optional<T>> result_ = std::make_shared<std::optional<T>>();
+        std::shared_ptr<bool> suspended_ = std::make_shared<bool>(false);
     };
     template<class T>
     HostAwaitable<T> host(std::function<T()> function, CancellationToken cancellation) {
@@ -326,6 +379,7 @@ private:
     std::deque<Job> jobs_;
     std::deque<std::function<void()>> completed_;
     bool stopping_ = false;
+    bool abandoningFrames_ = false;
 };
 
 }

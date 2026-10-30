@@ -2,7 +2,13 @@
 
 `qualify.py` owns orchestration for the existing native-model evidence subset.
 It uses the repository's `Models.pipe`, `semantics.cpp`, model protocol oracle,
-view protocol/interoperability fixtures and seven SDK admission tests. No copied
+view protocol/interoperability fixtures and fifteen SDK admission tests. It also
+runs independent fundamentals, iteration and local-async semantic/refusal fixtures,
+including compiler-mode guards, recursive collection budgets and nested teardown.
+The failure/cleanup oracle adds owned Error, structured control flow, awaited
+recovery, cleanup precedence/reserves, deferred result publication and forced
+frame-abandonment checks. Its independent source/refusal fixture and C++ runtime
+oracle are source-owned, not temporary copied implementations. No copied
 temporary fixture or handwritten generated header is an input.
 
 Use `--build-sdk` to qualify the local implementation. Three contained units
@@ -42,7 +48,8 @@ stop, not a filesystem quota. Failed/partial receipts and artifacts are retained
 choose a new output directory for retries. An interrupted coordinator is cleaned
 up by the enclosing aggregate job.
 
-Normal semantic/lifecycle execution and ASAN with leak detection run by default.
+Normal semantic/lifecycle execution and ASAN with leak detection run by default
+for the original models and each added fundamentals/iteration/composition/cleanup fixture.
 `--no-asan` explicitly omits the sanitizer pair and records that reduced scope.
 The model protocol oracle includes the existing 25 semantic and four protocol
 refusal families; view protocol and real model-to-view interoperability run
@@ -63,3 +70,9 @@ The style unit also checks typed declarations, all supported metric boundaries,
 separation. It emits the independent draw/layout project but does not execute
 ForgePipe in this headless runner. See the native model-view fixture README for
 exact installed-SDK execution and optional prior-compiler artifact comparison.
+
+Authored-style inspection adds explicit descriptor/refusal checks and real
+installed-generator transitions. Default response bytes can additionally be
+compared with a pinned prior compiler through the dedicated fixture's optional
+baseline argument. Existing SDK rollback and strict admission remain part of the
+same bounded run; descriptor values do not expose model or runtime state.

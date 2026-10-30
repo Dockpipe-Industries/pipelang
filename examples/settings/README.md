@@ -49,3 +49,8 @@ qualification, native input qualification, performance or release readiness.
 explicit properties compile to the existing ForgePipe style contract; application
 state and async Save remain in the unchanged `Settings.pipe`. This consumer's
 style qualification is headless layout/draw and model behavior only.
+
+The binding target explicitly enables `STYLE_INSPECTION`. Its generated
+`compiled-ui/style.json` describes the theme's resolved authored values and is
+covered by `bindings.json`; a separate CTest validates both. Backend defaults,
+host scale and runtime overrides are outside this descriptor.

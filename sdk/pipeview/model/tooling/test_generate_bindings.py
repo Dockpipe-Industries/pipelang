@@ -52,10 +52,10 @@ class BindingsAdmissionTest(unittest.TestCase):
             {"protocol": bindings.VIEW_PROTOCOL, "ok": True, "header": "// native view\n", "manifest": self.view_manifest},
         ]
 
-    def generate(self):
+    def generate(self, style_inspection=False):
         return bindings.generate(self.prefix, self.sdk_manifest_path, self.manifest_hash,
                                  self.model_tool, self.view_tool, self.model_path, self.view_path,
-                                 "fixture", self.output)
+                                 "fixture", self.output, style_inspection=style_inspection)
 
     def seed(self):
         self.output.mkdir()
@@ -66,6 +66,160 @@ class BindingsAdmissionTest(unittest.TestCase):
         if not self.output.exists():
             return None
         return {path.name: path.read_bytes() for path in self.output.iterdir()}
+
+    def descriptor(self):
+        return {"protocol": bindings.STYLE_DESCRIPTOR_PROTOCOL, "view": "View",
+                "style": "Compact", "scope": "resolved-authored", "properties": [
+                    {"name": "gap", "type": "length", "unit": "px", "value": 4.5},
+                    {"name": "text", "type": "color", "value": "#EAF1F8FF"},
+                ]}
+
+    def style_responses(self, descriptor=None):
+        responses = copy.deepcopy(self.responses)
+        responses[1]["style_descriptor"] = self.descriptor() if descriptor is None else descriptor
+        return responses
+
+    def test_style_inspection_opt_in_receipt_and_typed_sidecar(self):
+        with mock.patch.object(bindings, "run_tool", side_effect=self.style_responses()) as compiler:
+            receipt = self.generate(style_inspection=True)
+        self.assertEqual(set(self.snapshot()), bindings.OUTPUT_NAMES | {"style.json"})
+        self.assertEqual(json.loads((self.output / "style.json").read_bytes()), self.descriptor())
+        self.assertEqual(set(receipt["generated"]), bindings.OUTPUT_NAMES - {"bindings.json"} | {"style.json"})
+        for name, expected_hash in receipt["generated"].items():
+            self.assertEqual(sdk_manifest.file_hash(self.output / name), expected_hash)
+        self.assertNotIn("style_inspection", compiler.call_args_list[0].args[1])
+        self.assertEqual(compiler.call_args_list[1].args[1]["style_inspection"],
+                         bindings.STYLE_DESCRIPTOR_PROTOCOL)
+
+    def test_default_request_and_receipt_keep_the_original_closed_shape(self):
+        with mock.patch.object(bindings, "run_tool", side_effect=self.responses) as compiler:
+            receipt = self.generate()
+        for call in compiler.call_args_list:
+            self.assertNotIn("style_inspection", call.args[1])
+        self.assertEqual(set(receipt), {"protocol", "sdk_version", "sdk_manifest_sha256", "namespace",
+                                       "model_source_sha256", "view_source_sha256", "tools", "generated"})
+        self.assertEqual(set(receipt["generated"]), bindings.OUTPUT_NAMES - {"bindings.json"})
+
+    def test_style_selection_requires_an_exact_boolean_before_execution(self):
+        for value in (None, 0, 1, "true", []):
+            with self.subTest(value=value):
+                with mock.patch.object(bindings, "run_tool") as compiler:
+                    with self.assertRaisesRegex(ValueError, "Boolean"):
+                        self.generate(style_inspection=value)
+                compiler.assert_not_called()
+
+    def test_selected_response_shape_refuses_unsolicited_or_missing_descriptor(self):
+        self.seed()
+        before = self.snapshot()
+        for selected, responses in ((False, self.style_responses()), (True, self.responses)):
+            with self.subTest(selected=selected):
+                with mock.patch.object(bindings, "run_tool", side_effect=responses):
+                    with self.assertRaises(ValueError):
+                        self.generate(style_inspection=selected)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_style_descriptor_hostiles_refuse_before_publication(self):
+        candidates = []
+        for field, value in (("protocol", "wrong"), ("view", "Other"), ("scope", "effective"),
+                             ("style", ""), ("style", True), ("style", "x" * 65537),
+                             ("properties", {}), ("properties", [self.descriptor()["properties"][0]] * 15)):
+            descriptor = self.descriptor()
+            descriptor[field] = value
+            candidates.append(descriptor)
+        descriptor = self.descriptor()
+        descriptor["extra"] = False
+        candidates.append(descriptor)
+        descriptor = self.descriptor()
+        del descriptor["scope"]
+        candidates.append(descriptor)
+        descriptor = self.descriptor()
+        descriptor["style"] = None
+        candidates.append(descriptor)
+        property_sets = [
+            [False],
+            [{"name": "scale", "type": "length", "unit": "px", "value": 1}],
+            [{"name": "unknown", "type": "color", "value": "#FFFFFFFF"}],
+            list(reversed(self.descriptor()["properties"])),
+            [self.descriptor()["properties"][0]] * 2,
+        ]
+        for value in (False, "4", -1, 65, float("nan"), float("inf"), float("-inf")):
+            property_sets.append([{"name": "gap", "type": "length", "unit": "px", "value": value}])
+        for field, value in (("type", "color"), ("unit", "em"), ("extra", False)):
+            property_entry = copy.deepcopy(self.descriptor()["properties"][0])
+            property_entry[field] = value
+            property_sets.append([property_entry])
+        for value in (False, "#eaf1f8ff", "#FFFFFFFFF", "#FFFFFF", "#GGFFFFFF"):
+            property_sets.append([{"name": "text", "type": "color", "value": value}])
+        property_sets.append([{"name": "text", "type": "length", "value": "#FFFFFFFF"}])
+        property_sets.append([{"name": "text", "type": "color", "unit": "px", "value": "#FFFFFFFF"}])
+        for properties in property_sets:
+            descriptor = self.descriptor()
+            descriptor["properties"] = properties
+            candidates.append(descriptor)
+        self.seed()
+        (self.output / "style.json").write_text("previous style")
+        before = self.snapshot()
+        for index, descriptor in enumerate(candidates):
+            with self.subTest(candidate=index):
+                with mock.patch.object(bindings, "run_tool", side_effect=self.style_responses(descriptor)):
+                    with self.assertRaises(ValueError):
+                        self.generate(style_inspection=True)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_style_profile_bounds_and_unselected_style(self):
+        ranges = {"padding": (0, 64), "gap": (0, 64), "textInset": (0, 64),
+                  "labelHeight": (1, 128), "controlHeight": (1, 256),
+                  "fontPixelHeight": (7, 56), "borderWidth": (0, 8)}
+        for name, (minimum, maximum) in ranges.items():
+            for value in (minimum, maximum):
+                descriptor = self.descriptor()
+                descriptor["properties"] = [{"name": name, "type": "length", "unit": "px", "value": value}]
+                self.assertEqual(bindings.admit_style_descriptor(descriptor, self.view_manifest), descriptor)
+            for value in (minimum - 1, maximum + 1):
+                descriptor["properties"][0]["value"] = value
+                with self.assertRaises(ValueError):
+                    bindings.admit_style_descriptor(descriptor, self.view_manifest)
+        descriptor = self.descriptor()
+        descriptor["style"] = None
+        descriptor["properties"] = []
+        with mock.patch.object(bindings, "run_tool", side_effect=self.style_responses(descriptor)):
+            self.generate(style_inspection=True)
+        self.assertEqual(json.loads((self.output / "style.json").read_bytes()), descriptor)
+
+    def test_style_output_toggle_removes_only_the_owned_sidecar(self):
+        with mock.patch.object(bindings, "run_tool", side_effect=self.style_responses()):
+            self.generate(style_inspection=True)
+        self.assertTrue((self.output / "style.json").is_file())
+        with mock.patch.object(bindings, "run_tool", side_effect=self.responses):
+            self.generate()
+        self.assertEqual(set(self.snapshot()), bindings.OUTPUT_NAMES)
+        (self.output / "user.json").write_text("user material")
+        before = self.snapshot()
+        with mock.patch.object(bindings, "run_tool") as compiler:
+            with self.assertRaisesRegex(ValueError, "unowned"):
+                self.generate(style_inspection=True)
+        compiler.assert_not_called()
+        self.assertEqual(self.snapshot(), before)
+
+    def test_style_publication_failure_restores_the_previous_sidecar(self):
+        self.seed()
+        (self.output / "style.json").write_text("previous style")
+        before = self.snapshot()
+        replace = os.replace
+
+        def fail_publication(source, target):
+            if Path(source).name == "bindings":
+                raise OSError("injected style publication failure")
+            return replace(source, target)
+
+        for selected in (False, True):
+            responses = self.style_responses() if selected else self.responses
+            with self.subTest(selected=selected):
+                with mock.patch.object(bindings, "run_tool", side_effect=responses):
+                    with mock.patch.object(bindings.os, "replace", side_effect=fail_publication):
+                        with self.assertRaisesRegex(OSError, "publication failure"):
+                            self.generate(style_inspection=selected)
+                self.assertEqual(self.snapshot(), before)
 
     def test_complete_binding_receipt_and_installed_runtime_identity(self):
         with mock.patch.object(bindings, "run_tool", side_effect=self.responses) as compiler:

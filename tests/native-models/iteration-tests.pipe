@@ -1,0 +1,69 @@
+public Record IterationLabel {
+    public string text;
+}
+public Record IterationEnvelope {
+    public Optional<Result<List<int>,string>> values;
+}
+public Class IterationModel {
+    public List<int> numbers = List<int>.Empty();
+    public int count = 0;
+    public void Seed() {
+        numbers.Add(1);
+        numbers.Add(2);
+        numbers.Add(3);
+    }
+    public int SnapshotIteration() {
+        int total = 0;
+        foreach (int item in numbers) {
+            numbers.Add(9);
+            item = item + 10;
+            total = total + item;
+        }
+        return total;
+    }
+    public pure int ReadFirst() => numbers.At(0);
+    public pure int Size() => numbers.Count;
+    public pure int ControlFlow() {
+        List<int> local = List<int>.Empty();
+        local.Add(1);
+        local.Add(2);
+        local.Add(3);
+        local.Add(4);
+        int total = 0;
+        foreach (int item in local) {
+            if (item == 2)
+                continue;
+            if (item == 4)
+                break;
+            total = total + item;
+        }
+        int index = 0;
+        while (index < 4) {
+            index = index + 1;
+            if (index == 2)
+                continue;
+            total = total + index;
+        }
+        return total;
+    }
+    private void Forever() {
+        while (true) {
+            count = count + 1;
+        }
+    }
+    public void BudgetRollback() {
+        numbers.Add(55);
+        Forever();
+    }
+    public pure int PureBudget() {
+        int value = 0;
+        while (true) {
+            value = value + 1;
+        }
+        return value;
+    }
+    public int IndexRollback() {
+        count = 123;
+        return numbers.At(-1);
+    }
+}

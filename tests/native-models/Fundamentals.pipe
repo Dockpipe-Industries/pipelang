@@ -1,0 +1,87 @@
+public Record Label {
+    public string text = "initial";
+}
+
+public Record Envelope {
+    public Optional<Result<Label,string>> payload;
+}
+
+public Class Fundamentals {
+    public float stored = 0.0;
+    public int count = 0;
+    public Optional<Label> label;
+    public Envelope envelope;
+
+    public pure float Decimal() => 0.1;
+    public pure float Scientific() => 1.25e+3;
+    public pure float Smallest() => 4.9406564584124654e-324;
+    public pure float Largest() => 1.7976931348623157e308;
+    public pure float Absolute(float value) => float.Abs(value);
+    public pure float Root(float value) => float.Sqrt(value);
+    public pure float Logarithm(float value) => float.Log(value);
+    public pure float NegativeZero() => -0.0;
+    public pure float Add(float left, float right) => left + right;
+    public pure float Subtract(float left, float right) => left - right;
+    public pure float Multiply(float left, float right) => left * right;
+    public pure float Divide(float left, float right) => left / right;
+    public pure bool Less(float left, float right) => left < right;
+    public pure bool LessEqual(float left, float right) => left <= right;
+    public pure bool Greater(float left, float right) => left > right;
+    public pure bool GreaterEqual(float left, float right) => left >= right;
+    public pure bool Equal(float left, float right) => left == right;
+    public pure bool Different(float left, float right) => left != right;
+    public pure bool Finite(float value) => float.IsFinite(value);
+    public pure float FirstMinimum(float first, float second) => second < first ? second : first;
+    public pure float Composed(float value) => Add(Multiply(value, 2.0), 0.5);
+    public pure float SafeArm(bool safe) => safe ? 1.25 : Optional<float>.None().Value;
+    public pure bool SafeAnd() => false && Optional<float>.None().Value > 0.0;
+    public pure bool SafeOr() => true || Optional<float>.None().Value > 0.0;
+    public pure bool DefaultNone() => !label.HasValue && !envelope.payload.HasValue;
+    public pure Optional<float> Present(float value) => Optional<float>.Some(value);
+    public pure Optional<float> Absent() => Optional<float>.None();
+    public pure Label ReadLabel() => label.Value;
+
+    public void SetLabel(Label value) {
+        label = Optional<Label>.Some(value);
+    }
+
+    public void SetEnvelope(Envelope value) {
+        envelope = value;
+    }
+
+    public float Store(float value) {
+        stored = value;
+        return stored;
+    }
+
+    public float MissingRollsBack() {
+        count = 99;
+        label = Optional<Label>.Some(Label("changed"));
+        return Optional<float>.None().Value;
+    }
+
+    public int Scoped(bool early) {
+        int result = 3;
+        {
+            int local = 7;
+            result = result + local;
+            {
+                int nested = 11;
+                if (early)
+                    return result + nested;
+                result = result + 1;
+            }
+        }
+        {
+            int local = 2;
+            result = result + local;
+        }
+        return result;
+    }
+
+    public int ReturnFromBlock() {
+        {
+            return 41;
+        }
+    }
+}

@@ -83,9 +83,9 @@ def main():
         ("public Class Model { public pure int Read() => 9223372036854775808; }", "outside signed64"),
         ("public Record Value { public int number; } public Class Model { public pure Value Read() => new Value { absent = 1 }; }",
          "unknown or duplicate record"),
-        ("public Class Model { public Optional<int> value; }", "unsupported generic"),
+        ("public Class Model { public Unsupported<int> value; }", "unsupported generic"),
         ("public Class Model { public async Task<Result<void,string>> Run() { Result<void,string> result = await Run(); return result; } }",
-         "local Task composition is not admitted"),
+         "recursive local call"),
         ("public Class Model { public pure int Read(bool flag) { if (flag) return 1; } }", "every path"),
     ]
     refusal_cases += [

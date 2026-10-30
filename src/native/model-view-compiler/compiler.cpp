@@ -472,7 +472,10 @@ Json decode(const std::string &input)
 Json compile(const Json &request)
 {
     try {
-        members(request, {"protocol", "source", "model_manifest", "model_header"}, {"namespace"});
+        members(request, {"protocol", "source", "model_manifest", "model_header"}, {"namespace", "style_inspection"});
+        const bool inspectStyle = request.contains("style_inspection");
+        if (inspectStyle && text(request, "style_inspection") != styleDescriptorProtocol)
+            throw std::runtime_error("unsupported style inspection protocol");
         if (text(request, "protocol") != "pipelang.native-model-view.v1")
             throw std::runtime_error("unsupported model-view protocol");
         const auto source = text(request, "source");
@@ -493,9 +496,12 @@ Json compile(const Json &request)
             throw Failure{lexed.failure->message, lexed.failure->start, lexed.failure->end};
         Parser parser(lexed.tokens, request.at("model_manifest"));
         const auto view = parser.parse(nameSpace, header);
-        return {{"protocol", "pipelang.native-model-view.v1"}, {"ok", true}, {"header", emit(view)},
+        Json response = {{"protocol", "pipelang.native-model-view.v1"}, {"ok", true}, {"header", emit(view)},
             {"manifest", {{"protocol", "pipelang.native-model-view-manifest.v1"}, {"name", view.name},
                 {"adapter", view.name + "Adapter"}, {"model", view.model}, {"namespace", nameSpace}}}};
+        if (inspectStyle)
+            response["style_descriptor"] = styleDescriptor(view);
+        return response;
     } catch (const styles::Failure &failure) {
         return {{"protocol", "pipelang.native-model-view.v1"}, {"ok", false},
             {"diagnostics", Json::array({{{"code", "PMV2001"}, {"message", failure.message},

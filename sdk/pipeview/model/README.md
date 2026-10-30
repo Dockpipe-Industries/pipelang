@@ -55,3 +55,9 @@ The native view compiler additionally supports explicitly selected, view-scoped
 inheritance and explicit overrides lower to existing adapter style properties.
 This does not add renderer dependencies to the compiler/runtime or change model
 and action semantics. Unstyled source retains its prior generated artifacts.
+
+`STYLE_INSPECTION` on `pipelang_add_model_bindings` opts into the versioned
+[authored style descriptor](../../../docs/concepts/pipeview-style-inspection.md).
+It adds an atomically published `style.json` covered by the binding receipt.
+Default generation still owns exactly five outputs. The descriptor contains
+resolved authored values; it is not an effective runtime-style report.

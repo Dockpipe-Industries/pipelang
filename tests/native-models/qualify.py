@@ -171,18 +171,73 @@ def qualify(args, harness):
                          tests / "native-models/semantics.cpp"]
     unit("semantics-build", [*compile_arguments, "-O2", "-o", semantics / "test"])
     unit("semantics-run", [semantics / "test"])
+    fundamentals = args.output / "fundamentals"
+    unit("fundamentals-generate", [*python, tests / "native-models/fundamentals.py",
+                                   "--compiler", compiler, "--output", fundamentals])
+    fundamentals_compile = [args.cxx, "-std=c++20", "-pthread", "-Wall", "-Wextra", "-Werror",
+                            "-I" + str(fundamentals), "-I" + str(args.sdk_prefix / "include"),
+                            tests / "native-models/fundamentals.cpp"]
+    unit("fundamentals-build", [*fundamentals_compile, "-O2", "-o", fundamentals / "test"])
+    unit("fundamentals-run", [fundamentals / "test"])
+    unit("numeric-guard", [*python, tests / "native-models/numeric-guard.py", "--cxx", args.cxx,
+                           "--include", args.sdk_prefix / "include",
+                           "--fixture", args.output / "NumericDefaults.hpp"])
+    iteration = args.output / "iteration"
+    unit("iteration-generate", [*python, tests / "native-models/iteration-tests.py",
+                                "--compiler", compiler, "--output", iteration])
+    iteration_compile = [args.cxx, "-std=c++20", "-pthread", "-Wall", "-Wextra", "-Werror",
+                         "-I" + str(iteration), "-I" + str(args.sdk_prefix / "include"),
+                         tests / "native-models/iteration-tests.cpp"]
+    unit("iteration-build", [*iteration_compile, "-O2", "-o", iteration / "test"])
+    unit("iteration-run", [iteration / "test"])
+    composition = args.output / "async-composition"
+    unit("composition-generate", [*python, tests / "native-models/async-composition.py",
+                                  "--compiler", compiler, "--output", composition])
+    composition_compile = [args.cxx, "-std=c++20", "-pthread", "-Wall", "-Wextra", "-Werror",
+                           "-I" + str(composition), "-I" + str(args.sdk_prefix / "include"),
+                           tests / "native-models/async-composition.cpp"]
+    unit("composition-build", [*composition_compile, "-O2", "-o", composition / "test"])
+    unit("composition-run", [composition / "test"])
+    cleanup = args.output / "failure-cleanup"
+    unit("cleanup-generate", [*python, tests / "native-models/failure-cleanup.py",
+                              "--compiler", compiler, "--output", cleanup])
+    cleanup_compile = [args.cxx, "-std=c++20", "-pthread", "-Wall", "-Wextra", "-Werror",
+                       "-I" + str(cleanup), "-I" + str(args.sdk_prefix / "include"),
+                       tests / "native-models/failure-cleanup.cpp"]
+    unit("cleanup-build", [*cleanup_compile, "-O2", "-o", cleanup / "test"])
+    unit("cleanup-run", [cleanup / "test"])
     unit("view-protocol", [*python, tests / "native-model-views/test_protocol.py",
                            "--compiler", view_compiler, "--output", args.output / "view"])
     unit("cross-tool", [*python, tests / "native-model-views/test_cross_tool.py",
                         "--model-compiler", compiler, "--view-compiler", view_compiler])
     unit("styles", [*python, tests / "native-model-views/test_styles.py",
                     "--compiler", view_compiler, "--output", args.output / "styles"])
+    unit("style-inspection", [*python, tests / "native-model-views/test_style_inspection.py",
+                             "--compiler", view_compiler])
+    unit("style-generation", [*python, tests / "native-model-views/test_style_generation.py",
+                             "--sdk-prefix", args.sdk_prefix, "--output", args.output / "style-generation"])
     unit("sdk-admission", [*python, args.source_root / "sdk/pipeview/model/tooling/test_generate_bindings.py"])
     if not args.no_asan:
         unit("asan-build", [*compile_arguments, "-O1", "-g", "-fsanitize=address",
                             "-fno-omit-frame-pointer", "-o", semantics / "test-asan"])
         unit("asan-run", ["/usr/bin/env", "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
                           semantics / "test-asan"])
+        unit("fundamentals-asan-build", [*fundamentals_compile, "-O1", "-g", "-fsanitize=address",
+                                         "-fno-omit-frame-pointer", "-o", fundamentals / "test-asan"])
+        unit("fundamentals-asan-run", ["/usr/bin/env", "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+                                       fundamentals / "test-asan"])
+        unit("iteration-asan-build", [*iteration_compile, "-O1", "-g", "-fsanitize=address",
+                                      "-fno-omit-frame-pointer", "-o", iteration / "test-asan"])
+        unit("iteration-asan-run", ["/usr/bin/env", "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+                                    iteration / "test-asan"])
+        unit("composition-asan-build", [*composition_compile, "-O1", "-g", "-fsanitize=address",
+                                        "-fno-omit-frame-pointer", "-o", composition / "test-asan"])
+        unit("composition-asan-run", ["/usr/bin/env", "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+                                      composition / "test-asan"])
+        unit("cleanup-asan-build", [*cleanup_compile, "-O1", "-g", "-fsanitize=address",
+                                    "-fno-omit-frame-pointer", "-o", cleanup / "test-asan"])
+        unit("cleanup-asan-run", ["/usr/bin/env", "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+                                  cleanup / "test-asan"])
     verify_sdk(args)
     final_source = source_identity(args.source_root)
     write_json(args.output / "source-after.json", final_source)
@@ -196,20 +251,51 @@ def qualify(args, harness):
                      tests / "native-model-views/test_protocol.py",
                      tests / "native-model-views/test_cross_tool.py",
                      tests / "native-model-views/test_styles.py",
+                     tests / "native-model-views/test_style_inspection.py",
+                     tests / "native-model-views/test_style_generation.py",
                      tests / "native-model-views/StyleTest.cpp",
                      args.source_root / "sdk/pipeview/model/tooling/test_generate_bindings.py"]
+    fixture_paths.extend(tests / "native-models" / name for name in
+                         ("Fundamentals.pipe", "fundamentals.cpp", "fundamentals.py", "numeric-guard.py",
+                          "iteration-tests.pipe", "iteration-tests.cpp", "iteration-tests.py",
+                          "async-composition.pipe", "async-composition.cpp", "async-composition.py",
+                          "FailureCleanup.pipe", "failure-cleanup.cpp", "failure-cleanup.py"))
+    fundamentals_output = (args.output / "units/fundamentals-generate.output").read_text()
+    fundamentals_cases = json.loads(fundamentals_output.strip().splitlines()[-1])
+    if fundamentals_cases.get("status") != "passed" or fundamentals_cases.get("semantic_refusals") != 28:
+        raise RuntimeError("Fundamentals oracle case inventory changed")
+    iteration_output = (args.output / "units/iteration-generate.output").read_text()
+    iteration_cases = json.loads(iteration_output.strip().splitlines()[-1])
+    if iteration_cases != {"status": "passed", "refusals": 12}:
+        raise RuntimeError("Iteration oracle case inventory changed")
+    composition_output = (args.output / "units/composition-generate.output").read_text()
+    composition_cases = json.loads(composition_output.strip().splitlines()[-1])
+    if composition_cases != {"status": "passed", "refusals": 10}:
+        raise RuntimeError("Async composition oracle case inventory changed")
+    cleanup_output = (args.output / "units/cleanup-generate.output").read_text()
+    cleanup_cases = json.loads(cleanup_output.strip().splitlines()[-1])
+    if cleanup_cases != {"status": "passed", "refusals": 21}:
+        raise RuntimeError("Failure/cleanup oracle case inventory changed")
     protocol_output = (args.output / "units/model-protocol.output").read_text()
     protocol_cases = json.loads(protocol_output.strip().splitlines()[-1])
     if protocol_cases != {"status": "passed", "semantic_refusals": 25,
                           "protocol_refusals": 4, "admitted": 2}:
         raise RuntimeError("Model protocol oracle case inventory changed")
     sdk_test_output = (args.output / "units/sdk-admission.output").read_text()
-    if not re.search(r"\bRan 7 tests? in ", sdk_test_output) or "\nOK\n" not in sdk_test_output:
+    if not re.search(r"\bRan 15 tests? in ", sdk_test_output) or "\nOK\n" not in sdk_test_output:
         raise RuntimeError("SDK tooling oracle case inventory changed")
     style_output = (args.output / "units/styles.output").read_text()
     style_cases = json.loads(style_output.strip().splitlines()[-1])
     if style_cases != {"status": "passed", "style_refusals": 43, "unstyled_artifact_parity": False}:
         raise RuntimeError("Style oracle case inventory changed")
+    inspection_output = (args.output / "units/style-inspection.output").read_text()
+    inspection_cases = json.loads(inspection_output.strip().splitlines()[-1])
+    if inspection_cases != {"status": "passed", "inspection_refusals": 9, "default_wire_parity": False}:
+        raise RuntimeError("Style inspection oracle case inventory changed")
+    generation_output = (args.output / "units/style-generation.output").read_text()
+    generation_cases = json.loads(generation_output.strip().splitlines()[-1])
+    if generation_cases != {"status": "passed", "mode_sequences": ["default", "enabled", "disabled", "enabled"], "cmake_modes": ["disabled", "enabled", "disabled"], "refusal_count": 2}:
+        raise RuntimeError("Installed style generation oracle case inventory changed")
     write_json(args.output / "acceptance.json", {
         "status": "passed", "source_root": str(args.source_root),
         "sdk_prefix": str(args.sdk_prefix), "sdk_manifest_sha256": args.sdk_manifest_sha256,
@@ -217,7 +303,7 @@ def qualify(args, harness):
         "mode": "source-build" if args.build_sdk else "installed-artifact",
         "source_sha256": initial_source,
         "asan": not args.no_asan, "units": receipts,
-        "cases": {"model_protocol": protocol_cases, "sdk_tooling": 7, "styles": style_cases},
+        "cases": {"failure_cleanup": cleanup_cases, "composition": composition_cases, "iteration": iteration_cases, "fundamentals": fundamentals_cases, "model_protocol": protocol_cases, "sdk_tooling": 15, "styles": style_cases, "style_inspection": inspection_cases, "style_generation": generation_cases},
         "fixture_sha256": {str(path.relative_to(args.source_root)): file_hash(path)
                            for path in fixture_paths},
         "allocated_bytes": allocated_bytes(args.output), "estate_limit_bytes": limit,

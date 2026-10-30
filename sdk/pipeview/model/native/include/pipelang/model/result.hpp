@@ -18,6 +18,16 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+class EvaluationLimitFailure : public ExecutionFailure {
+public:
+    using ExecutionFailure::ExecutionFailure;
+};
+
+struct Error {
+    std::string message;
+    bool operator==(const Error&) const = default;
+};
+
 enum class Outcome { Success, Cancelled, Failure };
 
 template<class T, class E = std::string>
@@ -74,6 +84,33 @@ private:
 using InvocationResult = Result<void, std::string>;
 
 template<class T>
+class Optional {
+public:
+    Optional() = default;
+    static Optional None() { return {}; }
+    static Optional Some(T value) { return Optional(std::move(value)); }
+    bool has_value() const { return value_.has_value(); }
+    const T& value() const {
+        if (!value_)
+            throw ExecutionFailure("Optional.Value requires Some");
+        return *value_;
+    }
+    bool operator==(const Optional&) const = default;
+private:
+    explicit Optional(T value) : value_(std::move(value)) {}
+    std::optional<T> value_;
+};
+
+template<class T>
+class List;
+template<class T>
+void validate(const List<T>& value);
+template<class T>
+void validate(const Optional<T>& value);
+template<class T, class E>
+void validate(const Result<T, E>& result);
+
+template<class T>
 void validate(const T&) {}
 
 inline void validate(const std::string& value) {
@@ -115,6 +152,18 @@ inline void validate(const std::string& value) {
     }
 }
 
+inline void validate(const Error& error) { validate(error.message); }
+
+inline Error makeError(std::string message) {
+    validate(message);
+    return Error{std::move(message)};
+}
+
+[[noreturn]] inline void raiseError(const Error& error) {
+    validate(error);
+    throw ExecutionFailure(error.message);
+}
+
 inline std::string safeErrorMessage(const std::exception& error) {
     std::string message = error.what();
     try {
@@ -132,6 +181,12 @@ void validate(const Result<T, E>& result) {
         if (result.is_success())
             validate(result.value());
     }
+}
+
+template<class T>
+void validate(const Optional<T>& value) {
+    if (value.has_value())
+        validate(value.value());
 }
 
 inline std::int64_t add(std::int64_t left, std::int64_t right) {

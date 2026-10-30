@@ -42,3 +42,8 @@ The native model-view compiler owns typed view-scoped style resolution in
 `styles.cpp`, independently of renderers and model/action semantics. The
 [style capability](../../concepts/pipeview-styles.md) maps resolved values to the
 existing optional adapter contract; broader selectors/parts/reload remain planned.
+
+The optional native authored-style descriptor projects the same checked style
+used by header emission. SDK tooling validates its versioned transport and
+publishes it atomically with bindings; it does not parse or reinterpret source.
+The descriptor remains renderer-free and distinct from effective runtime state.

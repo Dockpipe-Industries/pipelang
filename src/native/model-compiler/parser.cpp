@@ -93,7 +93,7 @@ private:
             "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile",
             "wchar_t", "while", "xor", "not_eq", "and_eq", "or_eq", "xor_eq",
             "char8_t", "char16_t", "char32_t", "std", "pipelang",
-            "State", "snapshot", "poll", "pending"
+            "State", "snapshot", "poll", "pending", "foreach", "in", "finally"
         };
         if (value.size() > 96 || (value.starts_with('_') || value.starts_with("pl_")) || value.find("__") != std::string::npos ||
             reserved.contains(value))
@@ -190,8 +190,70 @@ private:
         return result;
     }
     Statement statement() {
+        struct DepthGuard {
+            unsigned& depth;
+            ~DepthGuard() { --depth; }
+        };
+        if (++statementDepth_ > 48)
+            fail("statement nesting limit exceeded");
+        DepthGuard depthGuard{statementDepth_};
         Statement result;
         result.offset = current().start;
+        if (take("try")) {
+            result.kind = "try";
+            result.body = block();
+            if (take("catch")) {
+                expect("(");
+                result.type = type();
+                result.name = identifier();
+                expect(")");
+                result.alternative = block();
+            }
+            if (take("finally")) {
+                result.hasFinally = true;
+                result.cleanup = block();
+            }
+            if (result.name.empty() && !result.hasFinally)
+                fail("try requires catch or finally");
+            return result;
+        }
+        if (take("throw")) {
+            result.kind = "throw";
+            if (!is(";"))
+                result.expression = expression();
+            expect(";");
+            return result;
+        }
+        if (is("break") || is("continue")) {
+            result.kind = current().literal;
+            advance();
+            expect(";");
+            return result;
+        }
+        if (take("while")) {
+            result.kind = "while";
+            expect("(");
+            result.expression = expression();
+            expect(")");
+            result.body = is("{") ? block() : std::vector<Statement>{statement()};
+            return result;
+        }
+        if (take("foreach")) {
+            result.kind = "foreach";
+            expect("(");
+            result.type = type();
+            result.name = identifier();
+            expect("in");
+            result.expression = expression();
+            expect(")");
+            result.body = is("{") ? block() : std::vector<Statement>{statement()};
+            return result;
+        }
+        if (is("{")) {
+            result.kind = "block";
+            result.body = block();
+            return result;
+        }
         if (take("if")) {
             result.kind = "if";
             expect("(");
@@ -311,10 +373,10 @@ private:
         } else if (take("(")) {
             result = expression();
             expect(")");
-        } else if (token.kind == "text" || token.kind == "integer" || token.kind == "boolean") {
+        } else if (token.kind == "text" || token.kind == "integer" || token.kind == "float" || token.kind == "boolean") {
             advance();
             result = make(token.kind, token.literal, token.start);
-        } else if (is("Result")) {
+        } else if (is("Result") || is("Optional") || is("List") || is("float")) {
             const auto resultType = type();
             result = make("type", resultType.text(), token.start);
             result->type = resultType;
@@ -344,6 +406,7 @@ private:
     std::size_t position_ = 0;
     std::size_t expressionCount_ = 0;
     unsigned blockDepth_ = 0;
+    unsigned statementDepth_ = 0;
     unsigned expressionDepth_ = 0;
 };
 
@@ -352,7 +415,7 @@ private:
 Program parse(const std::string& source) {
     if (source.size() > sourceLimit)
         throw Diagnostic("source byte limit exceeded", 0);
-    auto lexed = native::lex(source);
+    auto lexed = native::lex(source, native::NumericSyntax::Binary64);
     if (lexed.failure)
         throw Diagnostic(lexed.failure->message, lexed.failure->start);
     if (lexed.tokens.size() > 32768)

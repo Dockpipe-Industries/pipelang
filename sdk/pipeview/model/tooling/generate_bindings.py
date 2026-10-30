@@ -2,7 +2,9 @@
 """Compile native model/view bindings using one pinned exact installed model SDK."""
 import argparse
 import json
+import math
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -13,6 +15,7 @@ import sdk_manifest
 
 MODEL_PROTOCOL = "pipelang.native-model.v1"
 VIEW_PROTOCOL = "pipelang.native-model-view.v1"
+STYLE_DESCRIPTOR_PROTOCOL = "pipelang.native-style-descriptor.v1"
 MAXIMUM_SOURCE_BYTES = 65536
 MAXIMUM_MESSAGE_BYTES = 1 << 20
 MAXIMUM_DIAGNOSTIC_BYTES = 65536
@@ -91,6 +94,52 @@ def admit_view(manifest, namespace, model):
     return manifest
 
 
+def admit_style_descriptor(descriptor, view):
+    sdk_manifest.exact_object(descriptor, ("protocol", "view", "style", "scope", "properties"),
+                              "style descriptor")
+    if descriptor["protocol"] != STYLE_DESCRIPTOR_PROTOCOL or descriptor["view"] != view["name"]:
+        raise ValueError("Style descriptor protocol or view mismatch")
+    if descriptor["scope"] != "resolved-authored":
+        raise ValueError("Unsupported style descriptor scope")
+    if descriptor["style"] is not None:
+        text(descriptor["style"], "selected style")
+    properties = descriptor["properties"]
+    if not isinstance(properties, list) or len(properties) > 14:
+        raise ValueError("Style descriptor properties require an array of at most 14 entries")
+    if descriptor["style"] is None and properties:
+        raise ValueError("An unselected style cannot have authored properties")
+    lengths = {"padding": (0, 64), "gap": (0, 64), "textInset": (0, 64),
+               "labelHeight": (1, 128), "controlHeight": (1, 256),
+               "fontPixelHeight": (7, 56), "borderWidth": (0, 8)}
+    colors = {"background", "control", "field", "border", "focus", "text", "disabledText"}
+    previous = None
+    for entry in properties:
+        if not isinstance(entry, dict):
+            raise ValueError("Style property must be an object")
+        name = text(entry.get("name"), "style property name", 1024)
+        if previous is not None and name <= previous:
+            raise ValueError("Style properties must be unique and sorted by name")
+        previous = name
+        if name in lengths:
+            sdk_manifest.exact_object(entry, ("name", "type", "unit", "value"), "length property")
+            if entry["type"] != "length" or entry["unit"] != "px":
+                raise ValueError("Style length requires length type and logical px units")
+            value = entry["value"]
+            minimum, maximum = lengths[name]
+            valid_number = type(value) in (int, float) and minimum <= value <= maximum
+            if not valid_number or not math.isfinite(value):
+                raise ValueError("Style length exceeds its finite typed profile")
+        elif name in colors:
+            sdk_manifest.exact_object(entry, ("name", "type", "value"), "color property")
+            value = entry["value"]
+            canonical_color = isinstance(value, str) and re.fullmatch(r"#[0-9A-F]{8}", value)
+            if entry["type"] != "color" or not canonical_color:
+                raise ValueError("Style color requires canonical uppercase #RRGGBBAA")
+        else:
+            raise ValueError("Unsupported style descriptor property")
+    return descriptor
+
+
 def stop_process(process):
     try:
         if os.name == "posix":
@@ -153,13 +202,16 @@ def run_tool(tool, request):
         process.wait(timeout=5)
 
 
-def admit_response(response, protocol):
+def admit_response(response, protocol, style_inspection=False):
     if not isinstance(response, dict) or response.get("protocol") != protocol or type(response.get("ok")) is not bool:
         raise ValueError("Unexpected native response protocol or outcome")
     if not response["ok"]:
         sdk_manifest.exact_object(response, ("protocol", "ok", "diagnostics"), "native refusal")
         raise ValueError("Native compiler refused source: " + json.dumps(response["diagnostics"], ensure_ascii=False))
-    sdk_manifest.exact_object(response, ("protocol", "ok", "header", "manifest"), "native response")
+    fields = ("protocol", "ok", "header", "manifest")
+    if style_inspection:
+        fields += ("style_descriptor",)
+    sdk_manifest.exact_object(response, fields, "native response")
     text(response["header"], "generated native header", MAXIMUM_MESSAGE_BYTES)
     return response["header"].encode("utf-8"), response["manifest"]
 
@@ -185,7 +237,7 @@ def output_preflight(output):
         if not output.is_dir():
             raise ValueError("Output is not a directory")
         for entry in output.iterdir():
-            if entry.name not in OUTPUT_NAMES or entry.is_symlink() or not entry.is_file():
+            if entry.name not in OUTPUT_NAMES | {"style.json"} or entry.is_symlink() or not entry.is_file():
                 raise ValueError("Output directory contains unowned material")
 
 
@@ -212,7 +264,10 @@ def publish(output, files):
             raise
 
 
-def generate(prefix, manifest_path, manifest_hash, model_tool, view_tool, model_path, view_path, namespace, output):
+def generate(prefix, manifest_path, manifest_hash, model_tool, view_tool, model_path, view_path,
+             namespace, output, style_inspection=False):
+    if type(style_inspection) is not bool:
+        raise ValueError("Style inspection selection requires an exact Boolean")
     text(namespace, "namespace", 1024)
     output_preflight(output)
     for source in (model_path, view_path):
@@ -235,11 +290,16 @@ def generate(prefix, manifest_path, manifest_hash, model_tool, view_tool, model_
     model_response = run_tool(model_tool, {"protocol": MODEL_PROTOCOL, "source": model_source, "namespace": namespace})
     model_header, model_manifest = admit_response(model_response, MODEL_PROTOCOL)
     admit_model(model_manifest, namespace)
-    view_response = run_tool(view_tool, {"protocol": VIEW_PROTOCOL, "source": view_source,
-                                       "model_manifest": model_manifest, "namespace": namespace,
-                                       "model_header": "Model.hpp"})
-    view_header, view_manifest = admit_response(view_response, VIEW_PROTOCOL)
+    view_request = {"protocol": VIEW_PROTOCOL, "source": view_source,
+                    "model_manifest": model_manifest, "namespace": namespace,
+                    "model_header": "Model.hpp"}
+    if style_inspection:
+        view_request["style_inspection"] = STYLE_DESCRIPTOR_PROTOCOL
+    view_response = run_tool(view_tool, view_request)
+    view_header, view_manifest = admit_response(view_response, VIEW_PROTOCOL, style_inspection)
     admit_view(view_manifest, namespace, model_manifest)
+    if style_inspection:
+        admit_style_descriptor(view_response["style_descriptor"], view_manifest)
     if read_source(model_path)[0] != model_bytes or read_source(view_path)[0] != view_bytes:
         raise ValueError("Source changed during native compilation")
     for name, tool in (("model", model_tool), ("view", view_tool)):
@@ -248,6 +308,8 @@ def generate(prefix, manifest_path, manifest_hash, model_tool, view_tool, model_
     sdk_manifest.verify(prefix, manifest_path, manifest_hash)
     outputs = {"Model.hpp": model_header, "model.json": canonical(model_manifest),
                "ModelView.hpp": view_header, "view.json": canonical(view_manifest)}
+    if style_inspection:
+        outputs["style.json"] = canonical(view_response["style_descriptor"])
     receipt = {"protocol": "pipelang.native-model-bindings.v1", "sdk_version": "0.1.0",
                "sdk_manifest_sha256": manifest_hash, "namespace": namespace,
                "model_source_sha256": sdk_manifest.sha256(model_bytes),
@@ -266,10 +328,11 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--sdk-manifest-sha256", required=True)
     parser.add_argument("--namespace", required=True)
+    parser.add_argument("--style-inspection", action="store_true")
     args = parser.parse_args()
     generate(args.sdk_prefix, args.sdk_manifest, args.sdk_manifest_sha256,
              args.model_compiler, args.view_compiler, args.model, args.view,
-             args.namespace, args.output_directory)
+             args.namespace, args.output_directory, style_inspection=args.style_inspection)
 
 
 if __name__ == "__main__":

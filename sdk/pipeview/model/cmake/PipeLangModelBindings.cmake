@@ -1,5 +1,5 @@
 function(pipelang_add_model_bindings target)
-    cmake_parse_arguments(PARSE_ARGV 1 model "" "MODEL;VIEW;NAMESPACE;OUTPUT_DIRECTORY" "")
+    cmake_parse_arguments(PARSE_ARGV 1 model "STYLE_INSPECTION" "MODEL;VIEW;NAMESPACE;OUTPUT_DIRECTORY" "")
     if(model_UNPARSED_ARGUMENTS OR model_KEYWORDS_MISSING_VALUES)
         message(FATAL_ERROR "pipelang_add_model_bindings received unexpected or incomplete arguments")
     endif()
@@ -16,6 +16,11 @@ function(pipelang_add_model_bindings target)
     get_filename_component(output "${model_OUTPUT_DIRECTORY}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
     set(outputs "${output}/Model.hpp" "${output}/model.json" "${output}/ModelView.hpp"
         "${output}/view.json" "${output}/bindings.json")
+    set(inspection_arguments)
+    if(model_STYLE_INSPECTION)
+        list(APPEND outputs "${output}/style.json")
+        list(APPEND inspection_arguments --style-inspection)
+    endif()
     file(GLOB_RECURSE runtime_headers CONFIGURE_DEPENDS "${PipeLangModel_SDK_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/pipelang/model/*.hpp")
     add_custom_command(OUTPUT ${outputs}
         COMMAND "${Python3_EXECUTABLE}" -B "${PipeLangModel_GENERATOR}"
@@ -25,6 +30,7 @@ function(pipelang_add_model_bindings target)
             --model-compiler "${PipeLangModel_MODELC}" --view-compiler "${PipeLangModel_VIEWC}"
             --model "${model_source}" --view "${view_source}"
             --namespace "${model_NAMESPACE}" --output-directory "${output}"
+            ${inspection_arguments}
         DEPENDS "${model_source}" "${view_source}" "${PipeLangModel_MANIFEST}"
             "${PipeLangModel_MODELC}" "${PipeLangModel_VIEWC}" "${PipeLangModel_GENERATOR}"
             ${runtime_headers}

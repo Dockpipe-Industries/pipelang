@@ -8,6 +8,7 @@
 namespace pipelang::model_view {
 using Json = nlohmann::json;
 inline constexpr std::size_t messageByteLimit = 1U << 20;
+inline constexpr const char *styleDescriptorProtocol = "pipelang.native-style-descriptor.v1";
 struct Binding {
     std::string expression;
     std::string type;
@@ -40,6 +41,7 @@ struct View {
     Node root;
     std::optional<styles::ResolvedStyle> style;
 };
+Json styleDescriptor(const View &view);
 Json compile(const Json &request);
 std::string emit(const View &view);
 Json decode(const std::string &input);

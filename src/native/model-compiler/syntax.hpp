@@ -37,6 +37,9 @@ struct Statement {
     Expr target;
     std::vector<Statement> body;
     std::vector<Statement> alternative;
+    std::vector<Statement> cleanup;
+    bool hasFinally = false;
+    bool bodyFallsThrough = true;
     std::size_t offset = 0;
 };
 

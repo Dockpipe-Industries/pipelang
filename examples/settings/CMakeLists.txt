@@ -12,6 +12,7 @@ find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 pipelang_add_model_bindings(settings-bindings
+    STYLE_INSPECTION
     MODEL "${CMAKE_CURRENT_SOURCE_DIR}/Settings.pipe"
     VIEW "${CMAKE_CURRENT_SOURCE_DIR}/SettingsView.pipe"
     NAMESPACE settings_models
@@ -44,6 +45,8 @@ if(BUILD_TESTING)
     add_test(NAME PipeViewInspectionAdmission COMMAND "${Python3_EXECUTABLE}" -B
         "${CMAKE_CURRENT_SOURCE_DIR}/test_model_inspection.py" "${CMAKE_CURRENT_BINARY_DIR}/inspection.json")
     set_tests_properties(PipeViewInspectionAdmission PROPERTIES DEPENDS PipeViewSettingsInspection)
+    add_test(NAME PipeViewStyleDescriptorAdmission COMMAND "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_style_inspection.py" "${CMAKE_CURRENT_BINARY_DIR}/compiled-ui")
     # The former scalar/source-v2 adapter remains explicit compatibility evidence.
     add_test(NAME LegacyPipeViewBindingAdmission COMMAND "${Python3_EXECUTABLE}" -B
         "${CMAKE_CURRENT_SOURCE_DIR}/test_bindings.py")

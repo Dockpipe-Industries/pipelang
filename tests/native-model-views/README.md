@@ -34,3 +34,19 @@ existing contained harness, configure it with exact `ForgePipe_DIR` and
 `PipeLangModel_DIR`, build with one worker and run CTest. It checks resolved
 metrics/colors, geometry, focus/disabled draw commands and equivalent model/action
 projections. This is headless adapter proof, not visible rendering or input proof.
+
+## Authored style inspection
+
+`test_style_inspection.py --compiler /absolute/pipelang-model-viewc` independently
+checks the opt-in descriptor, inherited/overridden values, canonical colors,
+unselected/empty styles and refused selections. Optional `--baseline-compiler`
+compares actual default wire bytes for both styled and unstyled source with the
+previous compiler. Header and manifest identity is checked with inspection on/off.
+`test_style_generation.py --sdk-prefix /absolute/sdk --output /tmp/fresh-proof`
+uses the actual installed tools to test sidecar/receipt generation, output toggling
+and preservation after invalid input or unknown user files. Run both through the
+existing contained harness. Neither requires ForgePipe or Go.
+
+The installed-generator fixture also configures a small headless CMake consumer
+and toggles `STYLE_INSPECTION` off/on/off in one build directory. It verifies the
+complete output set and unchanged core artifacts after each rebuild.

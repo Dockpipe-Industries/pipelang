@@ -26,6 +26,10 @@ int main() {
         pipelang::native::Json generated;
         if (contract == pipelang::native::float64RequestContract) {
             generated = pipelang::native::generateFloat64Comparison(envelope);
+        } else if (contract == pipelang::native::float64ConditionalRequestContract) {
+            generated = pipelang::native::generateFloat64Conditional(envelope);
+        } else if (contract == pipelang::native::float64CallsRequestContract) {
+            generated = pipelang::native::generateFloat64Calls(envelope);
         } else {
             const auto program = pipelang::native::pilotProgram(envelope);
             pipelang::native::Emitter emitter;

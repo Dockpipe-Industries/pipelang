@@ -13,6 +13,10 @@ import (
 
 const float64RequestContract = "pipelang.cpp-emitter.request.v2"
 const float64ResponseContract = "pipelang.cpp-emitter.response.v2"
+const float64ConditionalRequestContract = "pipelang.cpp-emitter.request.v3"
+const float64ConditionalResponseContract = "pipelang.cpp-emitter.response.v3"
+const float64CallsRequestContract = "pipelang.cpp-emitter.request.v4"
+const float64CallsResponseContract = "pipelang.cpp-emitter.response.v4"
 const float64ExpressionLimit = 4096
 const float64DepthLimit = 64
 
@@ -25,20 +29,28 @@ type float64Request struct {
 }
 
 type float64Function struct {
+	ReturnType string            `json:"return_type,omitempty"`
 	PackageID  string            `json:"package_id"`
 	Path       string            `json:"path"`
 	Parameters []string          `json:"parameters"`
 	Body       float64Expression `json:"body"`
 }
 
+type float64Callee struct {
+	PackageID string `json:"package_id"`
+	Path      string `json:"path"`
+}
+
 type float64Expression struct {
-	Kind        string              `json:"kind"`
-	Type        string              `json:"type"`
-	Parameter   *int                `json:"parameter,omitempty"`
-	Boolean     *bool               `json:"boolean,omitempty"`
-	Float64Bits string              `json:"float64_bits,omitempty"`
-	Operator    string              `json:"operator,omitempty"`
-	Operands    []float64Expression `json:"operands,omitempty"`
+	Callee      *float64Callee       `json:"callee,omitempty"`
+	Arguments   *[]float64Expression `json:"arguments,omitempty"`
+	Kind        string               `json:"kind"`
+	Type        string               `json:"type"`
+	Parameter   *int                 `json:"parameter,omitempty"`
+	Boolean     *bool                `json:"boolean,omitempty"`
+	Float64Bits string               `json:"float64_bits,omitempty"`
+	Operator    string               `json:"operator,omitempty"`
+	Operands    []float64Expression  `json:"operands,omitempty"`
 }
 
 func float64TypeTag(typ coreir.Type) (string, error) {
@@ -56,10 +68,26 @@ func validFloat64Identity(value string) bool {
 }
 
 func projectFloat64Program(program coreir.Program) (float64Request, error) {
+	return projectFloat64ProgramWithProfile(program, Float64ComparisonCapability)
+}
+
+func projectFloat64ProgramWithProfile(program coreir.Program, profile string) (float64Request, error) {
+	calls := profile == Float64CallsCapability
+	conditionalValues := profile == Float64ConditionalCapability || calls
+	if profile != Float64ComparisonCapability && !conditionalValues {
+		return float64Request{}, fmt.Errorf("unsupported float64 profile %q", profile)
+	}
+	contract := float64RequestContract
+	if conditionalValues {
+		contract = float64ConditionalRequestContract
+	}
+	if calls {
+		contract = float64CallsRequestContract
+	}
 	if program.LanguageContract != coreir.LanguageContractV1130 || program.CompilerContract != coreir.CompilerContractV1 || len(program.Functions) == 0 || len(program.Functions) > 128 {
 		return float64Request{}, fmt.Errorf("float64 comparison profile requires v0.113.0/compiler.v1 and 1..128 functions")
 	}
-	request := float64Request{Contract: float64RequestContract, Profile: Float64ComparisonCapability,
+	request := float64Request{Contract: contract, Profile: profile,
 		LanguageContract: program.LanguageContract, CompilerContract: program.CompilerContract,
 		Functions: make([]float64Function, 0, len(program.Functions))}
 	identities := make(map[string]bool)
@@ -71,12 +99,19 @@ func projectFloat64Program(program coreir.Program) (float64Request, error) {
 		}
 		identities[key(identity)] = true
 		returnType, err := float64TypeTag(function.ReturnType)
-		if err != nil || returnType != "bool" || len(function.Parameters) > 64 {
+		if err != nil || (!conditionalValues && returnType != "bool") || len(function.Parameters) > 64 {
 			return float64Request{}, fmt.Errorf("float64 comparison functions return bool and accept at most 64 parameters")
 		}
 		projected := float64Function{PackageID: identity.PackageID, Path: identity.Path, Parameters: make([]string, 0, len(function.Parameters))}
+		returnPrimitive := coreir.PrimitiveBool
+		if returnType == "float64" {
+			returnPrimitive = coreir.PrimitiveFloat
+		}
+		if conditionalValues {
+			projected.ReturnType = returnType
+		}
 		if identity.Callable == nil || len(identity.Callable.Parameters) != len(function.Parameters) ||
-			!reflect.DeepEqual(identity.Callable.Returns, coreir.SemanticType{Kind: coreir.TypePrimitive, Primitive: coreir.PrimitiveBool}) {
+			!reflect.DeepEqual(identity.Callable.Returns, coreir.SemanticType{Kind: coreir.TypePrimitive, Primitive: returnPrimitive}) {
 			return float64Request{}, fmt.Errorf("float64 comparison callable identity does not match its signature")
 		}
 		for position, parameter := range function.Parameters {
@@ -93,14 +128,19 @@ func projectFloat64Program(program coreir.Program) (float64Request, error) {
 			}
 			projected.Parameters = append(projected.Parameters, tag)
 		}
-		projected.Body, err = projectFloat64Expression(&function.Body, projected.Parameters, 1, &nodes)
+		projected.Body, err = projectFloat64ExpressionWithProfile(&function.Body, projected.Parameters, 1, &nodes, conditionalValues, calls)
 		if err != nil {
 			return float64Request{}, err
 		}
-		if projected.Body.Type != "bool" {
+		if projected.Body.Type != returnType {
 			return float64Request{}, fmt.Errorf("float64 comparison body must return bool")
 		}
 		request.Functions = append(request.Functions, projected)
+	}
+	if calls {
+		if err := validateFloat64CallGraph(request); err != nil {
+			return float64Request{}, err
+		}
 	}
 	// The closed, bounded projection above rejects cycles and inactive payloads
 	// before calling the authoritative recursive Core checker.
@@ -116,6 +156,10 @@ func projectFloat64Program(program coreir.Program) (float64Request, error) {
 }
 
 func projectFloat64Expression(expression *coreir.Expr, parameters []string, depth int, nodes *int) (float64Expression, error) {
+	return projectFloat64ExpressionWithProfile(expression, parameters, depth, nodes, false, false)
+}
+
+func projectFloat64ExpressionWithProfile(expression *coreir.Expr, parameters []string, depth int, nodes *int, conditionalValues bool, calls bool) (float64Expression, error) {
 	*nodes = *nodes + 1
 	if expression == nil || depth > float64DepthLimit || *nodes > float64ExpressionLimit {
 		return float64Expression{}, fmt.Errorf("float64 comparison expression is missing, cyclic or exceeds its resource bounds")
@@ -160,7 +204,7 @@ func projectFloat64Expression(expression *coreir.Expr, parameters []string, dept
 		if expression.Unary == nil || expression.Unary.Operator != coreir.OperatorNot || tag != "bool" {
 			return float64Expression{}, fmt.Errorf("float64 comparison profile admits only logical not")
 		}
-		operand, err := projectFloat64Expression(expression.Unary.Operand, parameters, depth+1, nodes)
+		operand, err := projectFloat64ExpressionWithProfile(expression.Unary.Operand, parameters, depth+1, nodes, conditionalValues, calls)
 		if err != nil {
 			return float64Expression{}, err
 		}
@@ -174,11 +218,11 @@ func projectFloat64Expression(expression *coreir.Expr, parameters []string, dept
 		if expression.Binary == nil || tag != "bool" {
 			return float64Expression{}, fmt.Errorf("float64 comparison binary expression is invalid")
 		}
-		left, err := projectFloat64Expression(expression.Binary.Left, parameters, depth+1, nodes)
+		left, err := projectFloat64ExpressionWithProfile(expression.Binary.Left, parameters, depth+1, nodes, conditionalValues, calls)
 		if err != nil {
 			return float64Expression{}, err
 		}
-		right, err := projectFloat64Expression(expression.Binary.Right, parameters, depth+1, nodes)
+		right, err := projectFloat64ExpressionWithProfile(expression.Binary.Right, parameters, depth+1, nodes, conditionalValues, calls)
 		if err != nil {
 			return float64Expression{}, err
 		}
@@ -188,6 +232,42 @@ func projectFloat64Expression(expression *coreir.Expr, parameters []string, dept
 		}
 		result.Operator = string(operator)
 		result.Operands = []float64Expression{left, right}
+	case coreir.ExprCall:
+		active.Call = expression.Call
+		call := expression.Call
+		if !calls || call == nil || !validFloat64Identity(call.Target.PackageID) || !validFloat64Identity(call.Target.Path) || len(call.Arguments) > 64 {
+			return float64Expression{}, fmt.Errorf("profile refuses missing, invalid or unsupported typed call")
+		}
+		result.Callee = &float64Callee{PackageID: call.Target.PackageID, Path: call.Target.Path}
+		arguments := make([]float64Expression, 0, len(call.Arguments))
+		for _, argument := range call.Arguments {
+			projected, err := projectFloat64ExpressionWithProfile(argument, parameters, depth+1, nodes, conditionalValues, calls)
+			if err != nil {
+				return float64Expression{}, err
+			}
+			arguments = append(arguments, projected)
+		}
+		result.Arguments = &arguments
+	case coreir.ExprConditional:
+		active.Conditional = expression.Conditional
+		conditional := expression.Conditional
+		if !conditionalValues || conditional == nil || conditional.TerminalStatement {
+			return float64Expression{}, fmt.Errorf("profile refuses conditional statement or value")
+		}
+		for index, operand := range []*coreir.Expr{conditional.Condition, conditional.WhenTrue, conditional.WhenFalse} {
+			projected, err := projectFloat64ExpressionWithProfile(operand, parameters, depth+1, nodes, conditionalValues, calls)
+			if err != nil {
+				return float64Expression{}, err
+			}
+			expected := tag
+			if index == 0 {
+				expected = "bool"
+			}
+			if projected.Type != expected {
+				return float64Expression{}, fmt.Errorf("conditional condition or arm type mismatch")
+			}
+			result.Operands = append(result.Operands, projected)
+		}
 	default:
 		return float64Expression{}, fmt.Errorf("unsupported float64 comparison operation %q", expression.Kind)
 	}

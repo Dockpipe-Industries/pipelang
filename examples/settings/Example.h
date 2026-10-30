@@ -1,39 +1,39 @@
 #pragma once
-#include "DemoBindings.hpp"
-#include "SettingsStore.h"
+
+#include "ModelView.hpp"
 #include "SaveResult.h"
+#include "SettingsStore.h"
 #include <functional>
-#include <future>
-#include <thread>
-#include <forgepipe/ui/Session.h>
 #include <memory>
+#include <thread>
 
 namespace pipeview_settings {
-namespace model = pipelang::pipeview::state;
+namespace model = pipelang::model;
 
+// Owns the typed model, its generated view bridge and a storage service. Model
+// methods own application transitions; this shell supplies filesystem I/O only.
 class Application final {
 public:
-    using Persist = std::function<SaveResult(SettingsValue)>;
+    using Persist = std::function<SaveResult(SettingsValue, model::CancellationToken)>;
+    static std::unique_ptr<Application> create(const std::filesystem::path &path,
+        std::string &error, Persist persist = {});
     ~Application();
-    static std::unique_ptr<Application> create(const std::filesystem::path &path, std::string &error, Persist persist = {});
-    const std::shared_ptr<forgepipe::ui::Session> &session() const noexcept { return m_session; }
+    std::shared_ptr<forgepipe::ui::Session> session() const noexcept;
     bool isOwnerThread() const noexcept { return std::this_thread::get_id() == m_owner; }
-    model::Snapshot snapshot() const { return m_model->snapshot(); }
+    settings_models::SettingsSnapshot snapshot() const;
     bool dispatch(const std::vector<forgepipe::ui::Event> &events, std::string &error);
     bool pumpSave(std::string &error);
-    const std::string &storageError() const noexcept { return m_storageError; }
+    std::string storageError() const;
+    void cancelPending();
+    const settings_models::SettingsViewAdapter &view() const noexcept { return *m_view; }
 
 private:
-    Application(std::shared_ptr<forgepipe::ui::Session> session, std::unique_ptr<model::Model> state,
-        Persist persist);
-    bool project(std::string &error);
-    std::shared_ptr<forgepipe::ui::Session> m_session;
-    std::unique_ptr<model::Model> m_model;
-    Persist m_persist;
+    Application(std::shared_ptr<settings_models::SettingsStorage> storage, SettingsValue initial);
+    std::shared_ptr<settings_models::SettingsStorage> m_storage;
+    std::unique_ptr<settings_models::SettingsModel> m_model;
+    // The bridge is destroyed before the model; model teardown cancels and joins
+    // its owned work before the service is released.
+    std::unique_ptr<settings_models::SettingsViewAdapter> m_view;
     const std::thread::id m_owner = std::this_thread::get_id();
-    std::optional<model::SaveRequest> m_pending;
-    std::string m_storageError;
-    // Last member: destruction joins owned work before model/session teardown.
-    std::future<SaveResult> m_save;
 };
 }

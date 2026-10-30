@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.20)
+project(pipelang_native_models LANGUAGES CXX)
+
+set(PIPELANG_JSON_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/nlohmann/json.hpp")
+file(SHA256 "${PIPELANG_JSON_HEADER}" PIPELANG_JSON_SHA256)
+if(NOT PIPELANG_JSON_SHA256 STREQUAL "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63")
+    message(FATAL_ERROR "Pinned nlohmann/json.hpp checksum mismatch")
+endif()
+
+add_executable(pipelang-modelc main.cpp compiler.cpp parser.cpp checker.cpp generator.cpp ../lexer/lexer.cpp)
+target_compile_features(pipelang-modelc PRIVATE cxx_std_20)
+set_target_properties(pipelang-modelc PROPERTIES CXX_EXTENSIONS OFF)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(pipelang-modelc PRIVATE -Wall -Wextra -Wpedantic)
+endif()

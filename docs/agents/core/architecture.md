@@ -5,10 +5,16 @@ CLI and public materializer SDK. Dockpipe owns orchestration and execution.
 Dockpipe integrations import a published version of this module; no local
 checkout replace directives or duplicated compiler implementation belong there.
 
-The compiler API remains in `src/lib/pipelang`. Application IR lives in
+The existing reference compiler API remains in `src/lib/pipelang`. Application IR lives in
 `src/lib/applicationir`, standalone CLI dispatch in `src/lib/application.Run`,
 and shared materialization in `sdk/materialize`. Backend-specific entrypoints
 remain separately selected and must retain their explicit capability boundaries.
+New ordinary class/record/effect semantics are implemented C++ first in
+`src/native/model-compiler`; `src/native/model-view-compiler` resolves exported
+model members into an optional ForgePipe bridge. The owned-value/async runtime
+and exact installed SDK live in `sdk/pipeview/model`. These native protocols do
+not silently reinterpret old Go/Core/profile admissions or retire their reference.
+No application-specific Set/Save/Revert opcode list belongs in the model bridge.
 
 `dockpipe.config.json` workflow roots and `dockpipe.operation_event.v1` are
 interoperability data contracts. Their use does not authorize importing engine

@@ -1,5 +1,51 @@
 # Backlog and migration direction
 
+## Language direction
+
+Agreed direction, renewed 2026-10-30: PipeLang is a modern object-oriented
+language with familiar C#/Java-style readability and expressiveness, designed
+for humans and AI. Mature C# features such as foreach/iteration, generics,
+interfaces, pattern matching, lambdas, async/await and structured resource
+disposal are design references to evaluate with judgment. This is not a mandate
+to clone every feature, and this direction does not claim those features are
+implemented or authorize their implementation together.
+
+Real consumer needs should drive coherent, broadly useful language capabilities.
+When a missing feature would materially worsen application code, prefer defining
+and implementing that capability over special cases, duplicated logic, manual
+unrolling or awkward helper methods whose only purpose is fitting the current
+subset. Preserve cohesive application responsibilities. Bounded compiler slices
+are verification steps toward that language, not its destination or a reason to
+accept poor consumer architecture.
+
+AI-first means clear semantics, strong types, explicit effects and failures,
+useful diagnostics and inspectable behavior without sacrificing code that humans
+can read and maintain. As real consumers need async/parallel work, define task
+ownership, cancellation, failure propagation, cleanup, bounded concurrency and
+result ordering together. Scheduling syntax alone is not a complete capability.
+General language/foundation owners provide these semantics; UI and engine
+adapters consume them instead of inventing private substitutes.
+
+New compiler/runtime capabilities should be implemented in C++ first. Avoid new
+Go implementations whose only consequence is another port later. Existing Go
+remains the reference for already implemented behavior; changes to shared
+semantics and IR remain deliberate. Use independent correctness oracles and
+consumer evidence for genuinely new behavior rather than automatically building
+a duplicate Go implementation. Continue preserving frozen compatibility,
+resource bounds, explicit backend selection and fail-closed admission. Capability
+records must distinguish planned support from implemented and qualified support.
+
+The [2026-10-30 consumer architecture audit](../research/pipelang-consumer-architecture-audit-20261030.md)
+found existing action/model and schema-copying debt. Its typed action bridge,
+generated snapshots/event entrypoints, shared property/status/error projection
+and typed material helper calls now have focused native/installed-consumer proof;
+see [the native remediation record](../research/pipelang-native-models-20261030.md).
+Terminal root compatibility checks passed; the consumer audit is closed at the
+recorded focused Linux/headless/installed-SDK scope. This does not claim broad
+language, graphics, platform or full-suite acceptance.
+
+## Native migration and current evidence
+
 The ecosystem direction is a gradual C++ rewrite over time across Dockpipe,
 PipeLang and the package ecosystem. This is incremental work, not a claim that
 the current Go implementation has been replaced.
@@ -10,7 +56,7 @@ C++ emitter are already explicit native components; ordinary source parsing,
 semantic/type analysis, IR lowering and compiler/SDK orchestration still have Go
 owners. Port these responsibilities behind defined contracts and equivalent
 consumer coverage before retiring the reference path. Broader C++ language
-coverage remains a separate prerequisite; this is not a completed migration.
+coverage follows the coherent capability direction above and remains a prerequisite; this is not a completed migration.
 
 Before moving any boundary to C++, define its public contracts and fixtures,
 implement one coherent responsibility, prove source and generated artifact
@@ -42,11 +88,19 @@ follow-up work.
 
 An additional explicitly selected
 [binary64 comparison profile](../research/pipelang-cpp-float64-comparison-profile.md)
-now preserves IEEE host comparisons through both emitters. ForgePipe consumes it
-behind an experimental material-admission opt-in; default pilot output and engine
-behavior remain unchanged. Installed default/Go/native SDKs matched 5004 public
+preserves IEEE host comparisons through both emitters. It qualified the initial
+ForgePipe material-admission opt-in; default pilot output and engine behavior
+remain unchanged. Installed default/Go/native SDKs matched 5004 public
 material cases exactly. This does not add floating arithmetic or a general
 floating-point backend.
+
+The additive [binary64 conditional-value profile](../research/pipelang-cpp-float64-conditional-profile.md)
+adds typed conditional values and returns over existing source/Core semantics.
+ForgePipe's current material opt-in selects it for restitution minimum alongside
+four existing admission predicates. It preserves first-operand ties and signed
+zero; it adds no arithmetic or source-language feature. This checkpoint retains
+the established Go emitter as an exact-artifact reference, not as a requirement
+to duplicate future new language/runtime capabilities in Go.
 
 
 The tokenization slice is implemented in C++ behind explicit selection.
@@ -67,6 +121,13 @@ XML conversion remains on its existing explicit path; native parser selection
 refuses XML in this slice.
 
 
+The current Counter/settings consumers use the C++-first ordinary model SDK
+instead of the old closed Set/Save/Revert runtime. The former source-v2/Go state
+model remains explicit compatibility evidence. New models own their state,
+transactional methods and one authored async/await Save, while generated bridges
+own typed transport/projection. Structured host awaits are implemented; local async
+composition, Optional, loops and exception/finally syntax remain unsupported.
+
 ## PipeView: modular typed UI roadmap
 
 Status: design direction agreed on 2026-10-28. A bounded PV-01 foundation now
@@ -77,8 +138,9 @@ settings consumer; see [the syntax record](../research/pipeview-source-syntax.md
 The typed action/Save slice now adds an explicit v2 profile and a PipeLang-owned
 settings showcase; see [the Save record](../research/pipeview-settings-save.md).
 Full PV-01/PV-02 acceptance remains pending.
-PipeView is the PipeLang UI framework. Only the bounded source profile is
-implemented; the richer model/action/settings syntax remains illustrative.
+PipeView is the PipeLang UI framework. The legacy bounded source profiles and explicitly selected native ordinary-model
+bridge are implemented. Richer styles, general composition and remaining UI
+roadmap syntax continue to be planned; they are not implied by this checkpoint.
 Go remains the compiler reference while the bounded C++ port continues. This
 roadmap does not promote the existing ForgePipe JSON UI prototype to PipeView.
 
@@ -171,27 +233,18 @@ acceptance evidence and updated capability documentation before expansion.
 - [ ] **PV-02 — Typed settings-screen vertical slice.** The bounded source profile
   and player-name/VSync/Revert consumer are locally implemented and verified;
   [the profile](../concepts/pipeview-source.md) defines their explicit limits.
-  A bounded typed set/save/revert model now owns draft/saved snapshots and request
-  outcomes, with real explicit-path persistence, retry, process reload and Revert
-  in `examples/settings`. Go is the model reference; its C++ companion is compared
-  through shared traces. The showcase now performs persistence on an owned
-  background worker with creator-thread completion and teardown joining; see
-  [the worker record](../research/pipeview-owned-save-worker.md). This is not
-  general language action bodies, tasks or cancellation.
-  ForgePipe's installed settings example now consumes the same v2 typed model
-  for validated action dispatch and non-default saved-baseline Revert. The
-  installed counter/settings and canonical settings consumers pass headless
-  Go/native-parser/all-native matrices with identical generated headers. This
-  does not qualify interactive rendering, physical input or richer controls.
-  The [fixed percent stepper](../research/pipeview-percent-stepper.md) now adds
-  checked integer volume editing to the canonical showcase, with model-owned
-  invalid drafts, Save/Revert and immutable worker snapshots. New declarations,
-  Forge transport and inspection advertise v2 only when the component is used;
-  older adapters refuse it. Settings storage writes explicit v2 on Save and reads
-  legacy v1 with volume 100 without rewriting on load. Four installed-SDK modes
-  passed 16 CTests with identical generated headers, and the native entrypoint
-  compiled against the exact NativeHost SDK without startup. Volume is persisted
-  showcase state; audio gain, physical input and visible rendering are unqualified.
+  The original source-v2 Set/Save/Revert model and background worker remain
+  compatibility evidence; their earlier records describe that historical profile.
+  Current Counter and settings consumers use the C++-first ordinary model SDK:
+  source methods own edits, validation, saved/draft snapshots and status, while one
+  authored async/await Save handles typed host success, failure and cancellation.
+  Generated snapshots and event entrypoints replace application schema copies and
+  dispatch switches. Shared pure projections drive availability and inspection.
+  Exact installed native consumers and lifecycle/sanitizer checks pass at the
+  focused scope in the [remediation record](../research/pipelang-native-models-20261030.md).
+  The percent stepper remains a percent control. Storage retains legacy v1 reads,
+  v2 writes and atomic persistence. Interactive rendering, physical input, richer
+  controls and broad language coverage remain unqualified.
   Continue primary view syntax
   and typed state/actions, enum choices, checked volume, resolution, VSync,
   validation, dirty state, Save/Revert/Cancel, single-flight async save and typed

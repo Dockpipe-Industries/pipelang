@@ -18,7 +18,7 @@ import (
 
 func settingsProgram(t *testing.T) source.Program {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "examples", "settings", "SettingsView.pipe")
+	path := filepath.Join("..", "..", "..", "tests", "pipeview", "fixtures", "legacy-settings", "SettingsView.pipe")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

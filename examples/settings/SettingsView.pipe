@@ -1,24 +1,18 @@
-view SettingsView {
-    state playerName: string = "Rider";
-    state vsync: bool = true;
-    state volume: int = 100;
-
-    action nameEdited(string) => set playerName;
-    action vsyncEdited(bool) => set vsync;
-    action volumeEdited(int) => set volume;
-    action save() => save;
-    action revert() => revert;
-
+view SettingsView(model: SettingsModel) {
     Column(id: "root") {
         Label(id: "title", text: "Settings");
         Label(id: "name-label", text: "Player name");
-        TextField(id: "name-field", value: bind playerName, changed: nameEdited);
-        Toggle(id: "vsync-toggle", label: "VSync", value: bind vsync, changed: vsyncEdited);
-        PercentStepper(id: "volume-stepper", label: "Volume", value: bind volume, changed: volumeEdited);
-        Label(id: "save-status", value: bind save.status);
+        TextField(id: "name-field", value: bind model.draft.playerName,
+            changed: model.Rename, enabled: bind model.CanEdit(), sensitive: true);
+        Toggle(id: "vsync-toggle", label: "VSync", value: bind model.draft.vsync,
+            changed: model.ChangeVSync, enabled: bind model.CanEdit(), sensitive: true);
+        PercentStepper(id: "volume-stepper", label: "Volume", value: bind model.draft.volume,
+            changed: model.ChangeVolume, enabled: bind model.CanEdit(), sensitive: true);
+        Label(id: "save-status", value: bind model.StatusText());
+        Label(id: "save-error", value: bind model.error);
         Row(id: "actions") {
-            Button(id: "save-button", label: "Save", clicked: save);
-            Button(id: "revert-button", label: "Revert", clicked: revert);
+            Button(id: "save-button", label: "Save", enabled: bind model.CanSave(), clicked: model.Save);
+            Button(id: "revert-button", label: "Revert", enabled: bind model.CanEdit(), clicked: model.Revert);
         }
     }
 }

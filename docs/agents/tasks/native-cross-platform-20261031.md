@@ -41,8 +41,12 @@ through DockPipe Git runtime to PR #8. The current `dev` commit `01a7e60` was
 merged into the source branch through the same runtime. Conflicts retained the
 qualified native implementations and retired Go/Python files. The resulting
 source tree exactly matches `7520a0e` (tree `b4cee57b6074cfbc5859753b01f179a3a6cd6238`);
-only this evidence record changes afterward. All newer non-Go/Python `dev` files
-are already present in that qualified tree. No SDK release was published.
+only this evidence record and hosted-CI orchestration change afterward. All newer non-Go/Python `dev` files
+are already present in that qualified tree. No SDK release was published. Hosted jobs retain the integration ruleset
+contexts `test`, `test-windows`, `CodeQL (Actions)` and the historical
+`CodeQL (Go)` name. That last context now performs actual C++ CodeQL analysis
+(`c-cpp`, build mode `none`); it does not invoke Go or synthesize a passing status.
+Linux and Windows CI invoke the declared native build/check/test workflows.
 
 - The receiver was clean at f10fcda7cdc0fb01a1707905fa24ed1ebc0f6268 on
   codex/pipelang-editor-staging. The authored implementation remains in that checkout; no

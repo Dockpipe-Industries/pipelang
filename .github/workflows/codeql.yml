@@ -10,6 +10,7 @@ permissions:
   security-events: write
 jobs:
   actions:
+    name: CodeQL (Actions)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -19,3 +20,21 @@ jobs:
           build-mode: none
           config-file: ./.github/codeql/codeql-config.yml
       - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+  cpp:
+    # Keep the existing required context while analyzing its C++ replacement.
+    # The integration ruleset still requires this historical name; no Go is run.
+    name: CodeQL (Go)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Initialize C++ analysis
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          languages: c-cpp
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+      - name: Analyze C++ sources
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4

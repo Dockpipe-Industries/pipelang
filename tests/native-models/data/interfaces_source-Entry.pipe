@@ -1,0 +1,11 @@
+module Entry;
+import BaseTypes;
+import Types;
+public Class App {
+    public int Read() {
+        Value value = new Value(31);
+        Derived derived = value;
+        Base basic = derived;
+        return basic.Read();
+    }
+}

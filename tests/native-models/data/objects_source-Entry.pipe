@@ -1,0 +1,11 @@
+module Entry;
+import Values;
+public Class App {
+    private pure T Identity<T>(T value) { return value; }
+    public int Read() {
+        Box<int> boxed = new Box<int> { Value = 31 };
+        IValue view = new Value(boxed.Value);
+        IValue copied = Identity<IValue>(view);
+        return copied.Read();
+    }
+}

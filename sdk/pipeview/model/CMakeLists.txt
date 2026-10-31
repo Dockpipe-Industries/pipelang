@@ -1,0 +1,74 @@
+cmake_minimum_required(VERSION 3.21.1)
+project(PipeLangModel VERSION 0.1.0 LANGUAGES CXX)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+find_package(Threads REQUIRED)
+get_filename_component(PIPELANG_MODEL_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/model-compiler"
+    "${CMAKE_CURRENT_BINARY_DIR}/model-compiler")
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/model-view-compiler"
+    "${CMAKE_CURRENT_BINARY_DIR}/model-view-compiler")
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/sdk-tools"
+    "${CMAKE_CURRENT_BINARY_DIR}/sdk-tools")
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/containedexec"
+    "${CMAKE_CURRENT_BINARY_DIR}/containedexec")
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/legacy-compiler"
+    "${CMAKE_CURRENT_BINARY_DIR}/legacy-compiler")
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/lexer"
+    "${CMAKE_CURRENT_BINARY_DIR}/lexer")
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/view-parser"
+    "${CMAKE_CURRENT_BINARY_DIR}/view-parser")
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/cpp-emitter"
+    "${CMAKE_CURRENT_BINARY_DIR}/cpp-emitter")
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/src/native/scalar-compiler"
+    "${CMAKE_CURRENT_BINARY_DIR}/scalar-compiler")
+
+add_library(pipelang_model_runtime INTERFACE)
+add_library(PipeLang::ModelRuntime ALIAS pipelang_model_runtime)
+set_target_properties(pipelang_model_runtime PROPERTIES EXPORT_NAME ModelRuntime)
+target_compile_features(pipelang_model_runtime INTERFACE cxx_std_20)
+target_link_libraries(pipelang_model_runtime INTERFACE Threads::Threads)
+target_include_directories(pipelang_model_runtime INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/native/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+
+install(TARGETS pipelang_model_runtime EXPORT PipeLangModelTargets)
+install(TARGETS pipelang-modelc pipelang-model-viewc pipelang-sdk-tool pipelang-contained pipelang-native pipelang
+    pipelang-cpp-lexer pipelang-cpp-view-parser pipelang-cpp-emitter
+    pipelang-native-cpp
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(DIRECTORY native/include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES "${PIPELANG_MODEL_SOURCE_ROOT}/LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model/licenses" RENAME LICENSE)
+if(EXISTS "${PIPELANG_MODEL_SOURCE_ROOT}/NOTICE")
+    install(FILES "${PIPELANG_MODEL_SOURCE_ROOT}/NOTICE"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model/licenses")
+endif()
+install(FILES "${PIPELANG_MODEL_SOURCE_ROOT}/src/native/third_party/nlohmann/LICENSE.MIT"
+    "${PIPELANG_MODEL_SOURCE_ROOT}/src/native/third_party/nlohmann/PROVENANCE.json"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model/licenses/nlohmann-json")
+install(FILES "${PIPELANG_MODEL_SOURCE_ROOT}/src/native/third_party/yaml-cpp/LICENSE"
+    "${PIPELANG_MODEL_SOURCE_ROOT}/src/native/third_party/yaml-cpp/PROVENANCE.json"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model/licenses/yaml-cpp")
+install(FILES "${PIPELANG_MODEL_SOURCE_ROOT}/src/native/third_party/yaml-cpp/src/contrib/dragonbox.h"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model/licenses/yaml-cpp")
+
+set(model_cmake_directory "${CMAKE_INSTALL_LIBDIR}/cmake/PipeLangModel")
+configure_package_config_file(cmake/PipeLangModelConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfig.cmake"
+    INSTALL_DESTINATION "${model_cmake_directory}")
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}" COMPATIBILITY ExactVersion)
+install(EXPORT PipeLangModelTargets NAMESPACE PipeLang:: DESTINATION "${model_cmake_directory}")
+configure_file(cmake/PipeLangModelBindings.cmake
+    "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelBindings.cmake" @ONLY)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfigVersion.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelBindings.cmake" DESTINATION "${model_cmake_directory}")
+
+# Run last so the receipt covers the actual installed binaries and configuration.
+configure_file(cmake/InstallModelManifest.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/InstallModelManifest.cmake" @ONLY)
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/InstallModelManifest.cmake")

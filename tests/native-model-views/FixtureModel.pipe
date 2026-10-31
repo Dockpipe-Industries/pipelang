@@ -1,0 +1,42 @@
+public Record Values {
+    public string Name = "Before";
+    public bool Enabled = false;
+    public int Volume = 50;
+}
+
+public Class FixtureModel {
+    public Values Draft;
+    public bool Saving = false;
+    public string Error = "";
+
+    public FixtureModel(Values initial) {
+        Draft = initial;
+    }
+
+    public pure bool CanSave() => !Saving && Draft.Name != "";
+
+    public void SetName(string value) {
+        Draft.Name = value;
+    }
+
+    public void SetEnabled(bool value) {
+        Draft.Enabled = value;
+    }
+
+    public void SetVolume(int value) {
+        Draft.Volume = value;
+    }
+
+    public Result<void,string> Fail() {
+        Error = "Expected failure";
+        return Result<void,string>.Failure(Error);
+    }
+
+    public Result<void,string> Cancel() {
+        return Result<void,string>.Cancelled("Expected cancellation");
+    }
+
+    public async Task<Result<void,string>> Save(CancellationToken cancellation) {
+        return Result<void,string>.Success();
+    }
+}

@@ -1,0 +1,294 @@
+public Interface CleanupHost {
+    Task<Result<int,string>> Work(int value, CancellationToken token);
+}
+
+public Class FailureCleanup {
+    private CleanupHost host;
+    public int count = 0;
+    public string detail = "";
+
+    public FailureCleanup(CleanupHost service) {
+        host = service;
+    }
+
+    public void Edit(int value) {
+        count = value;
+    }
+
+    private void Add(int value) {
+        count = count + value;
+    }
+
+    private void CleanupFault() {
+        count = count + 100;
+        throw Error("cleanup fault");
+    }
+
+    public string OwnedError(string message) {
+        Error error = Error(message);
+        message = "changed local";
+        return error.Message;
+    }
+
+    public string ReturnOwnedLocal() {
+        string value = "owned before finally";
+        try {
+            return value;
+        } finally {
+            detail = value;
+            value = "cleanup edit";
+        }
+    }
+
+    public pure string PureOwnedReturn() {
+        string value = "pure original";
+        try {
+            return value;
+        } finally {
+            value = "pure cleanup";
+        }
+    }
+
+    public int CatchPartial() {
+        try {
+            count = 3;
+            int invalid = Optional<int>.None().Value;
+            count = invalid;
+        } catch (Error error) {
+            detail = error.Message;
+            count = count + 4;
+        } finally {
+            Add(10);
+        }
+        return count;
+    }
+
+    public string CatchArithmetic() {
+        try {
+            int invalid = 1 / 0;
+            count = invalid;
+            return "unexpected success";
+        } catch (Error error) {
+            return error.Message;
+        }
+    }
+
+    public void Uncaught() {
+        try {
+            count = 300;
+            throw Error("primary fault");
+        } finally {
+            Add(10);
+        }
+    }
+
+    public int ReturnBeforeCleanup() {
+        try {
+            count = 5;
+            return count;
+        } finally {
+            Add(10);
+        }
+    }
+
+    public int Nested(bool first) {
+        count = 0;
+        try {
+            try {
+                if (first)
+                    return 1;
+                return 2;
+            } finally {
+                count = count * 10 + 1;
+            }
+        } finally {
+            count = count * 10 + 2;
+        }
+    }
+
+    public int LoopExits() {
+        count = 0;
+        int index = 0;
+        while (index < 4) {
+            index = index + 1;
+            try {
+                if (index == 2)
+                    continue;
+                if (index == 4)
+                    break;
+                count = count + 10;
+            } finally {
+                Add(1);
+            }
+        }
+        return count;
+    }
+
+    public string PrimaryWins() {
+        try {
+            try {
+                throw Error("original");
+            } finally {
+                CleanupFault();
+            }
+        } catch (Error error) {
+            return error.Message;
+        }
+    }
+
+    public string Rethrow() {
+        try {
+            try {
+                throw Error("rethrow original");
+            } catch (Error first) {
+                detail = first.Message;
+                throw;
+            } finally {
+                Add(1);
+            }
+        } catch (Error outer) {
+            return outer.Message;
+        }
+    }
+
+    public int CleanupReplacesReturn() {
+        try {
+            return 9;
+        } finally {
+            CleanupFault();
+        }
+    }
+
+    public Result<int,string> TypedOutcome(bool cancelled) {
+        try {
+            count = 7;
+            return cancelled ? Result<int,string>.Cancelled("typed cancel") : Result<int,string>.Failure("typed failure");
+        } catch (Error error) {
+            detail = error.Message;
+            count = 999;
+            return Result<int,string>.Success(0);
+        } finally {
+            Add(1);
+        }
+    }
+
+    public void NormalBudgetIsNotCaught() {
+        try {
+            while (true) {
+                count = count + 1;
+            }
+        } catch (Error error) {
+            detail = error.Message;
+            throw Error("incorrectly caught limit");
+        } finally {
+            // This must use the reserve even after normal evaluation exhausted.
+            count = 77;
+            throw Error("secondary cleanup fault");
+        }
+    }
+
+    private void SpendCleanup() {
+        int index = 0;
+        while (index < 5000) {
+            index = index + 1;
+        }
+        count = count + 1;
+    }
+
+    public void SharedCleanupReserve() {
+        try {
+            try {
+                count = 0;
+            } finally {
+                SpendCleanup();
+            }
+        } finally {
+            SpendCleanup();
+        }
+    }
+
+    public int LocalCleanupLoop() {
+        try {
+            count = 0;
+        } finally {
+            int index = 0;
+            while (index < 4) {
+                index = index + 1;
+                if (index == 2)
+                    continue;
+                if (index == 4)
+                    break;
+                Add(index);
+            }
+        }
+        return count;
+    }
+
+    private async Task<Result<int,string>> ChildFailure() {
+        try {
+            return Result<int,string>.Failure("typed child failure");
+        } finally {
+            Add(1);
+        }
+    }
+
+    public async Task<Result<int,string>> ChildOutcome() {
+        count = 0;
+        try {
+            Result<int,string> result = await ChildFailure();
+            return result;
+        } catch (Error error) {
+            detail = error.Message;
+            count = 999;
+            return Result<int,string>.Success(0);
+        } finally {
+            Add(10);
+        }
+    }
+
+    public async Task<Result<int,string>> TryAwait(CancellationToken token, bool cleanupFails) {
+        count = 10;
+        try {
+            Add(1);
+            Result<int,string> result = await host.Work(7, token);
+            Add(1);
+            return result;
+        } finally {
+            Add(100);
+            if (cleanupFails)
+                throw Error("async cleanup fault");
+        }
+    }
+
+    public async Task<Result<int,string>> CatchAwait(CancellationToken token) {
+        try {
+            throw Error("owned across catch suspension");
+        } catch (Error error) {
+            Result<int,string> result = await host.Work(8, token);
+            detail = error.Message;
+            return result;
+        } finally {
+            Add(100);
+        }
+    }
+
+    public async Task<Result<int,string>> RecoverReturnCleanup(CancellationToken token) {
+        count = 1;
+        try {
+            try {
+                return Result<int,string>.Success(99);
+            } finally {
+                Add(10);
+                throw Error("return cleanup recovery");
+            }
+        } catch (Error error) {
+            Result<int,string> recovery = await host.Work(9, token);
+            detail = error.Message;
+            Add(1);
+            return recovery;
+        } finally {
+            Add(100);
+        }
+    }
+
+}

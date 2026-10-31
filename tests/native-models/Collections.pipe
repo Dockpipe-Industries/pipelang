@@ -1,0 +1,215 @@
+public Record CollectionValue {
+    public int number;
+    public string text;
+}
+
+public Record CollectionBundle {
+    public Array<CollectionValue> values;
+    public Dictionary<string,CollectionValue> mapping;
+    public KeyValuePair<string,CollectionValue> pair;
+}
+
+public Enum CollectionKey { First, Second }
+
+public Class CollectionModel {
+    public Array<int> array = Array<int>.Create(0, 0);
+    public Dictionary<string,int> map = Dictionary<string,int>.Empty();
+    public Queue<int> queue = Queue<int>.Empty();
+    public Stack<int> stack = Stack<int>.Empty();
+    public int marker = 0;
+    public Optional<Array<int>> wrapped;
+
+    public void Seed() {
+        array = Array<int>.Create(2, 3);
+        map.Add("first", 1);
+        map.Add("second", 2);
+        queue.Enqueue(4);
+        queue.Enqueue(5);
+        stack.Push(6);
+        stack.Push(7);
+    }
+
+    public pure bool ArrayCopies() {
+        Array<CollectionValue> original = Array<CollectionValue>.Create(2, CollectionValue(1, "original"));
+        Array<CollectionValue> copy = original;
+        copy.Set(0, CollectionValue(9, "copy"));
+        int total = 0;
+        foreach (CollectionValue item in original) {
+            total = total + item.number;
+        }
+        return original.Length == 2 && copy.Count == 2
+            && original.At(0) == CollectionValue(1, "original")
+            && copy.At(0) == CollectionValue(9, "copy") && total == 2;
+    }
+
+    public pure List<KeyValuePair<string,int>> MappingOrder() {
+        Dictionary<string,int> values = Dictionary<string,int>.Empty();
+        values.Add("one", 1);
+        values.Add("two", 2);
+        values.Set("one", 10);
+        values.Set("three", 3);
+        bool removed = values.Remove("two");
+        values.Add("two", 20);
+        if (!removed)
+            throw Error("expected existing key");
+        return values.Entries;
+    }
+
+    public pure string MappingIteration() {
+        Dictionary<string,int> values = Dictionary<string,int>.Empty();
+        values.Add("first", 1);
+        values.Add("second", 2);
+        string joined = "";
+        foreach (KeyValuePair<string,int> item in values) {
+            joined = joined + item.Key;
+        }
+        List<string> keys = values.Keys;
+        List<int> numbers = values.Values;
+        return joined + keys.At(0) + (numbers.At(1) == 2 ? "typed" : "wrong");
+    }
+
+    public pure bool DictionaryOptions() {
+        Dictionary<string,int> values = Dictionary<string,int>.Empty();
+        values.Set("present", 4);
+        Optional<int> found = values.TryGet("present");
+        Optional<int> missing = values.TryGet("missing");
+        bool present = values.ContainsKey("present");
+        bool removed = values.Remove("missing");
+        values.Clear();
+        return found.HasValue && found.Value == 4 && !missing.HasValue
+            && present && !removed && values.Count == 0;
+    }
+
+    public pure List<string> SetOrder() {
+        HashSet<string> values = HashSet<string>.Empty();
+        bool first = values.Add("first");
+        bool second = values.Add("second");
+        bool duplicate = values.Add("first");
+        bool removed = values.Remove("first");
+        bool replaced = values.Add("first");
+        if (!first || !second || duplicate || !removed || !replaced || !values.Contains("first"))
+            throw Error("set outcome mismatch");
+        return values.ToList();
+    }
+
+    public pure bool PrimitiveKeys() {
+        Dictionary<bool,int> booleans = Dictionary<bool,int>.Empty();
+        booleans.Add(true, 1);
+        HashSet<int> integers = HashSet<int>.Empty();
+        bool added = integers.Add(7);
+        Dictionary<CollectionKey,int> enums = Dictionary<CollectionKey,int>.Empty();
+        enums.Add(CollectionKey.Second, 9);
+        return booleans.At(true) == 1 && integers.Contains(7) && added
+            && enums.At(CollectionKey.Second) == 9;
+    }
+
+    public pure int SequenceOrder() {
+        Queue<int> fifo = Queue<int>.Empty();
+        fifo.Enqueue(1);
+        fifo.Enqueue(2);
+        Stack<int> lifo = Stack<int>.Empty();
+        lifo.Push(3);
+        lifo.Push(4);
+        int encoded = 0;
+        foreach (int item in fifo) {
+            encoded = encoded * 10 + item;
+        }
+        foreach (int item in lifo) {
+            encoded = encoded * 10 + item;
+        }
+        return encoded;
+    }
+
+    public pure bool SequenceOperations() {
+        Queue<int> fifo = Queue<int>.Empty();
+        Stack<int> lifo = Stack<int>.Empty();
+        Optional<int> emptyQueue = fifo.TryDequeue();
+        Optional<int> emptyStack = lifo.TryPop();
+        fifo.Enqueue(1);
+        fifo.Enqueue(2);
+        lifo.Push(3);
+        lifo.Push(4);
+        int queuePeek = fifo.Peek();
+        int stackPeek = lifo.Peek();
+        int dequeued = fifo.Dequeue();
+        int popped = lifo.Pop();
+        Optional<int> lastQueue = fifo.TryDequeue();
+        Optional<int> lastStack = lifo.TryPop();
+        fifo.Clear();
+        lifo.Clear();
+        return !emptyQueue.HasValue && !emptyStack.HasValue && queuePeek == 1
+            && stackPeek == 4 && dequeued == 1 && popped == 4
+            && lastQueue.Value == 2 && lastStack.Value == 3
+            && fifo.Count == 0 && lifo.Count == 0;
+    }
+
+    public pure CollectionBundle OwnedBundle() {
+        Array<CollectionValue> values = Array<CollectionValue>.Create(1, CollectionValue(5, "array"));
+        Dictionary<string,CollectionValue> mapping = Dictionary<string,CollectionValue>.Empty();
+        mapping.Add("key", CollectionValue(6, "map"));
+        KeyValuePair<string,CollectionValue> pair = KeyValuePair<string,CollectionValue>.Create("pair", CollectionValue(7, "pair"));
+        CollectionBundle bundle = CollectionBundle(values, mapping, pair);
+        values.Set(0, CollectionValue(99, "changed"));
+        mapping.Set("key", CollectionValue(99, "changed"));
+        return bundle;
+    }
+
+    public int MissingRollback() {
+        marker = 99;
+        array.Set(0, 8);
+        map.Set("first", 9);
+        return map.At("missing");
+    }
+
+    public void IndexRollback() {
+        marker = 99;
+        array.Set(0, 8);
+        array.Set(-1, 2);
+    }
+
+    public void DuplicateRollback() {
+        marker = 99;
+        map.Add("first", 90);
+    }
+
+    public void EmptyRollback() {
+        marker = 99;
+        queue.Clear();
+        int value = queue.Dequeue();
+        marker = value;
+    }
+
+    public int EditFields() {
+        array.Set(1, 11);
+        map.Set("third", 3);
+        int first = queue.Dequeue();
+        int top = stack.Pop();
+        return array.At(1) + first + top;
+    }
+
+    public pure int TemporaryOptionalRead()
+        => Optional<Array<int>>.Some(Array<int>.Create(1, 7)).Value.At(0);
+
+    private pure Queue<int> BuildQueue() {
+        Queue<int> values = Queue<int>.Empty();
+        values.Enqueue(13);
+        values.Enqueue(14);
+        return values;
+    }
+
+    public pure int TemporaryResultRead()
+        => Result<Queue<int>,string>.Success(BuildQueue()).Value.Peek();
+
+    private int ChangesWrapperAndReturnsIndex() {
+        wrapped = Optional<Array<int>>.None();
+        return 0;
+    }
+
+    public int ReceiverBeforeArguments() {
+        wrapped = Optional<Array<int>>.Some(Array<int>.Create(1, 17));
+        return wrapped.Value.At(ChangesWrapperAndReturnsIndex());
+    }
+
+    public pure bool WrappedIsEmpty() => !wrapped.HasValue;
+
+}

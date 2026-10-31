@@ -1,8 +1,8 @@
 name: release.build
-description: Build standalone PipeLang CLI archives for GitHub Releases.
+description: Package and relocate the installed native PipeLang SDK; no publication.
 docker_preflight: false
 steps:
-  - id: portable-cli-archives
+  - id: native-sdk-package
     kind: host
     cwd: repo
     run: assets/scripts/build.sh

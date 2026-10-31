@@ -1,0 +1,27 @@
+public Class Calls {
+    public float Choose(bool choose, float first, float second)
+        => choose ? first : second;
+
+    public float Identity(float value) => value;
+    public float Constant() => 0.5;
+    public float Zero() => Constant();
+    public bool Less(float first, float second) => first < second;
+
+    public float Minimum(float first, float second)
+        => Less(second, first) ? Identity(second) : Identity(first);
+
+    public float Compose(bool choose, float first, float second)
+        => Choose(choose, Identity(first), Identity(second));
+
+    public float Order() => Choose(true, Identity(0.25), Identity(0.75));
+    public float Lazy(bool choose)
+        => choose ? Identity(0.25) : Identity(0.75);
+
+    public bool Range(float value, float minimum, float maximum)
+        => value >= minimum && value <= maximum;
+
+    public bool Coefficients(float first, float second)
+        => Range(first, 0.0, 10.0)
+            && Range(second, 0.0, 10.0)
+            && Less(second, first);
+}

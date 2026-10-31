@@ -1,0 +1,22 @@
+
+public Record Box<T> { public T Value; }
+public Record Envelope<T> { public Optional<T> Value = Optional<T>.None(); }
+public Class Composition {
+    public int Seed;
+    public Composition() { Seed = 0; }
+    public Composition(int initial) { Seed = initial; }
+    public pure T Identity<T>(T value) => value;
+    public pure int Add(int value) => value + 2;
+    public pure float Add(float value) => value + 0.5;
+    public pure int Evaluate() {
+        Box<int> box = new Box<int> { Value = 12 };
+        return Identity<int>(Identity<int>(box.Value)) + Add(3);
+    }
+    public pure float Floating() => Identity<float>(Add(1.0));
+    public pure bool IndependentDefaults() {
+        Envelope<int> first = new Envelope<int> { };
+        Envelope<float> second = new Envelope<float> { };
+        return !first.Value.HasValue && !second.Value.HasValue;
+    }
+}
+

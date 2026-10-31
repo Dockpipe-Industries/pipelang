@@ -1,0 +1,30 @@
+module App; import Values;
+public Class Entry {
+    public pure int Evaluate() {
+        Box<int> value = new Box<int> { Value = 31 };
+        return value.Value;
+    }
+    public pure bool EnumValue() => Values.Shade.Blue == Shade.Blue;
+    public pure bool ForeachScope() {
+        List<int> items = List<int>.Empty();
+        foreach (int Shade in items) {
+            if (Shade < 0)
+                return false;
+        }
+        return Shade.Blue == Shade.Blue;
+    }
+    public pure bool CatchScope() {
+        try {
+            if (Shade.Blue != Shade.Blue)
+                return false;
+        } catch (Error Shade) {
+            if (Shade.Message == "impossible")
+                return false;
+        } finally {
+            if (Shade.Blue != Shade.Blue)
+                throw Error("wrong scope");
+        }
+        return Shade.Blue == Shade.Blue;
+    }
+}
+

@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.20)
+project(pipelang_native_models LANGUAGES CXX)
+
+set(PIPELANG_JSON_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/nlohmann/json.hpp")
+file(SHA256 "${PIPELANG_JSON_HEADER}" PIPELANG_JSON_SHA256)
+if(NOT PIPELANG_JSON_SHA256 STREQUAL "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63")
+    message(FATAL_ERROR "Pinned nlohmann/json.hpp checksum mismatch")
+endif()
+
+add_library(pipelang_model_compiler STATIC compiler.cpp composition.cpp parser.cpp checker.cpp generator.cpp ../lexer/lexer.cpp)
+target_compile_features(pipelang_model_compiler PUBLIC cxx_std_20)
+add_executable(pipelang-modelc main.cpp)
+target_link_libraries(pipelang-modelc PRIVATE pipelang_model_compiler)
+set_target_properties(pipelang-modelc pipelang_model_compiler PROPERTIES CXX_EXTENSIONS OFF)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(pipelang-modelc PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pipelang_model_compiler PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+option(PIPELANG_BUILD_CLASS_INHERITANCE_TESTS "Build the native class-inheritance compiler oracle" OFF)
+if(PIPELANG_BUILD_CLASS_INHERITANCE_TESTS)
+    add_executable(pipelang-class-inheritance-compiler-tests
+        ../../../tests/native-models/class_inheritance_compiler.cpp)
+    target_link_libraries(pipelang-class-inheritance-compiler-tests PRIVATE pipelang_model_compiler)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(pipelang-class-inheritance-compiler-tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+endif()

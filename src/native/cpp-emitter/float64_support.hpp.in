@@ -1,0 +1,5 @@
+#pragma once
+
+namespace pipelang::native {
+inline constexpr char float64RuntimeSupport[] = R"PL_FLOAT64(@PIPELANG_FLOAT64_SUPPORT@)PL_FLOAT64";
+}

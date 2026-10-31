@@ -1,0 +1,21 @@
+set(model_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+execute_process(COMMAND "${model_prefix}/@CMAKE_INSTALL_BINDIR@/pipelang-sdk-tool@CMAKE_EXECUTABLE_SUFFIX@" manifest
+    --prefix "${model_prefix}"
+    --manifest "${model_prefix}/@CMAKE_INSTALL_DATADIR@/pipelang-model/sdk-manifest.json"
+    --roots "@CMAKE_INSTALL_BINDIR@/pipelang-modelc@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-model-viewc@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-sdk-tool@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-contained@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-native@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-cpp-lexer@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-cpp-view-parser@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-cpp-emitter@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_BINDIR@/pipelang-native-cpp@CMAKE_EXECUTABLE_SUFFIX@"
+        "@CMAKE_INSTALL_INCLUDEDIR@/pipelang/model"
+        "@CMAKE_INSTALL_LIBDIR@/cmake/PipeLangModel"
+        "@CMAKE_INSTALL_DATADIR@/pipelang-model"
+    RESULT_VARIABLE model_manifest_status)
+if(NOT model_manifest_status EQUAL 0)
+    message(FATAL_ERROR "Failed to record installed PipeLangModel SDK identities")
+endif()

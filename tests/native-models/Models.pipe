@@ -1,0 +1,126 @@
+public Record Payload {
+    public int value = 0;
+    public string text = "initial";
+}
+
+public Record Snapshot {
+    public Payload draft;
+    public Payload accepted;
+    public bool equal;
+}
+
+public Interface Processor {
+    Task<Result<Payload,string>> Apply(Payload value, CancellationToken cancellation);
+}
+
+public Class Model {
+    private Processor Service;
+    private int secret = 19;
+    public Payload draft;
+    public Payload accepted;
+    public Result<Payload,string> last;
+    public int count = 0;
+    public int completions = 0;
+    public string error = "";
+
+    public Model(Processor service, Payload initial) {
+        Service = service;
+        draft = initial;
+        accepted = initial;
+    }
+
+    public pure int Secret() => secret;
+    public pure bool Same() => draft == accepted;
+    public pure Snapshot Inspect() => new Snapshot {
+        draft = draft,
+        accepted = accepted,
+        equal = Same()
+    };
+    public pure Payload Construct(int number, string text) => Payload(number, text);
+    public pure Payload Defaults() => new Payload { value = 5 };
+    public pure int Minimum() => -9223372036854775808;
+    public pure bool ShortCircuit() => false && 1 / 0 == 0;
+
+    public pure int SelectInteger(bool first, int left, int right) => first ? left : right;
+    public pure bool SelectBoolean(bool first, bool left, bool right) => first ? left : right;
+    public pure string ValidationText(bool valid) => valid ? "" : "Player name is required";
+    public pure Payload SelectPayload(bool first, Payload left, Payload right) => first ? left : right;
+    public pure Result<Payload,string> SelectResult(bool valid, Payload value)
+        => valid ? Result<Payload,string>.Success(value) : Result<Payload,string>.Failure("declined");
+    public pure int SafeConditional(bool safe) => safe ? 17 : 9223372036854775807 + 1;
+    public pure int SafeAlternative(bool unsafe) => unsafe ? -9223372036854775808 - 1 : 33;
+    public pure int ConditionalPrecedence(bool first, bool second) => first || second ? 1 : 2;
+    public pure int ConditionalAssociation(bool first, bool second) => first ? 1 : second ? 2 : 3;
+
+    private bool Probe(bool value) {
+        count = count + 1;
+        return value;
+    }
+    public int ConditionalEffects(bool value) => Probe(value) ? Advance() : 0;
+    public int CheckedConditional(bool safe) {
+        count = 7;
+        return safe ? 5 : 9223372036854775807 + 1;
+    }
+
+    public void Edit(int number, string text) {
+        draft.value = number;
+        draft.text = text;
+    }
+
+    private void AddOne() {
+        secret = secret + 1;
+        draft.value = draft.value + 1;
+    }
+
+    private void Edited() {
+        count = count + 1;
+        error = "edited";
+    }
+
+    public void ComposedEdit(int number) {
+        draft.value = number;
+        Edited();
+    }
+
+    public void Overflow() {
+        count = 7;
+        AddOne();
+    }
+
+    public int Advance() {
+        count = count + 1;
+        return count;
+    }
+
+    public Result<Payload,string> Echo() {
+        return Result<Payload,string>.Success(draft);
+    }
+
+    public Result<void,string> ExpectedFailure() {
+        error = "expected detail";
+        return Result<void,string>.Failure(error);
+    }
+
+    public async Task<Result<Payload,string>> Process(CancellationToken cancellation) {
+        Payload captured = draft;
+        Result<Payload,string> outcome = await Service.Apply(captured, cancellation);
+        completions = completions + 1;
+        last = outcome;
+        if (outcome.IsSuccess) {
+            accepted = outcome.Value;
+            error = "";
+        } else {
+            error = outcome.Error;
+        }
+        return outcome;
+    }
+
+    public async Task<Result<Payload,string>> ProcessTwice(CancellationToken cancellation) {
+        Payload captured = draft;
+        Result<Payload,string> first = await Service.Apply(captured, cancellation);
+        if (!first.IsSuccess)
+            return first;
+        Result<Payload,string> second = await Service.Apply(first.Value, cancellation);
+        return second;
+    }
+}

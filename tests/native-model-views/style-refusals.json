@@ -1,0 +1,106 @@
+[
+  {
+    "source": "style Bad { paddding: 1px; }",
+    "message": "unknown"
+  },
+  {
+    "source": "style Bad { scale: 2px; }",
+    "message": "unsupported"
+  },
+  {
+    "source": "style Bad { padding: 1; }",
+    "message": "identifier"
+  },
+  {
+    "source": "style Bad { gap: 1em; }",
+    "message": "px"
+  },
+  {
+    "source": "style Bad { gap: -1px; }",
+    "message": "literal"
+  },
+  {
+    "source": "style Bad { gap: 65px; }",
+    "message": "range"
+  },
+  {
+    "source": "style Bad { fontPixelHeight: 6px; }",
+    "message": "range"
+  },
+  {
+    "source": "style Bad { text: \"#ffffff\"; }",
+    "message": "#RRGGBBAA"
+  },
+  {
+    "source": "style Bad { text: \"#GGFFFFFF\"; }",
+    "message": "#RRGGBBAA"
+  },
+  {
+    "source": "style Bad { text: 2px; }",
+    "message": "type"
+  },
+  {
+    "source": "style Bad { padding: \"#000000ff\"; }",
+    "message": "type"
+  },
+  {
+    "source": "style Bad { token value: bool = 1px; }",
+    "message": "type"
+  },
+  {
+    "source": "style Bad { token a: length = missing; }",
+    "message": "unknown"
+  },
+  {
+    "source": "style Bad { token a: length = b; token b: length = a; }",
+    "message": "cycle"
+  },
+  {
+    "source": "style Bad extends Missing {}",
+    "message": "unknown"
+  },
+  {
+    "source": "style A extends B {} style B extends A {}",
+    "message": "cycle"
+  },
+  {
+    "source": "style Bad {} style Bad {}",
+    "message": "duplicate"
+  },
+  {
+    "source": "style Bad { gap: 1px; gap: 2px; }",
+    "message": "duplicate"
+  },
+  {
+    "source": "style Bad { token a: length = 1px; token a: length = 2px; }",
+    "message": "duplicate"
+  },
+  {
+    "source": "style A { gap: 1px; } style B extends A { gap: 2px; }",
+    "message": "override"
+  },
+  {
+    "source": "style A { token a: length = 1px; } style B extends A { token a: length = 2px; }",
+    "message": "override"
+  },
+  {
+    "source": "style Bad { override gap: 1px; }",
+    "message": "inherited"
+  },
+  {
+    "source": "style A { token a: length = 1px; } style B extends A { override token a: color = \"#000000ff\"; }",
+    "message": "type"
+  },
+  {
+    "source": "style Bad { Button { text: \"#000000ff\"; } }",
+    "message": "unsupported"
+  },
+  {
+    "source": "style Bad { hover: \"#000000ff\"; }",
+    "message": "unsupported"
+  },
+  {
+    "source": "style Bad { token unused: color = 1px; }",
+    "message": "type"
+  }
+]

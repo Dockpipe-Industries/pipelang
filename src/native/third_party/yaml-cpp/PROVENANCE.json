@@ -1,0 +1,11 @@
+{
+  "name": "yaml-cpp",
+  "version": "0.9.0",
+  "repository": "https://github.com/jbeder/yaml-cpp",
+  "commit": "56e3bb550c91fd7005566f19c079cb7a503223cf",
+  "release": "https://github.com/jbeder/yaml-cpp/releases/tag/yaml-cpp-0.9.0",
+  "source_archive": "https://codeload.github.com/jbeder/yaml-cpp/tar.gz/56e3bb550c91fd7005566f19c079cb7a503223cf",
+  "source_archive_sha256": "b8e01ea231a96d6984b0795f225281d1e9989f40ccd589568a051450f41e9151",
+  "license": "MIT; preserve the embedded component notices in src/contrib",
+  "selection": "Unmodified upstream include/, src/ and LICENSE; PipeLang owns CMakeLists.txt, FILES.sha256 and this provenance record. Upstream tests, tools and build scripts are not required."
+}

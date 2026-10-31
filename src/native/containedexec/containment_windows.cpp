@@ -267,6 +267,7 @@ int execute(const Request& request, const fs::path& executable) {
         }
     } catch (const std::exception& error) {
         report["error"] = error.what();
+        std::cerr << "native containment: " << std::string_view(error.what()).substr(0, 8192) << '\n';
         report["outcome"] = InterlockedCompareExchange(&cancelled, 0, 0) || WaitForSingleObject(event.get(), 0) == WAIT_OBJECT_0 ? "cancelled" : "failed";
         // Cleanup is reported only after the transport verifies zero active job members.
     }
@@ -277,6 +278,7 @@ int execute(const Request& request, const fs::path& executable) {
     } catch (const std::exception& error) {
         report["outcome"] = "failed";
         report["estate_error"] = error.what();
+        std::cerr << "native containment estate: " << std::string_view(error.what()).substr(0, 8192) << '\n';
     }
     report["sampled_peak_private_commit_bytes"] = peak;
     report["kernel_reported_peak_bytes"] = kernelPeak;

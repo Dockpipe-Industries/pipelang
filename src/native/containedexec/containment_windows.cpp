@@ -70,11 +70,24 @@ std::uint64_t allocated(const fs::path& estate, std::uint64_t limit) {
     while (!pending.empty()) {
         const auto directory = pending.back();
         pending.pop_back();
-        Handle handle(CreateFileW(directory.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        HANDLE directoryHandle = INVALID_HANDLE_VALUE;
+        DWORD openError = ERROR_SUCCESS;
+        for (unsigned attempt = 0; attempt < 8; ++attempt) {
+            directoryHandle = CreateFileW(directory.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+            if (directoryHandle != INVALID_HANDLE_VALUE)
+                break;
+            openError = GetLastError();
+            // A queued publication directory can be disappearing during a scan.
+            // Retry access denial; only verified disappearance may be skipped.
+            if (directory == estate || openError != ERROR_ACCESS_DENIED || attempt + 1 == 8)
+                break;
+            Sleep(1);
+        }
+        Handle handle(directoryHandle);
         if (handle.get() == INVALID_HANDLE_VALUE) {
-            const auto error = GetLastError();
+            const auto error = openError;
             if (directory != estate && (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND || error == ERROR_DELETE_PENDING))
                 continue;
             throw std::runtime_error("cannot enumerate proof estate (Win32 " + std::to_string(error) + "): " + directory.string());

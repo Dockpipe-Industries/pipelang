@@ -153,3 +153,11 @@ memory/thread stops and ownership checks remain unchanged. A fifteenth independe
 admission case runs 96 short-lived children across four workers. Bounded
 containment errors are now reported on stderr as well as in receipts. Fresh
 Windows CI must qualify these focused changes before merge.
+
+The fifteenth churn admission case passed natively in hosted Windows CI. That
+run then exposed transient access denial while an atomic-publication directory
+was disappearing during estate scanning. Non-root directory opens now retry
+access denial up to eight times; only the existing verified not-found/path-not-found/
+delete-pending cases may be skipped, and persistent access denial still fails.
+A sixteenth admission case repeatedly creates and removes owned publication
+directories. Final native Windows validation remains required; dev is unmerged.

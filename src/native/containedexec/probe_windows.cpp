@@ -42,6 +42,19 @@ void workload(const std::string& mode, const fs::path& marker) {
         }
         return;
     }
+    if (mode == "directory-churn") {
+        const fs::path directories = marker.string() + ".directories";
+        fs::create_directories(directories);
+        for (int round = 0; round < 25; ++round) {
+            for (int index = 0; index < 25; ++index)
+                atomicWrite(directories / std::to_string(index) / "new" / "value", "owned publication\n");
+            for (int index = 0; index < 25; ++index)
+                fs::remove_all(directories / std::to_string(index));
+            Sleep(1);
+        }
+        fs::remove(directories);
+        return;
+    }
     if (mode == "reparse-accounting") {
         const fs::path target = marker.string() + ".target";
         const fs::path link = marker.string() + ".junction";
@@ -153,6 +166,7 @@ void inside(const fs::path& runner, const fs::path& self, const fs::path& output
     };
     unit("normal", true);
     unit("process-churn", true, 30);
+    unit("directory-churn", true, 30);
     unit("reparse-accounting", true);
     unit("nonzero", false);
     unit("timeout", false, 1);
@@ -232,7 +246,7 @@ int main(int argc, char** argv) {
             require(fileHash(argv[3]) == argv[4], "native policy receipt hash differs");
             const auto receipt = parseJson(readFile(argv[3], 65536));
             require(receipt.at("status") == "passed" && receipt.at("policy") == "windows.job-commit.v1" &&
-                receipt.at("runner_sha256") == fileHash(argv[2]) && receipt.at("cases").size() == 15, "native policy receipt is incomplete");
+                receipt.at("runner_sha256") == fileHash(argv[2]) && receipt.at("cases").size() == 16, "native policy receipt is incomplete");
             return 0;
         }
         require(mode == "--suite" && argc == 4, "usage: native probe --suite RUNNER OUTPUT");
@@ -246,7 +260,7 @@ int main(int argc, char** argv) {
         const auto result = process({runner.string(), "job", "--output", (output / "job").string(), "--estate", output.string(),
             "--timeout", "120", "--", executablePath().string(), "--inside", runner.string(), output.string()}, {}, std::chrono::seconds(140), 1U << 20);
         require(result.exit == 0 && fs::exists(output / "acceptance.json"), "native policy probes failed: " + result.output + result.diagnostic);
-        std::cout << "Windows native policy: fifteen workload probes and uncontained-entry refusal passed\n";
+        std::cout << "Windows native policy: sixteen workload probes and uncontained-entry refusal passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Windows native policy probe: " << error.what() << '\n';

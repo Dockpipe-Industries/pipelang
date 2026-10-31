@@ -42,18 +42,25 @@ merged into the source branch through the same runtime. Conflicts retained the
 qualified native implementations and retired Go/Python files. The resulting
 source tree exactly matches `7520a0e` (tree `b4cee57b6074cfbc5859753b01f179a3a6cd6238`);
 subsequent changes are limited to this evidence record, hosted-CI orchestration
-and the Windows workflow checksum helper. Fresh hosted Windows build/test/package
-qualification covers that helper; Linux/macOS compiler/runtime inputs are unchanged. All newer non-Go/Python `dev` files
+the Windows workflow checksum helper and Linux containment-probe path selection. Fresh hosted Windows build/test/package
+qualification covers that helper. The Linux probe now derives its aggregate
+cgroup path from kernel state and checks equality with the declared identity
+before reading counters. Fresh Linux build 11 and its independent admission
+suite passed; compiler/runtime inputs remain unchanged on all platforms. All newer non-Go/Python `dev` files
 are already present in that qualified tree. No SDK release was published. Hosted jobs retain the integration ruleset
 contexts `test`, `test-windows`, `CodeQL (Actions)` and the historical
 `CodeQL (Go)` name. That last context now performs actual C++ CodeQL analysis
 (`c-cpp`, build mode `none`); it does not invoke Go or synthesize a passing status.
 Linux and Windows CI invoke the declared native build/check/test workflows;
-Windows also repeats package/relocation. A fresh Linux runner installs the native
+Linux and Windows also repeat package/relocation. The existing weekly CodeQL
+schedule, workflow concurrency and Actions analysis category are preserved. A fresh Linux runner installs the native
 `/usr/bin/cmake` expected by source bootstrap. The Windows checksum helper now
 uses .NET SHA-256 directly because the hosted PowerShell environment did not
 provide `Get-FileHash`. Native compiler/runtime source is unchanged by these CI
-repairs. The PR merge result and terminal hosted checks are recorded in PR #8
+repairs. CodeQL also reported two unchanged upstream yaml-cpp boolean expressions;
+review found intentional boolean logic rather than an erroneous bitwise complement.
+Their disposition requires explicit owner approval after automatic review refused
+alert dismissal; vendor bytes and all scanning queries remain unchanged. The PR merge result and terminal hosted checks are recorded in PR #8
 and the host objective checkpoint after the protected merge completes.
 
 - The receiver was clean at f10fcda7cdc0fb01a1707905fa24ed1ebc0f6268 on

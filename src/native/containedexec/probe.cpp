@@ -28,12 +28,13 @@ void assertLimits(bool coordinator) {
     require(counter(current / "pids.max") == (coordinator ? 64 : 128), "probe found incorrect pids.max");
     if (!coordinator)
         require(counter(current / "memory.high") == 734003200ULL, "probe found incorrect memory.high");
-    const char* aggregate = std::getenv("CONTAINED_JOB_GROUP");
-    require(aggregate && current.string().starts_with(std::string(aggregate) + '/'), "probe is outside aggregate");
-    require(counter(fs::path(aggregate) / "memory.max") == 2147483648ULL &&
-            counter(fs::path(aggregate) / "memory.high") == 1610612736ULL &&
-            counter(fs::path(aggregate) / "memory.swap.max") == 0 &&
-            counter(fs::path(aggregate) / "pids.max") == 384, "probe found incorrect aggregate limits");
+    const auto aggregate = current.parent_path();
+    const char* declaredAggregate = std::getenv("CONTAINED_JOB_GROUP");
+    require(declaredAggregate && aggregate == fs::path(declaredAggregate), "probe is outside aggregate");
+    require(counter(aggregate / "memory.max") == 2147483648ULL &&
+            counter(aggregate / "memory.high") == 1610612736ULL &&
+            counter(aggregate / "memory.swap.max") == 0 &&
+            counter(aggregate / "pids.max") == 384, "probe found incorrect aggregate limits");
 }
 int workload(const std::string& mode, const fs::path& marker) {
     assertLimits(false);

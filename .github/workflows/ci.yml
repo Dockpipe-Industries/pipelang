@@ -27,11 +27,12 @@ jobs:
           command -v cmake c++ strace systemd-run
       - name: Install checksum-locked DockPipe
         run: cmake -DOUTPUT_DIRECTORY="$RUNNER_TEMP/dockpipe" -P tooling/bootstrap-dockpipe.cmake
-      - name: Build, check and test through DockPipe
+      - name: Build, check, test and package through DockPipe
         run: |
           "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml
           "$DOCKPIPE_BIN" --workflow-file workflows/check/config.yml
           "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml
   test-windows:
     runs-on: windows-2022
     timeout-minutes: 60

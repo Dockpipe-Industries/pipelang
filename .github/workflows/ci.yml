@@ -42,7 +42,7 @@ jobs:
       - name: Install checksum-locked DockPipe
         shell: pwsh
         run: cmake -DOUTPUT_DIRECTORY="$env:RUNNER_TEMP/dockpipe" -P tooling/bootstrap-dockpipe.cmake
-      - name: Build, check and test through native DockPipe workflows
+      - name: Build, check, test and package through native DockPipe workflows
         shell: pwsh
         run: |
           & $env:DOCKPIPE_BIN --workflow-file workflows/build/config.yml
@@ -50,4 +50,6 @@ jobs:
           & $env:DOCKPIPE_BIN --workflow-file workflows/check/config.yml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $env:DOCKPIPE_BIN --workflow-file workflows/test/config.yml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $env:DOCKPIPE_BIN --workflow-file workflows/release/config.yml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

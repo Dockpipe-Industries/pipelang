@@ -46,7 +46,18 @@ function Write-JsonFile([string] $Path, $Value) {
     }
 }
 function Get-Sha256([string] $Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $digest = $algorithm.ComputeHash($stream)
+            return [BitConverter]::ToString($digest).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $algorithm.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
 }
 function Get-BoundedTimeout([int] $Requested) {
     $deadline = [Environment]::GetEnvironmentVariable('PIPELANG_NATIVE_STOPWATCH_DEADLINE')

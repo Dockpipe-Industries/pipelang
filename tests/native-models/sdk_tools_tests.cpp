@@ -5,6 +5,7 @@
 #include <iostream>
 #include <iterator>
 #include <thread>
+#include "windows_junction.hpp"
 #ifndef _WIN32
 #include <sys/stat.h>
 #endif
@@ -14,14 +15,14 @@ using namespace pipelang::tools;
 std::size_t refusals = 0;
 
 template<class Operation>
-void refuse(Operation operation) {
+void refuse(Operation operation, const std::string& contract = "invalid input") {
     try {
         operation();
     } catch (const std::exception&) {
         ++refusals;
         return;
     }
-    throw std::runtime_error("operation unexpectedly accepted invalid input");
+    throw std::runtime_error("operation unexpectedly accepted " + contract);
 }
 Json modelManifest() {
     return {{"protocol", "pipelang.native-model-manifest.v1"}, {"namespace", "fixture"},
@@ -72,9 +73,9 @@ void primitiveContracts(const fs::path& root, const fs::path& self) {
     refuse([] { parseJson("{\"a\":NaN}"); });
     refuse([] { parseJson(std::string(66, '[') + "0" + std::string(66, ']')); });
     for (const auto& name : {"../bad", "/bad", "a/../b", "a//b", "a\\b", "a/", "C:bad"})
-        refuse([&] { portablePath(name); });
-    refuse([&] { process({self.string(), "--sleep"}, {}, std::chrono::milliseconds(30)); });
-    refuse([&] { process({self.string(), "--flood"}, {}, std::chrono::seconds(2), 128); });
+        refuse([&] { portablePath(name); }, "portable path: " + std::string(name));
+    refuse([&] { process({self.string(), "--sleep"}, {}, std::chrono::milliseconds(30)); }, "process deadline");
+    refuse([&] { process({self.string(), "--flood"}, {}, std::chrono::seconds(2), 128); }, "process output limit");
     const auto result = process({self.string(), "--echo"}, "literal $(not-a-command) `text`\n");
     require(result.exit == 0 && result.output == "literal $(not-a-command) `text`\n" && result.diagnostic.empty(), "process transport changed literal data");
 }
@@ -82,8 +83,8 @@ void primitiveContracts(const fs::path& root, const fs::path& self) {
 void admissionAndPublication(const fs::path& root, const fs::path& self) {
     const auto prefix = root / "fake-sdk";
     fs::create_directories(prefix / "bin");
-    const auto model = prefix / "bin/fake-model";
-    const auto view = prefix / "bin/fake-view";
+    const auto model = nativeExecutable(prefix / "bin/fake-model");
+    const auto view = nativeExecutable(prefix / "bin/fake-view");
     fs::copy_file(self, model);
     fs::copy_file(self, view);
     const auto manifest = prefix / "sdk.json";
@@ -94,7 +95,14 @@ void admissionAndPublication(const fs::path& root, const fs::path& self) {
     atomicWrite(prefix / "bin/extra", "unmanifested");
     refuse([&] { verifyManifest(prefix, manifest, hash); });
     fs::remove(prefix / "bin/extra");
-#ifndef _WIN32
+#ifdef _WIN32
+    const auto junctionTarget = root / "junction-target";
+    atomicWrite(junctionTarget / "protected", "outside SDK roots");
+    pipelang::tests::DirectoryJunction junction(prefix / "bin/symbolic", junctionTarget);
+    refuse([&] { recordManifest(prefix, manifest, Json::array({"bin"})); }, "junction input");
+    junction.remove();
+    require(readFile(junctionTarget / "protected", 128) == "outside SDK roots", "junction fixture changed its target");
+#else
     fs::create_symlink(model, prefix / "bin/symbolic");
     refuse([&] { recordManifest(prefix, manifest, Json::array({"bin"})); });
     fs::remove(prefix / "bin/symbolic");
@@ -135,8 +143,8 @@ void admissionAndPublication(const fs::path& root, const fs::path& self) {
 void installedSdk(const fs::path& source, const fs::path& prefix, const fs::path& output) {
     const auto manifest = prefix / "share/pipelang-model/sdk-manifest.json";
     const auto hash = fileHash(manifest);
-    const auto model = prefix / "bin/pipelang-modelc";
-    const auto view = prefix / "bin/pipelang-model-viewc";
+    const auto model = nativeExecutable(prefix / "bin/pipelang-modelc");
+    const auto view = nativeExecutable(prefix / "bin/pipelang-model-viewc");
     const auto generated = output / "installed-bindings";
     generateBindings(prefix, manifest, hash, model, view,
         source / "tests/native-model-views/FixtureModel.pipe", source / "tests/native-model-views/Fixture.pipe",
@@ -164,19 +172,23 @@ int main() {
         const auto result = process(command, {}, std::chrono::seconds(90));
         require(result.exit == 0, "installed SDK consumer failed: " + result.output + result.diagnostic);
     };
-    invoke({"/usr/bin/cmake", "-S", consumer.string(), "-B", (consumer / "build").string(),
+    invoke({nativeTool("cmake").string(), "-S", consumer.string(), "-B", (consumer / "build").string(),
             "-DCMAKE_PREFIX_PATH=" + prefix.string(), "-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE",
+            "-DCMAKE_CXX_COMPILER=" + nativeTool("c++").string(),
+#ifdef _WIN32
+            "-G", "Ninja", "-DCMAKE_EXE_LINKER_FLAGS=-static",
+#endif
             "-DMODEL_SOURCE=" + (source / "tests/native-model-views/FixtureModel.pipe").string(),
             "-DVIEW_SOURCE=" + (source / "tests/native-model-views/Fixture.pipe").string()});
-    invoke({"/usr/bin/cmake", "--build", (consumer / "build").string(), "--parallel", "1"});
-    invoke({(consumer / "build/consumer").string()});
+    invoke({nativeTool("cmake").string(), "--build", (consumer / "build").string(), "--parallel", "1"});
+    invoke({nativeExecutable(consumer / "build/consumer").string()});
 }
 }
 
 int main(int argc, char** argv) {
     using namespace pipelang::tools;
     try {
-        const auto name = fs::path(argv[0]).filename().string();
+        const auto name = fs::path(argv[0]).stem().string();
         if (name == "fake-model" || name == "fake-view")
             return fakeTool(name == "fake-model");
         if (argc == 2 && std::string(argv[1]) == "--sleep") {

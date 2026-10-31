@@ -498,7 +498,7 @@ Json compile(const Json &request)
         const auto source = text(request, "source");
         validateManifest(request.at("model_manifest"));
         const auto nameSpace = request.contains("namespace") ? text(request, "namespace") : "pipelang_models";
-        if (!safeNamespace(nameSpace) || nameSpace != request.at("model_manifest").at("namespace"))
+        if (!safeNamespace(nameSpace) || nameSpace != text(request.at("model_manifest"), "namespace"))
             throw std::runtime_error("namespace must safely match model manifest");
         const auto header = text(request, "model_header");
         if (header.empty() || header.size() > 256 || header.front() == '/' || header.find("..") != std::string::npos)

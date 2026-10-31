@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include "windows_junction.hpp"
 
 namespace {
 using namespace pipelang::legacy;
@@ -86,8 +87,18 @@ void cli(const fs::path& executable, const fs::path& output) {
     fs::create_directory(generated / "X.bindings.env");
     require(run("compile", {"--out", generated.string()}).exit != 0, "CLI replaced an unowned output directory");
     require(fileHash(generated / "X.workflow.yml") == before, "failed CLI publication changed existing artifact");
+#ifdef _WIN32
+    const auto junctionTarget = output / "cli-junction-target";
+    atomicWrite(junctionTarget / "protected", "outside CLI sources");
+    pipelang::tests::DirectoryJunction junction(module / "alias.pipe", junctionTarget);
+#else
     fs::create_symlink(module / "X.pipe", module / "alias.pipe");
+#endif
     require(run("check").exit != 0, "CLI admitted symbolic sources");
+#ifdef _WIN32
+    junction.remove();
+    require(readFile(junctionTarget / "protected", 128) == "outside CLI sources", "CLI fixture changed its junction target");
+#endif
 }
 void frozen(const fs::path& source, const fs::path& output) {
     const auto inventory = readFile(source / "docs/agents/tasks/fixtures/pipelang-vnext/legacy-v0.0.0.1-inventory.txt", 65536);

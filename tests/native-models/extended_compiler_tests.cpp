@@ -12,7 +12,7 @@ public:
         fs::create_directories(output_);
     }
     Json invoke(const Json& request, bool view = false) {
-        const auto compiler = sdk_ / (view ? "bin/pipelang-model-viewc" : "bin/pipelang-modelc");
+        const auto compiler = nativeExecutable(sdk_ / (view ? "bin/pipelang-model-viewc" : "bin/pipelang-modelc"));
         const auto result = process({compiler.string()}, canonical(request), std::chrono::seconds(15), 8U << 20);
         require(result.exit == 0 && result.diagnostic.empty(), "compiler transport failed: " + result.diagnostic);
         const auto response = parseJson(result.output, 8U << 20);
@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
         if (argc == 4 && std::string(argv[1]) == "--numeric-guard") {
             using namespace pipelang::tools;
             for (const auto& flag : {"", "-ffast-math", "-ffinite-math-only"}) {
-                std::vector<std::string> command{"/usr/bin/c++", "-std=c++20", "-fsyntax-only", "-x", "c++",
+                std::vector<std::string> command{nativeTool("c++").string(), "-std=c++20", "-fsyntax-only", "-x", "c++",
                     "-I" + (fs::path(argv[2]) / "include").string(), argv[3]};
                 if (*flag)
                     command.push_back(flag);

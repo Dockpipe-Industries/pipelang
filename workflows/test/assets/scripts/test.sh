@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 set -eu
+platform_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$platform_directory/../../../build/assets/scripts/platform.sh"
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PIPELANG_NATIVE_TOOLCHAIN_PROOF=${PIPELANG_NATIVE_TOOLCHAIN_PROOF:-$(readlink -f bin/native-current)}
 : "${PIPELANG_NATIVE_TOOLCHAIN_PROOF:?Run the build workflow first}"

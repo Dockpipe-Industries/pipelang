@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 set -eu
+platform_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$platform_directory/platform.sh"
 if [ -n "${PIPELANG_NATIVE_TOOL_PATH:-}" ]; then
     PATH=$PIPELANG_NATIVE_TOOL_PATH
     export PATH
@@ -16,7 +18,9 @@ build=${PIPELANG_NATIVE_BUILD_DIRECTORY:-$PIPELANG_NATIVE_TOOLCHAIN_PROOF/build}
 runner=${PIPELANG_NATIVE_RUNNER:-}
 if [ -z "$runner" ]; then
     script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-    if [ -n "${PIPELANG_NATIVE_BOOTSTRAP_ARCHIVE:-}" ]; then
+    if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
+        . "$script_directory/bootstrap-macos.sh"
+    elif [ -n "${PIPELANG_NATIVE_BOOTSTRAP_ARCHIVE:-}" ]; then
         . "$script_directory/bootstrap-native.sh"
     else
         . "$script_directory/bootstrap-source.sh"
@@ -34,7 +38,11 @@ if [ "${1:-}" != --inside ]; then
             PIPELANG_NATIVE_TOOL_PATH="${PIPELANG_NATIVE_TOOL_PATH:-}" PIPELANG_NATIVE_TRACE_EXEC="${PIPELANG_NATIVE_TRACE_EXEC:-0}" \
             PIPELANG_NATIVE_RUNNER_SHA256="$PIPELANG_NATIVE_RUNNER_SHA256" sh "$0" --inside
 fi
-: "${CONTAINED_JOB_SLICE:?Build requires verified aggregate containment}"
+if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
+    : "${PIPELANG_MACOS_COORDINATOR:?Native workflow requires a macOS coordinator}"
+else
+    : "${CONTAINED_JOB_SLICE:?Build requires verified aggregate containment}"
+fi
 proof=$PIPELANG_NATIVE_TOOLCHAIN_PROOF
 DOCKPIPE_EVENT_LOG="$proof/operation-events.jsonl"
 export DOCKPIPE_EVENT_LOG
@@ -43,7 +51,7 @@ unit() {
     name=$1
     shift
     prefix="$proof/units/$name"
-    if [ "${PIPELANG_NATIVE_TRACE_EXEC:-0}" = 1 ]; then
+    if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ "${PIPELANG_NATIVE_TRACE_EXEC:-0}" = 1 ]; then
         set -- /usr/bin/strace -f -e trace=execve -s 4096 -o "$prefix.exec" "$@"
     fi
     if "$runner" unit --output "$prefix" --estate "$proof" --timeout 900 -- "$@" > "$prefix.launcher.log" 2>&1; then
@@ -54,12 +62,12 @@ unit() {
     tail -c 3000 "$prefix.launcher.log" >&2
     exit 1
 }
-unit configure /usr/bin/cmake -S sdk/pipeview/model -B "$build" \
-    -DCMAKE_BUILD_TYPE=Release \
+unit configure "$PIPELANG_CMAKE" -S sdk/pipeview/model -B "$build" \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" \
     -DPIPELANG_BUILD_SDK_TOOL_TESTS=ON -DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON
-unit build /usr/bin/cmake --build "$build" --parallel 1
-unit install /usr/bin/cmake --install "$build" --prefix "$proof/sdk"
-if [ -f "$PIPELANG_NATIVE_TOOLCHAIN_PROOF-bootstrap/build.exec" ]; then
+unit build "$PIPELANG_CMAKE" --build "$build" --parallel 1
+unit install "$PIPELANG_CMAKE" --install "$build" --prefix "$proof/sdk"
+if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ -f "$PIPELANG_NATIVE_TOOLCHAIN_PROOF-bootstrap/build.exec" ]; then
     unit bootstrap-exec-audit "$proof/sdk/bin/pipelang-sdk-tool" audit-exec --trace "$PIPELANG_NATIVE_TOOLCHAIN_PROOF-bootstrap/build.exec" --output "$proof/bootstrap.exec.audit.json"
 fi
 unit inventory "$proof/sdk/bin/pipelang-sdk-tool" inventory --source-root "$PWD" --output "$proof/inventory.json"
@@ -70,14 +78,14 @@ unit materialize-tests "$build/legacy-compiler/pipelang-materialize-tests" "$pro
 unit diagnostic-tests "$build/legacy-compiler/pipelang-diagnostic-tests" "$proof/diagnostic-tests" "$proof/sdk/bin/pipelang-native"
 unit operation-tests "$build/legacy-compiler/pipelang-operation-tests" "$proof/operation-tests" "$proof/sdk/bin/pipelang-native"
 unit companion-tests "$build/sdk-tools/pipelang-companion-tests" "$PWD" "$proof/sdk" "$proof/companion-tests"
-unit companion-generated-build /usr/bin/c++ -std=c++17 -Wall -Wextra -Werror -O2 \
+unit companion-generated-build "$PIPELANG_CXX" -std=c++17 -Wall -Wextra -Werror -O2 \
     -I"$proof/companion-tests" "$proof/companion-tests/emitted_probe.cpp" -o "$proof/companion-tests/emitted-probe"
 unit companion-generated-run "$proof/companion-tests/emitted-probe"
 unit scalar-tests "$build/scalar-compiler/pipelang-scalar-tests" "$PWD" "$proof/sdk" "$proof/scalar-tests"
-unit scalar-generated-build /usr/bin/c++ -std=c++17 -Wall -Wextra -Werror -O2 \
+unit scalar-generated-build "$PIPELANG_CXX" -std=c++17 -Wall -Wextra -Werror -O2 \
     "$proof/scalar-tests/generated/runtime.cpp" -o "$proof/scalar-tests/generated/runtime-test"
 unit scalar-generated-run "$proof/scalar-tests/generated/runtime-test"
-if [ "${PIPELANG_NATIVE_TRACE_EXEC:-0}" = 1 ]; then
+if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ "${PIPELANG_NATIVE_TRACE_EXEC:-0}" = 1 ]; then
     PIPELANG_NATIVE_TRACE_EXEC=0
     for trace in "$proof"/units/*.exec; do
         name=$(basename "$trace" .exec)

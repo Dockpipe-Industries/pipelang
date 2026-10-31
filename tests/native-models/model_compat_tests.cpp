@@ -2,6 +2,12 @@
 #include "../../src/native/support/support.hpp"
 #include <fstream>
 #include <iostream>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 using namespace pipelang::tools;
@@ -77,6 +83,18 @@ private:
     Json cases_ = Json::array();
 };
 void containment() {
+#ifdef _WIN32
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    BOOL inside = FALSE;
+    const auto required = JOB_OBJECT_LIMIT_JOB_MEMORY | JOB_OBJECT_LIMIT_ACTIVE_PROCESS | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    require(IsProcessInJob(GetCurrentProcess(), nullptr, &inside) && inside &&
+        QueryInformationJobObject(nullptr, JobObjectExtendedLimitInformation, &limits, sizeof(limits), nullptr),
+        "native oracle requires Windows kernel Job Object containment");
+    require((limits.BasicLimitInformation.LimitFlags & required) == required && limits.JobMemoryLimit == 1073741824ULL &&
+        limits.BasicLimitInformation.ActiveProcessLimit == 128, "native Windows oracle containment differs");
+#elif defined(__APPLE__)
+    require(std::getenv("PIPELANG_MACOS_COORDINATOR") != nullptr, "native oracle requires the macOS sampled coordinator");
+#else
     std::ifstream membership("/proc/self/cgroup");
     std::string line;
     fs::path group;
@@ -89,6 +107,7 @@ void containment() {
             {"memory.max", "1073741824\n"}, {"memory.high", "734003200\n"},
             {"memory.swap.max", "0\n"}, {"pids.max", "128\n"}})
         require(readFile(group / name, 128) == expected, "native oracle containment differs: " + name);
+#endif
 }
 void protocol(Oracle& oracle, const fs::path& root) {
     const auto response = oracle.admitted("models-fixture", readFile(root / "tests/native-models/Models.pipe", 65536));

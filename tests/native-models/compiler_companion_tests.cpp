@@ -21,7 +21,9 @@ ProcessResult invoke(const fs::path& executable, const std::string& bytes) {
 }
 void refused(const fs::path& executable, const std::string& name, const std::string& bytes, const std::string& message = "") {
     const auto result = invoke(executable, bytes);
-    require(result.exit == 2 && result.output.empty() && !result.diagnostic.empty(), "expected empty unsuccessful protocol refusal: " + name);
+    require(result.exit == 2 && result.output.empty() && !result.diagnostic.empty(), "expected empty unsuccessful protocol refusal: " + name +
+        "; exit=" + std::to_string(result.exit) + "; stdout_bytes=" + std::to_string(result.output.size()) +
+        "; diagnostic=" + result.diagnostic);
     require(result.diagnostic.find(message) != std::string::npos, "protocol refusal message differs: " + name);
     record(name, bytes);
 }
@@ -208,9 +210,9 @@ int main(int argc, char** argv) {
         const auto manifest = sdk / "share/pipelang-model/sdk-manifest.json";
         const auto expected = fileHash(manifest);
         verifyManifest(sdk, manifest, expected);
-        lexer(sdk / "bin/pipelang-cpp-lexer");
-        view(sdk / "bin/pipelang-cpp-lexer", sdk / "bin/pipelang-cpp-view-parser");
-        emitter(sdk / "bin/pipelang-cpp-emitter", root, output);
+        lexer(nativeExecutable(sdk / "bin/pipelang-cpp-lexer"));
+        view(nativeExecutable(sdk / "bin/pipelang-cpp-lexer"), nativeExecutable(sdk / "bin/pipelang-cpp-view-parser"));
+        emitter(nativeExecutable(sdk / "bin/pipelang-cpp-emitter"), root, output);
         verifyManifest(sdk, manifest, expected);
         atomicWrite(output / "acceptance.json", canonical({{"status", "passed"}, {"cases", cases}, {"sdk_manifest_sha256", expected},
             {"scope", "native companion transport/AST/pilot backend; full Core semantic admission and legacy Go differential/export byte parity remain pending"}}));

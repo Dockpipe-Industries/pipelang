@@ -70,7 +70,7 @@ void nativeOnly(const fs::path& root) {
             name != "go.mod" && name != "go.sum" && name != "go.work" && name != "go.work.sum" &&
             name != "pyproject.toml" && name != "requirements.txt" && name != "Pipfile" && name != "poetry.lock" && name != "__pycache__",
             "retired language file returned: " + entry.path().string());
-        if (entry.is_regular_file() && (extension == ".sh" || extension == ".yml" || extension == ".cmake" || name == "CMakeLists.txt")) {
+        if (entry.is_regular_file() && (extension == ".sh" || extension == ".ps1" || extension == ".yml" || extension == ".cmake" || name == "CMakeLists.txt")) {
             const auto bytes = readFile(entry.path(), 1U << 20);
             require(!std::regex_search(bytes, std::regex(R"((^|[ \t/;])(python[0-9.]*|gofmt)([ \t]|$)|go (build|test|run|install|mod|generate) )")),
                 "retired language command returned: " + entry.path().string());
@@ -103,13 +103,17 @@ int main(int argc, char** argv) {
         }
         checks.push_back("declared-workflow-validation");
         std::size_t scripts = 0;
+#ifndef _WIN32
         for (const auto& entry : fs::recursive_directory_iterator(root / "workflows")) {
             if (entry.path().extension() == ".sh") {
-                successful({"/usr/bin/bash", "-n", entry.path().string()});
+                successful({"/bin/bash", "-n", entry.path().string()});
                 ++scripts;
             }
         }
         checks.push_back("shell-syntax");
+#else
+        checks.push_back("native-Windows-PowerShell-syntax-checked-by-workflow");
+#endif
         for (const auto& entry : fs::directory_iterator(root / ".github/workflows")) {
             if (entry.path().extension() == ".yml") {
                 std::size_t visited = 0;

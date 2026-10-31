@@ -25,7 +25,9 @@ void test(const fs::path& output, const fs::path& executable) {
     require(diagnostic.at("primary").at("file") == source.generic_string() && diagnostic.at("primary").at("start") ==
         Json({{"offset", offset}, {"line", 1}, {"column", offset + 1}, {"utf16_column", offset + 1}}), "syntax diagnostic position changed");
     const auto rendered = check(broken, "text");
-    require(rendered.exit != 0 && rendered.output.starts_with(source.string() + ":1:" + std::to_string(offset + 1) + ": error[PL2001]: "), "text diagnostic position changed");
+    const auto expectedTextLocation = source.generic_string() + ":1:" + std::to_string(offset + 1) + ": error[PL2001]: ";
+    require(rendered.exit != 0 && rendered.output.starts_with(expectedTextLocation),
+        "text diagnostic position changed: " + rendered.output);
     const std::string unicode = "// editor buffer\nClass Broken { string Value = \"\xf0\x9f\x99\x82\" + ; }";
     const auto unicodeResult = check(unicode, "json");
     const auto primary = parseJson(unicodeResult.output).at("diagnostics").at(0).at("primary");

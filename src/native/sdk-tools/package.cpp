@@ -72,7 +72,7 @@ std::vector<fs::path> filesUnder(const fs::path& prefix) {
     std::vector<fs::path> files;
     std::size_t entries = 0;
     for (const auto& entry : fs::recursive_directory_iterator(prefix)) {
-        require(++entries <= 8192 && !entry.is_symlink(), "package entry capacity exceeded or symbolic input");
+        require(++entries <= 8192 && !symbolicPath(entry.path()), "package entry capacity exceeded or symbolic input");
         if (entry.is_directory())
             continue;
         regularFile(entry.path());
@@ -95,7 +95,7 @@ std::string nativeTarget() {
     return "darwin/amd64";
 #elif defined(__APPLE__) && defined(__aarch64__)
     return "darwin/arm64";
-#elif defined(_WIN32) && defined(_M_X64)
+#elif defined(_WIN32) && (defined(_M_X64) || defined(__x86_64__))
     return "windows/amd64";
 #else
     throw std::runtime_error("native SDK packaging target is unqualified");
@@ -137,7 +137,7 @@ void packageSdk(const fs::path& prefix, const fs::path& manifest, const std::str
     const auto finalPaths = filesUnder(prefix);
     require(finalPaths == paths, "SDK package input inventory changed during packaging");
     for (const auto& record : files)
-        require(fileHash(prefix / record.at("path").get<std::string>()) == record.at("sha256"), "SDK package input bytes changed during packaging");
+        require(fileHash(prefix / record.at("path").get<std::string>()) == record.at("sha256").get<std::string>(), "SDK package input bytes changed during packaging");
     fs::rename(temporary, archive);
     const Json package{{"protocol", "pipelang.native-sdk-package.v1"}, {"target", nativeTarget()}, {"format", "ustar"},
         {"qualification", "local-native-sdk-checkpoint"}, {"sdk_manifest", manifest.lexically_relative(prefix).generic_string()},
@@ -164,7 +164,7 @@ void extractSdk(const fs::path& manifest, const std::string& expected, const fs:
     require(archiveRecord.at("bytes").is_number_unsigned() && archiveRecord.at("bytes").get<std::uint64_t>() <= archiveLimit &&
         fs::file_size(archive) == archiveRecord.at("bytes").get<std::uint64_t>(), "SDK archive size differs");
     exactHash(text(archiveRecord.at("sha256"), "archive hash"));
-    require(fileHash(archive) == archiveRecord.at("sha256"), "SDK archive checksum differs");
+    require(fileHash(archive) == archiveRecord.at("sha256").get<std::string>(), "SDK archive checksum differs");
     const auto& records = metadata.at("files");
     require(records.is_array() && !records.empty() && records.size() <= 4096, "invalid SDK package file inventory");
     std::map<std::string, Json> files;
@@ -210,7 +210,7 @@ void extractSdk(const fs::path& manifest, const std::string& expected, const fs:
             require(numberField(block, 100, 8) == mode && block == header(name, static_cast<std::size_t>(count), mode), "SDK archive header is not canonical");
             std::string bytes(static_cast<std::size_t>(count), '\0');
             stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-            require(stream.gcount() == static_cast<std::streamsize>(bytes.size()) && sha256(bytes) == record.at("sha256"), "SDK archive member checksum differs");
+            require(stream.gcount() == static_cast<std::streamsize>(bytes.size()) && sha256(bytes) == record.at("sha256").get<std::string>(), "SDK archive member checksum differs");
             const auto padding = (512 - bytes.size() % 512) % 512;
             Block pad{};
             stream.read(pad.data(), static_cast<std::streamsize>(padding));
@@ -220,7 +220,7 @@ void extractSdk(const fs::path& manifest, const std::string& expected, const fs:
         }
         require(seen.size() == files.size(), "SDK archive is missing listed members");
         verifyManifest(stage, stage / manifestName, sdkHash);
-        require(fileHash(archive) == archiveRecord.at("sha256") && fileHash(manifest) == expected, "SDK package changed during extraction");
+        require(fileHash(archive) == archiveRecord.at("sha256").get<std::string>() && fileHash(manifest) == expected, "SDK package changed during extraction");
         freshOutput(output);
         fs::rename(stage, output);
     } catch (...) {

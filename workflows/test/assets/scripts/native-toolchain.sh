@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 set -eu
+platform_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$platform_directory/../../../build/assets/scripts/platform.sh"
 if [ -n "${PIPELANG_NATIVE_TOOL_PATH:-}" ]; then
     PATH=$PIPELANG_NATIVE_TOOL_PATH
     export PATH
@@ -31,7 +33,11 @@ if [ "${1:-}" != --inside ]; then
         PIPELANG_NATIVE_RUNTIME_SELECTION="${PIPELANG_NATIVE_RUNTIME_SELECTION:-all}" \
         PIPELANG_NATIVE_TOOL_PATH="${PIPELANG_NATIVE_TOOL_PATH:-}" sh "$0" --inside
 fi
-: "${CONTAINED_JOB_SLICE:?Tests require verified aggregate containment}"
+if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
+    : "${PIPELANG_MACOS_COORDINATOR:?Native workflow requires a macOS coordinator}"
+else
+    : "${CONTAINED_JOB_SLICE:?Tests require verified aggregate containment}"
+fi
 proof=$PIPELANG_NATIVE_COMPAT_PROOF
 sdk="$PIPELANG_NATIVE_TOOLCHAIN_PROOF/sdk"
 manifest="$sdk/share/pipelang-model/sdk-manifest.json"
@@ -46,7 +52,9 @@ unit() {
             # LeakSanitizer refuses ptrace. These source-bound C++ fixtures do
             # not launch child executables; trace their unsanitized runs instead.
             ;;
-        *) set -- /usr/bin/strace -f -e trace=execve -s 4096 -o "$prefix.exec" "$@" ;;
+        *) if [ "$PIPELANG_NATIVE_PLATFORM" = linux ]; then
+            set -- /usr/bin/strace -f -e trace=execve -s 4096 -o "$prefix.exec" "$@"
+           fi ;;
     esac
     if "$runner" unit --output "$prefix" --estate "$proof" --timeout 900 -- "$@" > "$prefix.launcher.log" 2>&1; then
         echo "$unit_name: passed"
@@ -71,13 +79,13 @@ compile_fixture() {
     source=$2
     generated=$3
     mkdir "$proof/$name-runtime"
-    unit "$name-build" /usr/bin/c++ -std=c++20 -pthread -Wall -Wextra -Werror -O2 \
+    unit "$name-build" "$PIPELANG_CXX" -std=c++20 -pthread -Wall -Wextra -Werror -O2 \
         -I"$sdk/include" -I"$generated" "$source" -o "$proof/$name-runtime/test"
     unit "$name-run" "$proof/$name-runtime/test"
-    unit "$name-sanitizer-build" /usr/bin/c++ -std=c++20 -pthread -Wall -Wextra -Werror -O1 -g \
+    unit "$name-sanitizer-build" "$PIPELANG_CXX" -std=c++20 -pthread -Wall -Wextra -Werror -O1 -g \
         -fsanitize=address,undefined -fno-omit-frame-pointer -I"$sdk/include" -I"$generated" \
         "$source" -o "$proof/$name-runtime/test-sanitized"
-    unit "$name-sanitizer-run" /usr/bin/env ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+    unit "$name-sanitizer-run" /usr/bin/env ASAN_OPTIONS=detect_leaks=$([ "$PIPELANG_NATIVE_PLATFORM" = linux ] && echo 1 || echo 0):halt_on_error=1 \
         UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 "$proof/$name-runtime/test-sanitized"
 }
 for suite in $PIPELANG_NATIVE_COMPAT_SUITES; do
@@ -99,7 +107,7 @@ done
 class_oracle="$build/model-compiler/pipelang-class-inheritance-compiler-tests"
 unit class-inheritance-generate "$class_oracle" "$PWD" "$proof/class-inheritance"
 for fixture in ClassInheritance ClassModules; do
-    unit "$fixture-transport" /usr/bin/sh -c '"$1" < "$2" > "$3"' sh "$sdk/bin/pipelang-modelc" "$proof/class-inheritance/$fixture.request.json" "$proof/class-inheritance/$fixture.actual.json"
+    unit "$fixture-transport" "$class_oracle" --transport "$sdk/bin/pipelang-modelc" "$proof/class-inheritance/$fixture.request.json" "$proof/class-inheritance/$fixture.actual.json"
     unit "$fixture-verify" "$class_oracle" --verify "$proof/class-inheritance/$fixture.expected.json" "$proof/class-inheritance/$fixture.actual.json"
 done
 compile_fixture class-inheritance tests/native-models/class_inheritance_runtime.cpp "$proof/class-inheritance"
@@ -114,6 +122,7 @@ case "$PIPELANG_NATIVE_RUNTIME_SELECTION" in
 esac
 unit sdk-verify-after "$sdk/bin/pipelang-sdk-tool" verify --prefix "$sdk" --manifest "$manifest" --sha256 "$expected"
 for trace in "$proof"/units/*.exec; do
+    test -f "$trace" || continue
     name=$(basename "$trace" .exec)
     "$runner" unit --output "$proof/units/$name-exec-audit" --estate "$proof" --timeout 60 -- \
         "$sdk/bin/pipelang-sdk-tool" audit-exec --trace "$trace" --output "$trace.audit.json" \

@@ -42,7 +42,7 @@ ProcessResult process(const std::vector<std::string>& arguments, std::string_vie
     require(!arguments.empty() && fs::path(arguments.front()).is_absolute(), "process requires an absolute executable");
     require(timeout.count() > 0, "process requires a positive deadline");
 #ifdef _WIN32
-    throw std::runtime_error("native process transport has not yet qualified Windows");
+    return windowsProcess(arguments, input, timeout, maximumOutput, maximumDiagnostic, monitor, log);
 #else
     Pipe source;
     Pipe output;
@@ -58,6 +58,33 @@ ProcessResult process(const std::vector<std::string>& arguments, std::string_vie
             ::dup2(output.descriptors[1], STDOUT_FILENO) < 0 || ::dup2(diagnostic.descriptors[1], STDERR_FILENO) < 0)
             ::_exit(126);
         ::execv(argv[0], argv.data());
+        const int failure = errno;
+        const auto emit = [](const char* bytes, std::size_t remaining) {
+            while (remaining > 0) {
+                const auto written = ::write(STDERR_FILENO, bytes, remaining);
+                if (written < 0 && errno == EINTR)
+                    continue;
+                if (written <= 0)
+                    return;
+                bytes += written;
+                remaining -= static_cast<std::size_t>(written);
+            }
+        };
+        constexpr char prefix[] = "native process exec failed (errno ";
+        emit(prefix, sizeof(prefix) - 1);
+        std::array<char, 16> digits{};
+        std::size_t count = 0;
+        unsigned number = static_cast<unsigned>(failure);
+        do {
+            digits[count++] = static_cast<char>('0' + number % 10);
+            number /= 10;
+        } while (number != 0 && count < digits.size());
+        while (count > 0) {
+            --count;
+            emit(&digits[count], 1);
+        }
+        constexpr char suffix[] = ")\n";
+        emit(suffix, sizeof(suffix) - 1);
         ::_exit(127);
     }
     ::setpgid(child, child);

@@ -32,7 +32,7 @@ std::vector<fs::path> pipePaths(const fs::path& root) {
     std::size_t count = 0;
     for (auto iterator = fs::recursive_directory_iterator(root); iterator != fs::recursive_directory_iterator(); ++iterator) {
         require(++count <= 16384, "materializer traversal bound exceeded");
-        require(!iterator->is_symlink(), "materializer refuses symbolic source entries");
+        require(!symbolicPath(iterator->path()), "materializer refuses symbolic source entries");
         if (iterator->is_directory()) {
             if (iterator->path().filename() == ".pipelang")
                 iterator.disable_recursion_pending();

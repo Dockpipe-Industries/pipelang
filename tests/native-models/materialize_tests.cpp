@@ -1,6 +1,7 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "../../src/native/legacy-compiler/legacy.hpp"
 #include <iostream>
+#include "windows_junction.hpp"
 
 namespace {
 using namespace pipelang::legacy;
@@ -78,8 +79,18 @@ void test(const fs::path& output, const fs::path& executable) {
     passed("installed-cli");
     require(process({executable.string(), "materialize", "--workdir", project.string()}).exit == 0, "materializer broke the active default CLI contract");
     passed("default-cli-contract");
+#ifdef _WIN32
+    const auto junctionTarget = output / "materialize-junction-target";
+    atomicWrite(junctionTarget / "protected", "outside materializer sources");
+    pipelang::tests::DirectoryJunction junction(model / "alias.pipe", junctionTarget);
+#else
     fs::create_symlink(model / "AppConfig.pipe", model / "alias.pipe");
+#endif
     refuses("symbolic-source", [&] { materialize(roots, true, destination); });
+#ifdef _WIN32
+    junction.remove();
+    require(readFile(junctionTarget / "protected", 128) == "outside materializer sources", "materializer fixture changed its junction target");
+#endif
     atomicWrite(output / "acceptance.json", canonical({{"status", "passed"}, {"cases", cases}, {"native_materializer", true}}));
 }
 }

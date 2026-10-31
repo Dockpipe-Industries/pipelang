@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 set -eu
+platform_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$platform_directory/platform.sh"
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ -z "${PIPELANG_NATIVE_TOOLCHAIN_PROOF:-}" ]; then
     workspace=$(mktemp -d "${TMPDIR:-/tmp}/pipelang-native-build.XXXXXXXX")
@@ -14,7 +16,10 @@ if [ "$build" != "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/build" ]; then
     test ! -e "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/build"
     ln -s "$build" "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/build"
 fi
-"$build/containedexec/pipelang-containment-probe" --suite "$build/containedexec/pipelang-contained" "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/installed-containment" > "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/installed-containment.log" 2>&1
+if ! "$build/containedexec/pipelang-containment-probe" --suite "$build/containedexec/pipelang-contained" "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/installed-containment" > "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/installed-containment.log" 2>&1; then
+    tail -c 8000 "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/installed-containment.log" >&2
+    exit 1
+fi
 mkdir -p bin
 # A successful build is the only operation allowed to replace this pointer.
 test ! -e bin/native-current || test -L bin/native-current

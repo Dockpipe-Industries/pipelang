@@ -27,9 +27,9 @@ Json inventory(const fs::path& prefix, const Json& roots, const fs::path& exclud
         require(selectedRoots.insert(name).second, "duplicate SDK root");
         const auto root = prefix / name;
         within(prefix, root);
-        require(fs::exists(root) && !fs::is_symlink(fs::symlink_status(root)), "SDK root is missing or symbolic");
+        require(fs::exists(root) && !symbolicPath(root), "SDK root is missing or symbolic");
         const auto add = [&](const fs::path& path) {
-            require(!fs::is_symlink(fs::symlink_status(path)), "SDK symbolic entry refused");
+            require(!symbolicPath(path), "SDK symbolic entry refused");
             if (fs::is_directory(path))
                 return;
             regularFile(path);

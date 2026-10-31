@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.21.1)
 project(PipeLangModel VERSION 0.1.0 LANGUAGES CXX)
 
+include(cmake/NativeCompilerProfile.cmake)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 find_package(Threads REQUIRED)
@@ -55,6 +56,11 @@ install(FILES "${PIPELANG_MODEL_SOURCE_ROOT}/src/native/third_party/yaml-cpp/LIC
 install(FILES "${PIPELANG_MODEL_SOURCE_ROOT}/src/native/third_party/yaml-cpp/src/contrib/dragonbox.h"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model/licenses/yaml-cpp")
 
+if(PIPELANG_NATIVE_COMPILER_PROFILE STREQUAL "windows-clang-mingw")
+    install(DIRECTORY "${PIPELANG_MODEL_SOURCE_ROOT}/src/native/third_party/windows-runtime/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model/licenses/windows-runtime")
+endif()
+
 set(model_cmake_directory "${CMAKE_INSTALL_LIBDIR}/cmake/PipeLangModel")
 configure_package_config_file(cmake/PipeLangModelConfig.cmake.in
     "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfig.cmake"
@@ -68,7 +74,13 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfigVersion.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelBindings.cmake" DESTINATION "${model_cmake_directory}")
 
+configure_file(cmake/NativeToolchain.json.in "${CMAKE_CURRENT_BINARY_DIR}/native-toolchain.json" @ONLY)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/native-toolchain.json"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model")
+
 # Run last so the receipt covers the actual installed binaries and configuration.
 configure_file(cmake/InstallModelManifest.cmake.in
     "${CMAKE_CURRENT_BINARY_DIR}/InstallModelManifest.cmake" @ONLY)
 install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/InstallModelManifest.cmake")
+
+pipelang_native_finalize("${CMAKE_CURRENT_SOURCE_DIR}")

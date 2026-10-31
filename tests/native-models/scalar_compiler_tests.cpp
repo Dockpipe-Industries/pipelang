@@ -5,8 +5,8 @@
 namespace {
 using namespace pipelang::tools;
 void run(const fs::path& root, const fs::path& sdk, const fs::path& output) {
-    const auto compiler = sdk / "bin/pipelang-native-cpp";
-    const auto emitter = sdk / "bin/pipelang-cpp-emitter";
+    const auto compiler = nativeExecutable(sdk / "bin/pipelang-native-cpp");
+    const auto emitter = nativeExecutable(sdk / "bin/pipelang-cpp-emitter");
     const auto emitterHash = fileHash(emitter);
     const auto fixture = root / "tests/native-models/ScalarCalls.pipe";
     const auto destination = output / "generated";

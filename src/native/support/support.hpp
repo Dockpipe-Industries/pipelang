@@ -2,6 +2,7 @@
 #pragma once
 #include "../third_party/nlohmann/json.hpp"
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -27,12 +28,15 @@ void require(bool condition, const std::string& message);
 Json dependencyInventory(const fs::path& root);
 Json auditExecutions(const fs::path& trace);
 void portablePath(const std::string& value);
+bool symbolicPath(const fs::path& path);
 void regularFile(const fs::path& path);
 void atomicWrite(const fs::path& path, std::string_view bytes);
 void publishDirectory(const fs::path& output, const std::map<std::string, std::string>& files);
 void publishOwnedDirectory(const fs::path& output, const std::map<std::string, std::string>& files,
                            const std::set<std::string>& ownedNames);
 fs::path executablePath();
+fs::path nativeExecutable(fs::path path);
+fs::path nativeTool(const std::string& name);
 void outputPreflight(const fs::path& output);
 std::string uniqueName();
 
@@ -46,6 +50,26 @@ ProcessResult process(const std::vector<std::string>& arguments, std::string_vie
                       std::chrono::milliseconds timeout = std::chrono::seconds(45),
                       std::size_t maximumOutput = 1U << 20, std::size_t maximumDiagnostic = 65536,
                       const std::function<void()>& monitor = {}, const fs::path& log = {});
+
+#ifdef _WIN32
+void atomicWriteWindows(const fs::path& temporary, const fs::path& output, std::string_view bytes);
+bool windowsReparsePoint(const fs::path& path);
+bool windowsPrivateFile(const fs::path& path);
+void appendWindows(const fs::path& path, std::string_view bytes, std::uint64_t maximum);
+
+struct WindowsJobLimits {
+    std::uint64_t memoryLimit = 2ULL << 30;
+    std::uint64_t memoryStop = 1800ULL << 20;
+    unsigned processLimit = 384;
+    unsigned threadLimit = 384;
+    std::string name;
+};
+
+ProcessResult windowsProcess(const std::vector<std::string>& arguments, std::string_view input,
+    std::chrono::milliseconds timeout, std::size_t maximumOutput, std::size_t maximumDiagnostic,
+    const std::function<void()>& monitor, const fs::path& log, const WindowsJobLimits& policy = {},
+    const std::function<void(std::uint64_t, std::uint64_t)>& account = {}, const std::function<void()>& cleaned = {});
+#endif
 
 class Arguments {
 public:

@@ -1,6 +1,7 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "../../src/native/sdk-tools/package.hpp"
 #include <iostream>
+#include "windows_junction.hpp"
 
 namespace {
 using namespace pipelang::tools;
@@ -89,9 +90,20 @@ void test(const fs::path& output) {
     bad["archive"]["sha256"] = fileHash(archive);
     changed("trailing-data", bad);
     atomicWrite(archive, original);
+#ifdef _WIN32
+    const auto junctionTarget = output / "junction-target";
+    atomicWrite(junctionTarget / "protected", "outside package roots");
+    pipelang::tests::DirectoryJunction junction(sdk / "bin/alias", junctionTarget);
+#else
     fs::create_symlink(sdk / "bin/tool", sdk / "bin/alias");
+#endif
     refuses("symbolic-input", [&] { packageSdk(sdk, sdkManifest, sdkHash, output / "symbolic"); });
+#ifdef _WIN32
+    junction.remove();
+    require(readFile(junctionTarget / "protected", 128) == "outside package roots", "junction fixture changed its target");
+#else
     fs::remove(sdk / "bin/alias");
+#endif
     refuses("output-within-sdk", [&] { packageSdk(sdk, sdkManifest, sdkHash, sdk / "package"); });
     atomicWrite(sdk / "bin/tool", "altered SDK executable");
     refuses("altered-sdk", [&] { packageSdk(sdk, sdkManifest, sdkHash, output / "altered"); });

@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 set -eu
+platform_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$platform_directory/../../../build/assets/scripts/platform.sh"
 if [ -n "${PIPELANG_NATIVE_TOOL_PATH:-}" ]; then
     PATH=$PIPELANG_NATIVE_TOOL_PATH
     export PATH
@@ -24,7 +26,11 @@ if [ "${1:-}" != --inside ]; then
         PIPELANG_NATIVE_RUNNER="$runner" PIPELANG_NATIVE_RUNNER_SHA256="$PIPELANG_NATIVE_RUNNER_SHA256" \
         PIPELANG_NATIVE_TOOL_PATH="${PIPELANG_NATIVE_TOOL_PATH:-}" sh "$0" --inside
 fi
-: "${CONTAINED_JOB_SLICE:?Packaging requires verified aggregate containment}"
+if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
+    : "${PIPELANG_MACOS_COORDINATOR:?Native workflow requires a macOS coordinator}"
+else
+    : "${CONTAINED_JOB_SLICE:?Packaging requires verified aggregate containment}"
+fi
 proof=$PIPELANG_NATIVE_PACKAGE_PROOF
 DOCKPIPE_EVENT_LOG="$proof/operation-events.jsonl"
 export DOCKPIPE_EVENT_LOG
@@ -37,8 +43,11 @@ unit() {
     unit_name=$1
     shift
     prefix="$proof/units/$unit_name"
+    if [ "$PIPELANG_NATIVE_PLATFORM" = linux ]; then
+        set -- /usr/bin/strace -f -e trace=execve -s 4096 -o "$prefix.exec" "$@"
+    fi
     if "$runner" unit --output "$prefix" --estate "$proof" --timeout 900 -- \
-        /usr/bin/strace -f -e trace=execve -s 4096 -o "$prefix.exec" "$@" > "$prefix.launcher.log" 2>&1; then
+        "$@" > "$prefix.launcher.log" 2>&1; then
         echo "$unit_name: passed"
         return
     fi
@@ -47,7 +56,7 @@ unit() {
     exit 1
 }
 unit archive "$tool" sdk-package --prefix "$sdk" --manifest "$manifest" --sha256 "$expected" --output "$proof/package"
-unit independent-archive-reader /usr/bin/cmake -E tar tf "$proof/package/pipelang-native-sdk.tar"
+unit independent-archive-reader "$PIPELANG_CMAKE" -E tar tf "$proof/package/pipelang-native-sdk.tar"
 package_manifest="$proof/package/sdk-package.json"
 package_hash=$(sha256sum "$package_manifest" | cut -d' ' -f1)
 unit extract "$tool" sdk-extract --manifest "$package_manifest" --sha256 "$package_hash" --output "$proof/relocated-sdk"
@@ -57,12 +66,13 @@ unit relocated-materializer "$build/legacy-compiler/pipelang-materialize-tests" 
 unit relocated-diagnostics "$build/legacy-compiler/pipelang-diagnostic-tests" "$proof/diagnostics" "$proof/relocated-sdk/bin/pipelang-native"
 unit relocated-operations "$build/legacy-compiler/pipelang-operation-tests" "$proof/operations" "$proof/relocated-sdk/bin/pipelang-native"
 unit relocated-scalars "$build/scalar-compiler/pipelang-scalar-tests" "$PWD" "$proof/relocated-sdk" "$proof/scalars"
-unit relocated-scalar-build /usr/bin/c++ -std=c++17 -Wall -Wextra -Werror -O2 "$proof/scalars/generated/runtime.cpp" -o "$proof/scalars/generated/test"
+unit relocated-scalar-build "$PIPELANG_CXX" -std=c++17 -Wall -Wextra -Werror -O2 "$proof/scalars/generated/runtime.cpp" -o "$proof/scalars/generated/test"
 unit relocated-scalar-run "$proof/scalars/generated/test"
 unit relocated-extended "$build/sdk-tools/pipelang-extended-tests" "$PWD" "$proof/relocated-sdk" "$proof/extended"
 unit relocated-sdk-verify "$proof/relocated-sdk/bin/pipelang-sdk-tool" verify --prefix "$proof/relocated-sdk" \
     --manifest "$proof/relocated-sdk/share/pipelang-model/sdk-manifest.json" --sha256 "$expected"
 for trace in "$proof"/units/*.exec; do
+    test -f "$trace" || continue
     audit_name=$(basename "$trace" .exec)
     "$runner" unit --output "$proof/units/$audit_name-exec-audit" --estate "$proof" --timeout 60 -- \
         "$tool" audit-exec --trace "$trace" --output "$trace.audit.json" > "$proof/units/$audit_name-exec-audit.launcher.log" 2>&1

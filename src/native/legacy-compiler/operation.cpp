@@ -82,10 +82,7 @@ void append(const fs::path& selected, const std::string& bytes) {
     }
     require(::close(file) == 0, "cannot close operation log");
 #else
-    std::ofstream stream(path, std::ios::binary | std::ios::app);
-    stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    stream.close();
-    require(stream.good(), "cannot append operation event");
+    appendWindows(path, bytes, 64U << 20);
 #endif
 }
 }

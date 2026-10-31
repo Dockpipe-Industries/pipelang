@@ -3,6 +3,8 @@
 #include <iostream>
 #include <regex>
 #include <sstream>
+#include <cstdlib>
+#include <optional>
 
 namespace {
 using namespace pipelang::tools;
@@ -26,11 +28,29 @@ void test(const fs::path& output, const fs::path& executable) {
     const auto source = project / "workflows/config.pipe";
     const auto root = source.parent_path();
     const auto log = output / "events.jsonl";
+#ifdef _WIN32
+    const auto generated = output / "generated&";
+#else
     const auto generated = output / "generated<&>";
+#endif
     atomicWrite(root / "config.yml", "");
     atomicWrite(source, "Class Demo { string IMAGE = \"nginx\"; int Add(int x) => x + 1; }");
     const auto invoke = [&](std::vector<std::string> arguments, const fs::path& selectedLog) {
+#ifdef _WIN32
+        struct EventEnvironment {
+            std::optional<std::string> previous;
+            explicit EventEnvironment(const fs::path& log) {
+                const char* value = std::getenv("DOCKPIPE_EVENT_LOG");
+                if (value)
+                    previous = value;
+                require(_putenv_s("DOCKPIPE_EVENT_LOG", log.string().c_str()) == 0, "cannot select operation event log");
+            }
+            ~EventEnvironment() { _putenv_s("DOCKPIPE_EVENT_LOG", previous ? previous->c_str() : ""); }
+        } environment(selectedLog);
+        std::vector<std::string> command{executable.string()};
+#else
         std::vector<std::string> command{"/usr/bin/env", "DOCKPIPE_EVENT_LOG=" + selectedLog.string(), executable.string()};
+#endif
         command.insert(command.end(), arguments.begin(), arguments.end());
         return process(command);
     };
@@ -43,13 +63,32 @@ void test(const fs::path& output, const fs::path& executable) {
         {"entry_class", "Demo"}, {"workflow_path", (generated / "Demo.workflow.yml").generic_string()},
         {"bindings_json_path", (generated / "Demo.bindings.json").generic_string()},
         {"bindings_env_path", (generated / "Demo.bindings.env").generic_string()}, {"result", "compiled"}}), "compile operation IDs differ");
+#ifdef _WIN32
+    require(readFile(log, 65536).find("\\u0026") != std::string::npos, "operation JSON lost HTML escaping");
+#else
     require(readFile(log, 65536).find("\\u003c") != std::string::npos, "operation JSON lost HTML escaping");
+#endif
+#ifdef _WIN32
+    require(windowsPrivateFile(log), "new Windows operation log is not private to its owner");
+#else
     require((fs::status(log).permissions() & fs::perms::mask) == (fs::perms::owner_read | fs::perms::owner_write), "new operation log is not private");
+#endif
+#ifdef _WIN32
+    // These characters are invalid for creation on Windows. The failed input
+    // still carries them through the operation event's error and identity.
+    const auto missing = root / "missing<&>.pipe";
+#else
     const auto missing = root / "missing.pipe";
+#endif
     require(invoke({"compile", "--profile", "v0.0.0.1", "--in", missing.string(), "--out", generated.string()}, log).exit != 0, "missing source compile succeeded");
     recorded = events(log);
     require(recorded.size() == 2, "failed compile did not append exactly one event");
     eventContract(recorded[1], "pipelang.compile", "fail");
+#ifdef _WIN32
+    const auto escaped = readFile(log, 65536);
+    require(escaped.find("\\u003c") != std::string::npos && escaped.find("\\u003e") != std::string::npos &&
+        escaped.find("\\u0026") != std::string::npos, "Windows operation event lost HTML escaping");
+#endif
     require(recorded[1].at("ids").at("input_path") == missing.generic_string() && recorded[1].at("ids").at("result") == "failed" &&
         !recorded[1].at("error").get<std::string>().empty(), "failed compile lost identity/error");
     const auto materialized = invoke({"materialize", "--profile", "v0.0.0.1", "--workdir", project.string(), "--from", root.string(), "--from", root.string(), "--force"}, log);

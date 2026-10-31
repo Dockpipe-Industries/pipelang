@@ -15,7 +15,7 @@ Json compile(const fs::path& tool, const Json& request, const std::string& proto
     const auto payload = request.dump();
     require(payload.size() <= 1U << 20, "native request exceeds its capacity");
     const auto result = process({tool.string()}, payload);
-    require(result.exit == 0 && result.diagnostic.empty(), "native compiler process failed or emitted diagnostics: " + result.diagnostic);
+    require(result.exit == 0 && result.diagnostic.empty(), "native compiler process failed or emitted diagnostics (exit " + std::to_string(result.exit) + "): " + result.diagnostic);
     auto response = parseJson(result.output, 1U << 20);
     require(response.is_object() && response.contains("protocol") && response.at("protocol") == protocol &&
             response.contains("ok") && response.at("ok").is_boolean(), "unexpected native response protocol or outcome");

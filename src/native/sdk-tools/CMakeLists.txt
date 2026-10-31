@@ -1,6 +1,11 @@
 add_library(pipelang_tool_support STATIC
     ../support/sha256.cpp ../support/files.cpp ../support/json.cpp ../support/process.cpp ../support/executable.cpp)
 target_compile_features(pipelang_tool_support PUBLIC cxx_std_20)
+if(WIN32)
+    target_sources(pipelang_tool_support PRIVATE ../support/process_windows.cpp ../support/files_windows.cpp)
+    target_link_libraries(pipelang_tool_support PUBLIC advapi32 psapi)
+    target_compile_definitions(pipelang_tool_support PRIVATE _WIN32_WINNT=0x0A00 WINVER=0x0A00 NOMINMAX)
+endif()
 set_target_properties(pipelang_tool_support PROPERTIES CXX_EXTENSIONS OFF)
 add_library(pipelang_sdk_tools STATIC manifest.cpp schema.cpp bindings.cpp package.cpp)
 target_link_libraries(pipelang_sdk_tools PUBLIC pipelang_tool_support)

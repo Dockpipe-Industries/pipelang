@@ -1,5 +1,8 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "../../src/native/model-compiler/compiler.hpp"
+#ifdef PIPELANG_CLASS_TRANSPORT
+#include "../../src/native/support/support.hpp"
+#endif
 
 #include <filesystem>
 #include <fstream>
@@ -210,6 +213,17 @@ void sourceAndModules(const std::filesystem::path& root, const std::filesystem::
 
 int main(int argc, char** argv) {
     try {
+#ifdef PIPELANG_CLASS_TRANSPORT
+        if (argc == 5 && std::string(argv[1]) == "--transport") {
+            using namespace pipelang::tools;
+            const auto request = readFile(argv[3], 16U << 20);
+            const auto response = process({argv[2]}, request, std::chrono::seconds(45), 16U << 20);
+            ::require(response.exit == 0 && response.diagnostic.empty(),
+                "installed class compiler transport failed: " + std::to_string(response.exit) + ": " + response.diagnostic);
+            atomicWrite(argv[4], response.output);
+            return 0;
+        }
+#endif
         if (argc == 4 && std::string(argv[1]) == "--verify") {
             const auto expected = Json::parse(read(argv[2]));
             const auto actual = Json::parse(read(argv[3]));

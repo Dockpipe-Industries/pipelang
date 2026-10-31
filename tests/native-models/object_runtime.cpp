@@ -67,7 +67,7 @@ struct CounterTag {
 };
 
 struct CounterInterface {
-    static constexpr std::uint64_t typeId = 100;
+    [[maybe_unused]] static constexpr std::uint64_t typeId = 100;
     static bool accepts(std::uint64_t value) {
         return value == CounterTag::typeId;
     }

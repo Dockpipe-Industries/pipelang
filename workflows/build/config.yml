@@ -5,4 +5,4 @@ steps:
   - id: build
     kind: host
     cwd: repo
-    run: assets/scripts/build.sh
+    cmd: cmake -DPIPELANG_OPERATION=build -P workflows/build/assets/scripts/dispatch.cmake

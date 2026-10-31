@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "scope": "Notices for LLVM/MinGW runtime components statically linked by the native Windows Clang profile; no compiler or optional Python/debugger runtime is redistributed in the SDK",
+  "upstream": "https://github.com/mstorsjo/llvm-mingw/releases/tag/20260616",
+  "archive_url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-x86_64.zip",
+  "archive_sha256": "b9b68a4d276e16fa25802aaba458e4638f64b3884c290aaccdc2d87083b6ca35",
+  "notices": [
+    {
+      "file": "LICENSE.TXT",
+      "archive_member": "llvm-mingw-20260616-ucrt-x86_64/LICENSE.TXT",
+      "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee",
+      "size_bytes": 15141
+    },
+    {
+      "file": "COPYING",
+      "archive_member": "llvm-mingw-20260616-ucrt-x86_64/x86_64-w64-mingw32/share/mingw32/COPYING",
+      "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f",
+      "size_bytes": 2326
+    },
+    {
+      "file": "COPYING.MinGW-w64.txt",
+      "archive_member": "llvm-mingw-20260616-ucrt-x86_64/x86_64-w64-mingw32/share/mingw32/COPYING.MinGW-w64.txt",
+      "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1",
+      "size_bytes": 5905
+    },
+    {
+      "file": "COPYING.MinGW-w64-runtime.txt",
+      "archive_member": "llvm-mingw-20260616-ucrt-x86_64/x86_64-w64-mingw32/share/mingw32/COPYING.MinGW-w64-runtime.txt",
+      "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f",
+      "size_bytes": 12155
+    },
+    {
+      "file": "COPYING.winpthreads.txt",
+      "archive_member": "llvm-mingw-20260616-ucrt-x86_64/x86_64-w64-mingw32/share/mingw32/COPYING.winpthreads.txt",
+      "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177",
+      "size_bytes": 2883
+    },
+    {
+      "file": "COPYING.winstorecompat.txt",
+      "archive_member": "llvm-mingw-20260616-ucrt-x86_64/x86_64-w64-mingw32/share/mingw32/COPYING.winstorecompat.txt",
+      "sha256": "fa7368d1f93d890c173177475d8ec7aff265a7d08f1f364d66f74d138978ce36",
+      "size_bytes": 1099
+    }
+  ]
+}

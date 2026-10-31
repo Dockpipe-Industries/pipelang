@@ -15,7 +15,17 @@ void require(bool condition, const std::string& message) {
     if (!condition)
         throw std::runtime_error(message);
 }
+bool symbolicPath(const fs::path& path) {
+#ifdef _WIN32
+    return windowsReparsePoint(path);
+#else
+    return fs::is_symlink(fs::symlink_status(path));
+#endif
+}
 void regularFile(const fs::path& path) {
+#ifdef _WIN32
+    require(!windowsReparsePoint(path), "expected a regular nonsymbolic file: " + path.string());
+#endif
     require(fs::is_regular_file(fs::symlink_status(path)), "expected a regular nonsymbolic file: " + path.string());
 }
 std::string readFile(const fs::path& path, std::size_t maximum) {
@@ -40,7 +50,7 @@ void portablePath(const std::string& value) {
     require(!value.empty() && value.find('\\') == std::string::npos && value.find('\0') == std::string::npos,
             "SDK paths must be portable relative paths");
     const fs::path path(value);
-    require(!path.is_absolute() && path.generic_string() == value, "SDK path is not canonical");
+    require(!path.has_root_path() && path.generic_string() == value, "SDK path is not canonical");
     for (const auto& component : path)
         require(component != "." && component != ".." && !component.empty(), "SDK path escapes its prefix");
     require(value.find(":") == std::string::npos && value.find("//") == std::string::npos && value.back() != '/',
@@ -50,18 +60,20 @@ void atomicWrite(const fs::path& path, std::string_view bytes) {
     fs::create_directories(path.parent_path());
     const auto temporary = path.parent_path() / (".pipelang-" + uniqueName());
     try {
+#ifdef _WIN32
+        atomicWriteWindows(temporary, path, bytes);
+#else
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
         output.close();
         require(output.good(), "failed to write staged output");
-#ifndef _WIN32
         const int file = ::open(temporary.c_str(), O_RDONLY | O_CLOEXEC);
         require(file >= 0, "cannot open staged output for synchronization");
         const int synced = ::fsync(file);
         ::close(file);
         require(synced == 0, "cannot synchronize staged output");
-#endif
         fs::rename(temporary, path);
+#endif
     } catch (...) {
         fs::remove(temporary);
         throw;
@@ -73,7 +85,7 @@ const std::set<std::string>& bindingNames() {
     return names;
 }
 void ownedPreflight(const fs::path& output, const std::set<std::string>& names) {
-    require(output.is_absolute() && !fs::is_symlink(fs::symlink_status(output)), "output must be an absolute nonsymbolic directory");
+    require(output.is_absolute() && !symbolicPath(output), "output must be an absolute nonsymbolic directory");
     require(fs::weakly_canonical(output) == output.lexically_normal(), "output has symbolic ancestors");
     if (!fs::exists(output))
         return;

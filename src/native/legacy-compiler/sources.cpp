@@ -27,7 +27,7 @@ std::map<std::string, std::string> readSources(const fs::path& root) {
             iterator.disable_recursion_pending();
             continue;
         }
-        require(!iterator->is_symlink(), "symbolic source entries are not admitted");
+        require(!symbolicPath(iterator->path()), "symbolic source entries are not admitted");
         if (iterator->is_directory() || iterator->path().extension() != ".pipe")
             continue;
         require(files.size() < 128, "legacy source-set bound exceeded");

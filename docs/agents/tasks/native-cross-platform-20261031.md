@@ -41,7 +41,8 @@ through DockPipe Git runtime to PR #8. The current `dev` commit `01a7e60` was
 merged into the source branch through the same runtime. Conflicts retained the
 qualified native implementations and retired Go/Python files. The resulting
 source tree exactly matches `7520a0e` (tree `b4cee57b6074cfbc5859753b01f179a3a6cd6238`);
-subsequent changes are limited to this evidence record, hosted-CI orchestration
+subsequent changes are limited to this evidence record, hosted-CI orchestration,
+byte-preserving Git checkout attributes,
 the Windows workflow checksum helper and Linux containment-probe path selection. Fresh hosted Windows build/test/package
 qualification covers that helper. The Linux probe now derives its aggregate
 cgroup path from kernel state and checks equality with the declared identity
@@ -56,7 +57,11 @@ Linux and Windows also repeat package/relocation. The existing weekly CodeQL
 schedule, workflow concurrency and Actions analysis category are preserved. A fresh Linux runner installs the native
 `/usr/bin/cmake` expected by source bootstrap. The Windows checksum helper now
 uses .NET SHA-256 directly because the hosted PowerShell environment did not
-provide `Get-FileHash`. Native compiler/runtime source is unchanged by these CI
+provide `Get-FileHash`. Fresh Windows CI passed the hashing and fourteen containment
+probes, then detected a pinned-vendor hash mismatch caused by checkout newline
+conversion. Root `.gitattributes` now disables automatic text conversion so
+Windows preserves the same committed vendor/fixture bytes already qualified
+through exact source delivery. Native compiler/runtime source is unchanged by these CI
 repairs. CodeQL also reported two unchanged upstream yaml-cpp boolean expressions;
 review found intentional boolean logic rather than an erroneous bitwise complement.
 Their disposition requires explicit owner approval after automatic review refused

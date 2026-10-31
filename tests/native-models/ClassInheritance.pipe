@@ -1,0 +1,220 @@
+public source Interface IReadable {
+    pure int Read();
+    void Set(int replacement);
+    Task<Result<int,string>> Later(SemaphoreSlim gate);
+}
+
+public Class Deep : Leaf {
+    public Deep(int initial) : base(initial) {}
+    public override pure int Read() => base.Read() + 100;
+}
+
+public Class Base : IReadable {
+    protected int count;
+    private int secret = 3;
+    public int Tag = 7;
+    public Optional<Base> Next;
+
+    protected Base(int initial) {
+        count = initial;
+    }
+
+    public virtual pure int Read() => count;
+    public virtual pure int Work(int iterations) {
+        int index = 0;
+        while (index < iterations) {
+            index = index + 1;
+        }
+        return index;
+    }
+    public pure int Fixed() => secret;
+    public pure int ViaThis() => Read();
+    public void Set(int replacement) { count = replacement; }
+    public void Link(Base other) { Next = Optional<Base>.Some(other); }
+    public pure bool Linked(Base other) => Next.HasValue && Next.Value == other;
+    protected virtual pure int ProtectedRead() => count;
+    public pure int ViaProtected() => ProtectedRead();
+    public virtual async Task<Result<int,string>> Later(SemaphoreSlim gate) {
+        await gate.WaitAsync();
+        return Result<int,string>.Success(Read());
+    }
+}
+
+public Class Leaf : Base {
+    private int extra = 10;
+    public Leaf(int initial) : base(initial + 1) {}
+    public override pure int Read() => base.Read() + extra;
+    public override pure int Work(int iterations) => base.Work(iterations) + 1;
+    protected override pure int ProtectedRead() => count + 20;
+    public pure int BaseOnly() => base.Read();
+    public pure int Fixed(int value) => value;
+    public override async Task<Result<int,string>> Later(SemaphoreSlim gate) {
+        Result<int,string> value = await base.Later(gate);
+        if (!value.IsSuccess)
+            return value;
+        return Result<int,string>.Success(value.Value + 1000);
+    }
+}
+
+public Class FailedBase : Base {
+    protected FailedBase(Base destination, Atomic<int> effects) : base(0) {
+        destination.Set(999);
+        effects.Increment();
+        throw Error("base failed");
+    }
+}
+
+public Class FailedLeaf : FailedBase {
+    public FailedLeaf(Base destination, Atomic<int> effects) : base(destination, effects) {}
+}
+
+public Class FailedBody : Base {
+    public FailedBody(Base destination, Atomic<int> effects) : base(0) {
+        destination.Set(888);
+        effects.Increment();
+        throw Error("derived failed");
+    }
+}
+
+public Class OrderBase {
+    private int before = log.Add(1);
+    protected OrderBase(Atomic<int> log, int seed) { log.Add(10); }
+    public pure int Before() => before;
+}
+
+public Class OrderLeaf : OrderBase {
+    private int after = log.Add(100);
+    public OrderLeaf(Atomic<int> log) : base(log, log.Add(10000)) { log.Add(1000); }
+    public pure int After() => after;
+}
+
+public Class RequiredBase {
+    public Base Required;
+    protected RequiredBase(Base initial) { Required = initial; }
+}
+
+public Class RequiredLeaf : RequiredBase {
+    public RequiredLeaf(Deep initial) : base(initial) {}
+}
+
+public Class MissingBase {
+    public Base Required;
+    protected MissingBase() {}
+}
+
+public Class MissingLeaf : MissingBase {
+    public MissingLeaf() {}
+}
+
+public Class VirtualConstructorBase {
+    public int Captured;
+    protected VirtualConstructorBase() { Captured = Read(); }
+    public virtual pure int Read() => 1;
+}
+
+public Class VirtualConstructorLeaf : VirtualConstructorBase {
+    private int later = 10;
+    public VirtualConstructorLeaf() {}
+    public override pure int Read() => later + 2;
+}
+
+public Class App {
+    private Deep item;
+    private Base alias;
+    private IReadable view;
+    private SemaphoreSlim signal;
+    private Atomic<int> effects;
+    public int marker = 0;
+
+    public App() {
+        item = new Deep(4);
+        alias = item;
+        view = item;
+    }
+
+    public pure int Read() => alias.Read();
+    public pure int InterfaceRead() => view.Read();
+    public pure int ViaThis() => item.ViaThis();
+    public pure int BaseOnly() => item.BaseOnly();
+    public pure int ProtectedRead() => item.ViaProtected();
+    public pure int Fixed() => alias.Fixed();
+    public pure bool Identity() => item == alias && alias == view;
+    public pure int Tag() => alias.Tag;
+    public void Set(int replacement) { alias.Set(replacement); }
+    public void SetTag(int replacement) { item.Tag = replacement; }
+    public void Link() { item.Link(alias); }
+    public pure bool Linked() => alias.Linked(item);
+    public pure Base Reference() => item;
+    public pure int Pick(Base value) => 1;
+    public pure int Pick(Deep value) => 2;
+    public pure int Overload() => Pick(item);
+    public pure int InheritedOverload() => item.Fixed() + item.Fixed(4);
+    public int Work(int iterations) => alias.Work(iterations);
+
+    public int ConstructorOrder() {
+        Atomic<int> log = Atomic<int>.Create(0);
+        OrderLeaf ordered = new OrderLeaf(log);
+        return ordered.Before() * 100000 + ordered.After() + log.Load();
+    }
+
+    public int Required() {
+        RequiredLeaf holder = new RequiredLeaf(item);
+        return holder.Required.Read();
+    }
+
+    public int Missing() {
+        try {
+            MissingLeaf missing = new MissingLeaf();
+        } catch (Error error) {
+            return 7;
+        }
+        return 0;
+    }
+
+    public int ConstructorDispatch() {
+        VirtualConstructorLeaf created = new VirtualConstructorLeaf();
+        return created.Captured * 100 + created.Read();
+    }
+
+    public int ConversionContexts(bool choose) {
+        Base selected = choose ? item : alias;
+        List<Deep> derived = List<Deep>.Empty();
+        derived.Add(item);
+        int total = selected.Read();
+        foreach (Base current in derived) {
+            total = total + current.Read();
+        }
+        return total;
+    }
+
+    public int Recover(bool baseFailure) {
+        try {
+            if (baseFailure) {
+                FailedLeaf failed = new FailedLeaf(item, effects);
+            } else {
+                FailedBody failed = new FailedBody(item, effects);
+            }
+        } catch (Error error) {
+            marker = marker + 1;
+        }
+        return alias.Read();
+    }
+
+    public int Rollback() {
+        marker = 99;
+        item.Set(999);
+        item.Tag = 999;
+        throw Error("rollback");
+    }
+
+    public int Effects() => effects.Load();
+    public void Open() { signal.Release(); }
+    public async Task<Result<int,string>> Later() {
+        Result<int,string> value = await alias.Later(signal);
+        return value;
+    }
+    public async Task<Result<int,string>> InterfaceLater() {
+        Result<int,string> value = await view.Later(signal);
+        return value;
+    }
+}

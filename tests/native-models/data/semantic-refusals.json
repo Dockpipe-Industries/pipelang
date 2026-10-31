@@ -1,0 +1,1496 @@
+[
+  {
+    "id": "parallel_source/0",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Atomic<int> value; }"
+    }
+  },
+  {
+    "id": "parallel_source/1",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Record R { public Atomic<int> value; }"
+    }
+  },
+  {
+    "id": "parallel_source/2",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<string> value; }"
+    }
+  },
+  {
+    "id": "parallel_source/3",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<List<int>> value; }"
+    }
+  },
+  {
+    "id": "parallel_source/4",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int,bool> value; }"
+    }
+  },
+  {
+    "id": "parallel_source/5",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private List<Atomic<int>> values; }"
+    }
+  },
+  {
+    "id": "parallel_source/6",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Optional<Atomic<int>> value; }"
+    }
+  },
+  {
+    "id": "parallel_source/7",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Result<Atomic<int>,string> value; }"
+    }
+  },
+  {
+    "id": "parallel_source/8",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public Atomic<int> Read() { return total; } }"
+    }
+  },
+  {
+    "id": "parallel_source/9",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public pure int Read() { return total.Load(); } }"
+    }
+  },
+  {
+    "id": "parallel_source/10",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read(Atomic<int> value) { return value.Load(); } }"
+    }
+  },
+  {
+    "id": "parallel_source/11",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<float> total; public void Run() { total.Add(1.0); } }"
+    }
+  },
+  {
+    "id": "parallel_source/12",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<bool> total; public void Run() { total.Increment(); } }"
+    }
+  },
+  {
+    "id": "parallel_source/13",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { total = Atomic<int>.Create(1); } }"
+    }
+  },
+  {
+    "id": "parallel_source/14",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { total.Store(true); } }"
+    }
+  },
+  {
+    "id": "parallel_source/15",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { total.CompareExchange(1); } }"
+    }
+  },
+  {
+    "id": "parallel_source/16",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { total.Load(1); } }"
+    }
+  },
+  {
+    "id": "parallel_source/17",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { total.Unknown(); } }"
+    }
+  },
+  {
+    "id": "parallel_source/18",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { parallel foreach (int item in values) { state = item; } } }"
+    }
+  },
+  {
+    "id": "parallel_source/19",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { int outer = 0; parallel foreach (int item in values) { outer = item; } } }"
+    }
+  },
+  {
+    "id": "parallel_source/20",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { List<int> captured = List<int>.Empty(); parallel foreach (int item in values) { captured.Add(item); } } }"
+    }
+  },
+  {
+    "id": "parallel_source/21",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { parallel foreach (int item in values) { return; } } }"
+    }
+  },
+  {
+    "id": "parallel_source/22",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { parallel foreach (int item in values) { break; } } }"
+    }
+  },
+  {
+    "id": "parallel_source/23",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { parallel foreach (int item in values) { continue; } } }"
+    }
+  },
+  {
+    "id": "parallel_source/24",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { parallel foreach (int item in values) { parallel foreach (int item in values) { total.Increment(); } } } }"
+    }
+  },
+  {
+    "id": "parallel_source/25",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public pure void Run(List<int> values) { parallel foreach (int item in values) { total.Increment(); } } }"
+    }
+  },
+  {
+    "id": "parallel_source/26",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0; private void Unsafe(int value) { state = value; } public void Run(List<int> values) { parallel foreach (int item in values) { Unsafe(item); } } }"
+    }
+  },
+  {
+    "id": "parallel_source/27",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0; private void Unsafe(int value) { state = value; } private void Indirect(int value) { Unsafe(value); } public void Run(List<int> values) { parallel foreach (int item in values) { Indirect(item); } } }"
+    }
+  },
+  {
+    "id": "parallel_source/28",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0; private void Nested(List<int> values) { parallel foreach (int item in values) { total.Increment(); } } public void Run(List<int> values) { parallel foreach (int item in values) { Nested(values); } } }"
+    }
+  },
+  {
+    "id": "parallel_source/29",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0; private int Ordinary() { state = 1; return state; } public void Run(List<int> values) { parallel foreach (int item in values) { int ignored = Ordinary(); } } }"
+    }
+  },
+  {
+    "id": "parallel_source/30",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0; private pure int UnsafePure() { return total.Load(); } public void Run(List<int> values) { parallel foreach (int item in values) { int local = 0; } } }"
+    }
+  },
+  {
+    "id": "parallel_source/31",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { int ignored = 0; parallel foreach (bool item in values) { ignored = 1; } } }"
+    }
+  },
+  {
+    "id": "parallel_source/32",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private Atomic<int> total; public int state = 0;  public void Run(List<int> values) { parallel foreach (int item in 3) { total.Increment(); } } }"
+    }
+  },
+  {
+    "id": "parallel_source/33",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Interface Host { Task<Result<int,string>> Work(CancellationToken token); } public Class M { private Host host; public M(Host service) { host = service; } public async Task<Result<int,string>> Run(List<int> values, CancellationToken token) { parallel foreach (int item in values) { Result<int,string> value = await host.Work(token); } return Result<int,string>.Success(0); } }"
+    }
+  },
+  {
+    "id": "parallel_source/34",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { private async Task<Result<int,string>> Child() { return Result<int,string>.Success(1); } public async Task<Result<int,string>> Run(List<int> values) { parallel foreach (int item in values) { Result<int,string> value = await Child(); } return Result<int,string>.Success(0); } }"
+    }
+  },
+  {
+    "id": "collections_source/0",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Dictionary<float,int> values; }"
+    }
+  },
+  {
+    "id": "collections_source/1",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public HashSet<float> values; }"
+    }
+  },
+  {
+    "id": "collections_source/2",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Record Key { public int number; } public Class M { public Dictionary<Key,int> values; }"
+    }
+  },
+  {
+    "id": "collections_source/3",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Dictionary<int> values; }"
+    }
+  },
+  {
+    "id": "collections_source/4",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Dictionary<int,int,string> values; }"
+    }
+  },
+  {
+    "id": "collections_source/5",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Array<int,string> values; }"
+    }
+  },
+  {
+    "id": "collections_source/6",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public KeyValuePair<int> value; }"
+    }
+  },
+  {
+    "id": "collections_source/7",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Queue<void> values; }"
+    }
+  },
+  {
+    "id": "collections_source/8",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Stack<CancellationToken> values; }"
+    }
+  },
+  {
+    "id": "collections_source/9",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Array<Task<Result<int,string>>> values; }"
+    }
+  },
+  {
+    "id": "collections_source/10",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { Array<int> values = Array<int>.Create(1.0, 0); return values.Count; } }"
+    }
+  },
+  {
+    "id": "collections_source/11",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { Array<int> values = Array<int>.Create(1, 0.0); return values.Count; } }"
+    }
+  },
+  {
+    "id": "collections_source/12",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { Array<int> values = Array<int>.Create(1, 0); values.Set(0.0, 1); return values.At(0); } }"
+    }
+  },
+  {
+    "id": "collections_source/13",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { Dictionary<string,int> values = Dictionary<string,int>.Empty(); values.Add(1, 2); return values.Count; } }"
+    }
+  },
+  {
+    "id": "collections_source/14",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { Queue<int> values = Queue<int>.Empty(); values.Enqueue(true); return values.Count; } }"
+    }
+  },
+  {
+    "id": "collections_source/15",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { Stack<int> values = Stack<int>.Empty(); values.Push(1.0); return values.Count; } }"
+    }
+  },
+  {
+    "id": "collections_source/16",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { KeyValuePair<string,int> pair = KeyValuePair<string,int>.Create(1, 2); return pair.Value; } }"
+    }
+  },
+  {
+    "id": "collections_source/17",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { KeyValuePair<string,int> pair = KeyValuePair<string,int>.Create(\"key\", 2); pair.Key = \"changed\"; return pair.Value; } }"
+    }
+  },
+  {
+    "id": "collections_source/18",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public pure int Read() { KeyValuePair<string,int> pair = KeyValuePair<string,int>.Create(\"key\", 2); pair.Value = 3; return pair.Value; } }"
+    }
+  },
+  {
+    "id": "collections_source/19",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Array<int> values; public pure int Read() { values.Set(0, 2); return 0; } }"
+    }
+  },
+  {
+    "id": "collections_source/20",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Dictionary<string,int> values; public pure int Read() { values.Set(\"key\", 2); return 0; } }"
+    }
+  },
+  {
+    "id": "collections_source/21",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public HashSet<int> values; public pure bool Read() { return values.Add(2); } }"
+    }
+  },
+  {
+    "id": "collections_source/22",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Queue<int> values; public pure int Read() { values.Enqueue(2); return 0; } }"
+    }
+  },
+  {
+    "id": "collections_source/23",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Class M { public Stack<int> values; public pure int Read() { return values.Pop(); } }"
+    }
+  },
+  {
+    "id": "collections_source/24",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "pipelang_models",
+      "source": "public Interface Store { Task<Result<int,string>> Save(CancellationToken token); } public Class M { public Dictionary<string,Store> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/0",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { public pure string Read() => \"a\" \"+\" \"b\"; }"
+    }
+  },
+  {
+    "id": "concurrent_source/1",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { public ConcurrentQueue<int> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/2",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { public ConcurrentStack<int> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/3",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { public ConcurrentDictionary<int,int> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/4",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Record R { public ConcurrentQueue<int> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/5",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private Optional<ConcurrentQueue<int>> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/6",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private Result<ConcurrentQueue<int>,string> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/7",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private List<ConcurrentQueue<int>> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/8",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private Array<ConcurrentStack<int>> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/9",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private Dictionary<string,ConcurrentQueue<int>> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/10",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentDictionary<int,ConcurrentQueue<int>> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/11",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentQueue<CancellationToken> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/12",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentStack<void> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/13",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentDictionary<float,int> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/14",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Record Key { public int value; } public Class M { private ConcurrentDictionary<Key,int> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/15",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentDictionary<int> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/16",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentQueue<int> values; public ConcurrentQueue<int> Leak() => values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/17",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentQueue<int> values; public async Task<Result<ConcurrentQueue<int>,string>> Leak() { return Result<ConcurrentQueue<int>,string>.Success(values); } }"
+    }
+  },
+  {
+    "id": "concurrent_source/18",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentQueue<int> values; public void Replace() { values = ConcurrentQueue<int>.Empty(); } }"
+    }
+  },
+  {
+    "id": "concurrent_source/19",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentQueue<int> values; public pure int Count() => values.Count; }"
+    }
+  },
+  {
+    "id": "concurrent_source/20",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentQueue<int> values; public pure List<int> Snapshot() => values.ToList(); }"
+    }
+  },
+  {
+    "id": "concurrent_source/21",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentDictionary<int,int> values; public pure int Read() => values.At(0); }"
+    }
+  },
+  {
+    "id": "concurrent_source/22",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { public pure int Read() { ConcurrentQueue<int> local = ConcurrentQueue<int>.Empty(); return local.Count; } }"
+    }
+  },
+  {
+    "id": "concurrent_source/23",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentDictionary<int,int> values; public void Add() { values.Set(0, true); } }"
+    }
+  },
+  {
+    "id": "concurrent_source/24",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentStack<int> values; public void Add() { values.Push(1.0); } }"
+    }
+  },
+  {
+    "id": "concurrent_source/25",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Class M { private ConcurrentDictionary<int,int> values; public bool Update() => values.TryUpdate(0, 1, false); }"
+    }
+  },
+  {
+    "id": "concurrent_source/26",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Record Box<T> { public T Value; } public Class M { private Box<ConcurrentQueue<int>> values; }"
+    }
+  },
+  {
+    "id": "concurrent_source/27",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Interface Store { Task<Result<ConcurrentStack<int>,string>> Read(CancellationToken token); } public Class M {}"
+    }
+  },
+  {
+    "id": "concurrent_source/28",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "concurrent_models",
+      "source": "public Interface Store { Task<Result<ConcurrentStack<int>,string>> Read(CancellationToken token); } public Class M {}"
+    }
+  },
+  {
+    "id": "synchronization_source/0",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { lock (1) {}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/1",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { lock (gate) {\n    permits.Wait();\n}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/2",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { lock (gate) {\n    bool acquired = permits.Wait(0);\n}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/3",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits; private void Blocking() {\n    permits.Wait();\n} public void Run(List<int> values) { lock (gate) {\n    Blocking();\n}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/4",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits; private void Blocking() {\n    permits.Wait();\n}\nprivate void Middle() {\n    Blocking();\n} public void Run(List<int> values) { lock (gate) {\n    Middle();\n}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/5",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { lock (gate) {\n    parallel foreach (int item in values) {}\n}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/6",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits; private void Launch(List<int> items) {\n    parallel foreach (int item in items) {\n        int copy = item;\n    }\n} public void Run(List<int> values) { lock (gate) {\n    Launch(values);\n}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/7",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public async Task<Result<void,string>> Run(List<int> values) { lock (gate) {\n    await permits.WaitAsync();\n} return Result<void,string>.Success(); } }"
+    }
+  },
+  {
+    "id": "synchronization_source/8",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits; private void Blocking() {\n    permits.Wait();\n} public async Task<Result<void,string>> Run(List<int> values) { Blocking(); return Result<void,string>.Success(); } }"
+    }
+  },
+  {
+    "id": "synchronization_source/9",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits; private void Blocking() {\n    permits.Wait();\n}\nprivate void Middle() {\n    Blocking();\n} public async Task<Result<void,string>> Run(List<int> values) { Middle(); return Result<void,string>.Success(); } }"
+    }
+  },
+  {
+    "id": "synchronization_source/10",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public async Task<Result<void,string>> Run(List<int> values) { permits.Wait(); return Result<void,string>.Success(); } }"
+    }
+  },
+  {
+    "id": "synchronization_source/11",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { try {} finally {\n    permits.Wait();\n}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/12",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits; private void Blocking() {\n    permits.Wait();\n} public void Run(List<int> values) { try {} finally {\n    Blocking();\n}  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/13",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public async Task<Result<void,string>> Run(List<int> values) { try {} finally {\n    await permits.WaitAsync();\n} return Result<void,string>.Success(); } }"
+    }
+  },
+  {
+    "id": "synchronization_source/14",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public async Task<Result<void,string>> Run(List<int> values) { parallel foreach (int item in values) {\n    await permits.WaitAsync();\n} return Result<void,string>.Success(); } }"
+    }
+  },
+  {
+    "id": "synchronization_source/15",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { Lock local = Lock.Create(1);  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/16",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { SemaphoreSlim local = SemaphoreSlim.Create(true);  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/17",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { SemaphoreSlim local = SemaphoreSlim.Create(1, false);  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/18",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { permits.Release(true);  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/19",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { bool acquired = permits.Wait(0.0);  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/20",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public async Task<Result<void,string>> Run(List<int> values) { bool acquired = await permits.WaitAsync(0.0); return Result<void,string>.Success(); } }"
+    }
+  },
+  {
+    "id": "synchronization_source/21",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { permits.WaitAsync();  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/22",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { gate = Lock.Create();  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/23",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits;  public void Run(List<int> values) { permits = SemaphoreSlim.Create(1);  } }"
+    }
+  },
+  {
+    "id": "synchronization_source/24",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { public Lock exposed; }"
+    }
+  },
+  {
+    "id": "synchronization_source/25",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { public SemaphoreSlim exposed; }"
+    }
+  },
+  {
+    "id": "synchronization_source/26",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock<int> invalid; }"
+    }
+  },
+  {
+    "id": "synchronization_source/27",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private SemaphoreSlim<int> invalid; }"
+    }
+  },
+  {
+    "id": "synchronization_source/28",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Record Refusal { public Lock invalid; }"
+    }
+  },
+  {
+    "id": "synchronization_source/29",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Optional<SemaphoreSlim> invalid; }"
+    }
+  },
+  {
+    "id": "synchronization_source/30",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private List<Lock> invalid; }"
+    }
+  },
+  {
+    "id": "synchronization_source/31",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Result<SemaphoreSlim,string> invalid; }"
+    }
+  },
+  {
+    "id": "synchronization_source/32",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; public Lock Escape() => gate; }"
+    }
+  },
+  {
+    "id": "synchronization_source/33",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private SemaphoreSlim gate; public SemaphoreSlim Escape() => gate; }"
+    }
+  },
+  {
+    "id": "synchronization_source/34",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private SemaphoreSlim gate; public pure int Observe() => gate.CurrentCount; }"
+    }
+  },
+  {
+    "id": "synchronization_source/35",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { public pure int Observe() { Lock gate = Lock.Create(); return 1; } }"
+    }
+  },
+  {
+    "id": "synchronization_source/36",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Interface Host { Task<Result<void,string>> Send(Lock gate); } public Class Refusal {}"
+    }
+  },
+  {
+    "id": "synchronization_source/37",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Interface Host { Task<Result<void,string>> Send(SemaphoreSlim gate); } public Class Refusal {}"
+    }
+  },
+  {
+    "id": "synchronization_source/38",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Interface Host { Task<Result<SemaphoreSlim,string>> Read(); } public Class Refusal {}"
+    }
+  },
+  {
+    "id": "synchronization_source/39",
+    "request": {
+      "protocol": "pipelang.native-model.v1",
+      "namespace": "synchronization_models",
+      "source": "public Class Refusal { private Lock gate; private SemaphoreSlim permits; public int marker; public void Run(List<int> values) { parallel foreach (int item in values) {\n    lock (gate) {\n        marker = item;\n    }\n}  } }"
+    }
+  },
+  {
+    "id": "objects_source/0",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public Counter exposed; }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/1",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public List<Counter> exposed; }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/2",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public Optional<Counter> exposed; }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/3",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\npublic Record Box<T> { public T Value; }\npublic Class App { private Box<Counter> invalid; }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/4",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { private Dictionary<Counter,int> invalid; }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/5",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { private HashSet<Counter> invalid; }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/6",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { private ConcurrentQueue<Counter> invalid; }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/7",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { private ConcurrentDictionary<int,Counter> invalid; }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/8",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public int Read() { Counter local = new Counter(); return local.secret; } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/9",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public int Read() { Counter local = new Counter(); return local.Missing(); } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/10",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public App Make() { return new App(); } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/11",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public int Read() { Counter local = null; return local.Read(); } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/12",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public void Run(List<int> values) { Counter local = new Counter(); parallel foreach (int item in values) { local.Set(item); } } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/13",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { private Lock gate; public void Run(List<int> values) { Counter local = new Counter(); parallel foreach (int item in values) { lock (gate) { local.Set(item); } } } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/14",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public int Read() { Counter<int> local = new Counter<int>(); return local.Read(); } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/15",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public int Read() { Counter local = new Counter(); return local.Read<int>(); } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/16",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\npublic Record Invalid { public Counter reference; }\npublic Class App {  }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/17",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\npublic Interface Host { Task<Result<void,string>> Send(Counter reference); }\npublic Class App {  }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/18",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\npublic Interface Host { Task<Result<Counter,string>> Read(); }\npublic Class App {  }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/19",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public source Interface I { pure int Read(); } public Class C : I { public int Read() => 1; } public Class App {}",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/20",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public source Interface I { pure int Read(); } public Class C : I {} public Class App {}",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/21",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public source Interface I { void Set(int value); } public Class C : I { private void Set(int value) {} } public Class App {}",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/22",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public source Interface I { pure int Read(); } public Class C : I { public pure bool Read() => true; } public Class App {}",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/23",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public source Interface I { void Set(int value); } public Class C : I { public void Set(string value) {} } public Class App {}",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/24",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public source Interface I { pure int Read(); } public Class C : I { public pure int Read() => 1; } public Class App { public int Run() { I view = new C(); C converted = (C)view; return converted.Read(); } }",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/25",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public source Interface I { Task<Result<int,string>> Read(); } public Class C : I { public pure int Read() => 1; } public Class App {}",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "objects_source/26",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "object_models",
+      "source": "public source Interface Left { pure int Read(); }\npublic source Interface Right { pure int Read(); }\npublic Class Both : Left, Right {\n    public pure int Read() => 1;\n}\npublic Class App {\n    private pure int Pick(Left value) => value.Read();\n    private pure int Pick(Right value) => value.Read();\n    public int Run() {\n        Both value = new Both();\n        return Pick(value);\n    }\n}\n",
+      "models": [
+        "App"
+      ]
+    }
+  },
+  {
+    "id": "interfaces_source/0",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface A : A {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/1",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface A : B {} public source Interface B : A {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/2",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Base {} public source Interface Derived : Base, Base {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/3",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Derived : Missing {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/4",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public Interface Host { Task<Result<int,string>> Read(); } public source Interface Derived : Host {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/5",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public Class Base {} public source Interface Derived : Base {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/6",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Left { pure int Read(); } public source Interface Right { pure bool Read(); } public source Interface Derived : Left, Right {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/7",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Left { pure int Read(); } public source Interface Right { int Read(); } public source Interface Derived : Left, Right {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/8",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Base { pure int Read(); } public source Interface Derived : Base { pure bool Read(); } public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/9",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Base { Task<Result<int,string>> Read(); } public source Interface Derived : Base { pure int Read(); } public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/10",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Base { void Set(int value); } public source Interface Derived : Base {} public Class Value : Derived {} public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/11",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Base { pure int Read(); } public source Interface Derived : Base {} public Class Value : Derived { public int Read() => 1; } public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/12",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Base { pure int Read(); } public source Interface Derived : Base {} public Class Value : Derived { private pure int Read() => 1; } public Class App {}"
+    }
+  },
+  {
+    "id": "interfaces_source/13",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Left { pure int Read(); } public source Interface Right { pure int Read(); } public Class Value : Left { public pure int Read() => 1; } public Class App { public int Run() { Left first = new Value(); Right other = first; return other.Read(); } }"
+    }
+  },
+  {
+    "id": "interfaces_source/14",
+    "request": {
+      "protocol": "pipelang.native-model.v3",
+      "namespace": "interface_inheritance",
+      "models": [
+        "App"
+      ],
+      "source": "public source Interface Base { pure int Read(); } public source Interface Derived : Base {} public Class Value : Derived { public pure int Read() => 1; } public Class App { public int Run() { Base basic = new Value(); Derived narrowed = basic; return narrowed.Read(); } }"
+    }
+  }
+]

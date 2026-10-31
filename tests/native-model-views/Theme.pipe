@@ -1,0 +1,15 @@
+style Theme {
+    token inset: length = 16px;
+    token ink: color = "#DDEEFFff";
+    padding: inset;
+    gap: 8px;
+    controlHeight: 42px;
+    text: ink;
+    focus: "#AABBCCff";
+    disabledText: "#667788ff";
+}
+style Compact extends Theme {
+    override token inset: length = 10.5px;
+    override gap: 4px;
+    background: "#102030ff";
+}

@@ -2,6 +2,9 @@
 #pragma once
 #include "result.hpp"
 #include <cstdint>
+#include <atomic>
+#include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -94,19 +97,71 @@ public:
         EvaluationBudget& budget_;
     };
     void step() {
+        if (cleanupDepth_ == 0 && cancellationCheck_ && cancellationCheck_())
+            throw OperationCancelled("parallel operation cancelled");
+        if (shared_) {
+            auto& remaining = cleanupDepth_ == 0 ? shared_->normal : shared_->cleanup;
+            auto observed = remaining.load(std::memory_order_relaxed);
+            for (;;) {
+                if (observed == 0)
+                    throw EvaluationLimitFailure(cleanupDepth_ == 0
+                        ? "source evaluation budget exceeded" : "cleanup evaluation budget exceeded");
+                if (remaining.compare_exchange_strong(observed, observed - 1, std::memory_order_relaxed))
+                    return;
+            }
+        }
         auto& remaining = cleanupDepth_ == 0 ? remaining_ : cleanupRemaining_;
         if (remaining == 0)
             throw EvaluationLimitFailure(cleanupDepth_ == 0
                 ? "source evaluation budget exceeded" : "cleanup evaluation budget exceeded");
         --remaining;
     }
+    bool inCleanup() const noexcept {
+        return cleanupDepth_ != 0;
+    }
     CleanupRegion cleanup() { return CleanupRegion(*this); }
     void reset() {
         remaining_ = maximumSteps;
         cleanupRemaining_ = maximumSteps;
+        if (shared_) {
+            shared_->normal.store(maximumSteps, std::memory_order_relaxed);
+            shared_->cleanup.store(maximumSteps, std::memory_order_relaxed);
+        }
+    }
+    void prepareParallel() {
+        if (cleanupDepth_ != 0)
+            throw ExecutionFailure("parallel work cannot start during cleanup");
+        if (!shared_)
+            shared_ = std::make_shared<SharedCounters>(remaining_, cleanupRemaining_);
+    }
+    EvaluationBudget fork() const {
+        if (!shared_)
+            throw ExecutionFailure("parallel budget must be prepared before worker creation");
+        EvaluationBudget child;
+        child.shared_ = shared_;
+        child.cancellationCheck_ = cancellationCheck_;
+        return child;
+    }
+    void setCancellationCheck(std::function<bool()> check) {
+        if (!cancellationCheck_) {
+            cancellationCheck_ = std::move(check);
+            return;
+        }
+        auto inherited = std::move(cancellationCheck_);
+        cancellationCheck_ = [inherited = std::move(inherited), check = std::move(check)] {
+            return inherited() || (check && check());
+        };
     }
     static constexpr std::size_t maximumSteps = 65536;
 private:
+    struct SharedCounters {
+        SharedCounters(std::size_t normalSteps, std::size_t cleanupSteps)
+            : normal(normalSteps), cleanup(cleanupSteps) {}
+        std::atomic<std::size_t> normal;
+        std::atomic<std::size_t> cleanup;
+    };
+    std::shared_ptr<SharedCounters> shared_;
+    std::function<bool()> cancellationCheck_;
     std::size_t remaining_ = maximumSteps;
     std::size_t cleanupRemaining_ = maximumSteps;
     unsigned cleanupDepth_ = 0;

@@ -1,0 +1,1 @@
+module Values; public Record Box<T> { public T Value; } public Enum Shade { Blue, Red }

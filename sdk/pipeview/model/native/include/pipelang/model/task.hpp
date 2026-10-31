@@ -4,6 +4,7 @@
 #include "result.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <coroutine>
@@ -119,6 +120,8 @@ struct Coroutine {
         void unhandled_exception() {
             try {
                 throw;
+            } catch (const OperationCancelled& error) {
+                pendingResult = T::Cancelled(safeErrorMessage(error));
             } catch (const std::exception& error) {
                 pendingResult = T::Failure(safeErrorMessage(error));
             } catch (...) {
@@ -174,7 +177,18 @@ struct Coroutine {
 // completions have FIFO order. Worker callbacks never access model state. The
 // owner must pump poll(); no continuation is run by the worker or another owner.
 class TaskScope {
+    struct PollState {
+        std::function<std::optional<bool>()> check;
+        CancellationToken cancellation;
+        std::optional<bool> result;
+        std::exception_ptr failure;
+        std::coroutine_handle<> continuation;
+        bool cancelled = false;
+        bool active = false;
+    };
+
 public:
+    static constexpr std::size_t maximumPollingWaits = 32;
     explicit TaskScope(TaskOptions options = {})
         : owner_(std::this_thread::get_id()), capacity_(options.capacity) {
         if (capacity_ == 0 || capacity_ > TaskOptions::maximumCapacity)
@@ -208,6 +222,15 @@ public:
         }
         for (auto& completion : finalCompletions)
             completion();
+        // Closing never calls a polling predicate: a semaphore permit must not
+        // be consumed by a wait that is being cancelled during owner teardown.
+        const auto closingWaits = polling_;
+        for (const auto& state : closingWaits) {
+            if (state && state->active) {
+                evaluatePoll(*state, true);
+                completePoll(state);
+            }
+        }
         abandoningFrames_ = true;
         for (auto& entry : entries_) {
             entry.abandon();
@@ -252,6 +275,9 @@ public:
     }
     std::size_t poll() {
         requireOwner();
+        // Capture registrations before host continuations run. A continuation
+        // may register another wait, which belongs to the next owner poll.
+        const auto pollingSnapshot = polling_;
         // Only the queue present at entry is delivered. Jobs submitted by these
         // continuations are delivered on a later poll, avoiding an unbounded pump.
         std::deque<std::function<void()>> ready;
@@ -259,11 +285,88 @@ public:
             std::lock_guard lock(mutex_);
             ready.swap(completed_);
         }
-        const auto count = ready.size();
+        auto count = ready.size();
         for (auto& completion : ready)
             completion();
+        for (const auto& state : pollingSnapshot) {
+            if (state && state->active && evaluatePoll(*state, stopping_)) {
+                completePoll(state);
+                ++count;
+            }
+        }
         reap();
         return count;
+    }
+    class PollingAwaitable {
+    public:
+        PollingAwaitable(TaskScope& scope, std::function<std::optional<bool>()> check,
+                         CancellationToken cancellation)
+            : scope_(scope), state_(std::make_shared<PollState>()) {
+            state_->check = std::move(check);
+            state_->cancellation = std::move(cancellation);
+        }
+
+        PollingAwaitable(const PollingAwaitable&) = delete;
+        PollingAwaitable& operator=(const PollingAwaitable&) = delete;
+        PollingAwaitable(PollingAwaitable&&) noexcept = default;
+
+        ~PollingAwaitable() {
+            if (state_) {
+                // Frame destruction invalidates a registration even if its
+                // slot remains in an already captured poll snapshot.
+                state_->active = false;
+                state_->continuation = {};
+                state_->check = {};
+            }
+        }
+
+        bool await_ready() {
+            scope_.requireOwner();
+            return scope_.evaluatePoll(*state_, scope_.stopping_);
+        }
+
+        bool await_suspend(std::coroutine_handle<> continuation) {
+            scope_.requireOwner();
+            if (scope_.stopping_) {
+                scope_.evaluatePoll(*state_, true);
+                return false;
+            }
+            for (auto& slot : scope_.polling_) {
+                if (!slot || !slot->active) {
+                    state_->continuation = continuation;
+                    state_->active = true;
+                    slot = state_;
+                    *suspended_ = true;
+                    return true;
+                }
+            }
+            throw ExecutionFailure("polling wait capacity exceeded");
+        }
+
+        bool await_resume() {
+            if (state_->failure)
+                std::rethrow_exception(state_->failure);
+            if (state_->cancelled)
+                throw OperationCancelled("operation cancelled");
+            if (!state_->result)
+                throw ExecutionFailure("polling wait completed without a result");
+            return *state_->result;
+        }
+
+        std::shared_ptr<const bool> suspensionState() const {
+            return suspended_;
+        }
+
+    private:
+        TaskScope& scope_;
+        std::shared_ptr<PollState> state_;
+        std::shared_ptr<bool> suspended_ = std::make_shared<bool>(false);
+    };
+
+    PollingAwaitable pollUntil(std::function<std::optional<bool>()> check,
+                              CancellationToken cancellation = {}) {
+        requireOwner();
+        return PollingAwaitable(*this, std::move(check), std::move(cancellation));
     }
     template<class T>
     class HostAwaitable {
@@ -325,6 +428,34 @@ public:
         return HostAwaitable<T>(*this, std::move(function), std::move(cancellation));
     }
 private:
+    bool evaluatePoll(PollState& state, bool closing) {
+        try {
+            if (closing || state.cancellation.is_cancelled()) {
+                state.cancelled = true;
+                return true;
+            }
+            state.result = state.check();
+            return state.result.has_value();
+        } catch (...) {
+            state.failure = std::current_exception();
+            return true;
+        }
+    }
+
+    void completePoll(const std::shared_ptr<PollState>& state) {
+        // Unregister before resuming: the continuation may destroy this awaiter
+        // and immediately reuse a slot for a different operation.
+        state->active = false;
+        for (auto& slot : polling_) {
+            if (slot == state)
+                slot.reset();
+        }
+        auto continuation = std::exchange(state->continuation, {});
+        state->check = {};
+        if (continuation)
+            continuation.resume();
+    }
+
     struct Entry {
         std::coroutine_handle<> handle;
         std::function<void()> cancel;
@@ -374,6 +505,7 @@ private:
     std::size_t capacity_;
     std::thread worker_;
     std::vector<Entry> entries_;
+    std::array<std::shared_ptr<PollState>, maximumPollingWaits> polling_{};
     std::mutex mutex_;
     std::condition_variable wake_;
     std::deque<Job> jobs_;

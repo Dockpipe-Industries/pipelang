@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace pipelang::models {
 
@@ -15,8 +16,21 @@ struct Diagnostic : std::runtime_error {
     Diagnostic(std::string message, std::size_t offset)
         : std::runtime_error(std::move(message)), offset(offset) {}
     std::size_t offset;
+    std::string module;
+};
+
+struct ModuleSource {
+    std::string name;
+    std::string source;
 };
 
 nlohmann::json compile(const std::string& source, const std::string& nameSpace);
+nlohmann::json compileModules(const std::vector<ModuleSource>& modules, const std::string& entry,
+                              const std::string& nameSpace);
+
+nlohmann::json compileObjects(const std::string& source, const std::vector<std::string>& models,
+                              const std::string& nameSpace);
+nlohmann::json compileModuleObjects(const std::vector<ModuleSource>& modules, const std::string& entry,
+                                    const std::vector<std::string>& models, const std::string& nameSpace);
 
 }

@@ -375,6 +375,9 @@ bool validType(const std::string &type, const std::set<std::string> &names, unsi
 }
 void validateManifest(const Json &manifest)
 {
+    if (manifest.is_object() && manifest.contains("protocol") &&
+        manifest.at("protocol") == "pipelang.native-model-manifest.v2")
+        throw std::runtime_error("object and source-interface model view transport is not qualified");
     members(manifest, {"protocol", "namespace", "records", "enums", "interfaces", "classes"});
     if (text(manifest, "protocol") != "pipelang.native-model-manifest.v1" || !safeNamespace(text(manifest, "namespace")))
         throw std::runtime_error("unsupported or unsafe model manifest");
@@ -382,6 +385,20 @@ void validateManifest(const Json &manifest)
     for (const auto *category : {"records", "enums", "interfaces", "classes"}) {
         boundedArray(manifest.at(category));
         for (const auto &item : manifest.at(category)) {
+            if (item.contains("constructorOverloads"))
+                throw std::runtime_error("view bindings do not support overloaded model constructors");
+            if (item.contains("sourceName"))
+                throw std::runtime_error("view bindings do not support module or specialized generic declarations");
+            if (item.contains("methods") && item.at("methods").is_array()) {
+                std::set<std::string> methodNames;
+                for (const auto &method : item.at("methods")) {
+                    if (method.contains("sourceName"))
+                        throw std::runtime_error("view bindings do not support specialized generic methods");
+                    if (method.is_object() && method.contains("name") && method.at("name").is_string() &&
+                        !methodNames.insert(method.at("name").get<std::string>()).second)
+                        throw std::runtime_error("view bindings do not support overloaded model methods");
+                }
+            }
             const auto name = text(item, "name");
             if (!safeName(name) || !types.insert(name).second)
                 throw std::runtime_error("unsafe or duplicate manifest type");
@@ -481,7 +498,7 @@ Json compile(const Json &request)
         const auto source = text(request, "source");
         validateManifest(request.at("model_manifest"));
         const auto nameSpace = request.contains("namespace") ? text(request, "namespace") : "pipelang_models";
-        if (!safeNamespace(nameSpace) || nameSpace != request.at("model_manifest").at("namespace"))
+        if (!safeNamespace(nameSpace) || nameSpace != text(request.at("model_manifest"), "namespace"))
             throw std::runtime_error("namespace must safely match model manifest");
         const auto header = text(request, "model_header");
         if (header.empty() || header.size() > 256 || header.front() == '/' || header.find("..") != std::string::npos)

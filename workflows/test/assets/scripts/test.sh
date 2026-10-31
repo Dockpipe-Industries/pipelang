@@ -1,18 +1,13 @@
 #!/usr/bin/env sh
 set -eu
-export GOWORK=off
-go test -p 1 ./src/lib/application ./sdk/materialize ./sdk/pipeview/... ./examples/pipeview-forgepipe ./src/cmd/... ./src/lib/pipelang/cppbackend ./src/lib/pipelang/internal/nativeprocess ./src/lib/pipelang/nativelexer ./src/lib/pipelang/nativeviewparser ./tests/pipelangcompat
-go test -p 1 ./src/lib/pipelang -run '^(TestParse|TestAnalyze|TestCompile|TestInvoke|TestDiagnostic|TestSemantic|TestFormatView)' -skip 'Memory|Generated|GoBackend'
-
-python3 -B tests/pipeview/check_packages.py
-
-python3 -B tests/pipeview/check_test_handles.py
-
-# Build and qualify a fresh native SDK when explicitly selected.
-if [ "${PIPELANG_TEST_NATIVE_MODELS:-0}" = 1 ]; then
-    : "${PIPELANG_NATIVE_MODEL_PROOF:?Select a fresh proof directory outside the checkout}"
-    python3 -B tests/native-models/qualify.py \
-        --source-root "$PWD" \
-        --build-sdk \
-        --output "$PIPELANG_NATIVE_MODEL_PROOF"
+platform_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$platform_directory/../../../build/assets/scripts/platform.sh"
+script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PIPELANG_NATIVE_TOOLCHAIN_PROOF=${PIPELANG_NATIVE_TOOLCHAIN_PROOF:-$(readlink -f bin/native-current)}
+: "${PIPELANG_NATIVE_TOOLCHAIN_PROOF:?Run the build workflow first}"
+if [ -z "${PIPELANG_NATIVE_COMPAT_PROOF:-}" ]; then
+    workspace=$(mktemp -d "${TMPDIR:-/tmp}/pipelang-native-test.XXXXXXXX")
+    PIPELANG_NATIVE_COMPAT_PROOF="$workspace/proof"
 fi
+export PIPELANG_NATIVE_TOOLCHAIN_PROOF PIPELANG_NATIVE_COMPAT_PROOF
+exec sh "$script_directory/native-toolchain.sh"

@@ -1,156 +1,35 @@
-name: Standalone staging release
+name: Native SDK package candidate
 on:
-  push:
-    tags: ['v0.1.*-staging.*']
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: standalone-release-${{ github.ref }}
-  cancel-in-progress: false
 jobs:
-  artifacts:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 35
-    outputs:
-      manifest_sha256: ${{ steps.manifest.outputs.sha256 }}
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: '1.26.10'
-          cache: false
-      - name: Verify release contracts
-        run: python3 -m unittest discover -s tooling -p 'test_*.py'
-      - name: Verify fresh staging tag
-        if: startsWith(github.ref, 'refs/tags/')
-        run: test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
-      - name: Install the locked Dockpipe version
-        run: python3 tooling/bootstrap_dockpipe.py --output "$RUNNER_TEMP/dockpipe"
-      - name: Verify the bounded repository baseline through Dockpipe
+      - name: Prepare native containment
         run: |
-          "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml --
-          "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml --
-      - name: Build standalone archives through Dockpipe
-        run: '"$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml --'
-      - id: manifest
-        name: Bind native jobs to exact manifest
-        shell: python
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          command -v cmake c++ strace systemd-run
+      - name: Install checksum-locked DockPipe
+        run: cmake -DOUTPUT_DIRECTORY="$RUNNER_TEMP/dockpipe" -P tooling/bootstrap-dockpipe.cmake
+      - name: Build, qualify and package through DockPipe
         run: |
-          import hashlib
-          import os
-          from pathlib import Path
-          data = (Path(os.environ['PIPELANG_RELEASE_DIR']) / 'release-manifest.json').read_bytes()
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('sha256=' + hashlib.sha256(data).hexdigest() + '\n')
+          "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/check/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml
+          echo "PACKAGE_DIRECTORY=$(readlink -f bin/native-package)" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: pipelang-standalone
-          path: ${{ env.PIPELANG_RELEASE_DIR }}
+          name: pipelang-native-linux-amd64
+          path: ${{ env.PACKAGE_DIRECTORY }}
           if-no-files-found: error
           retention-days: 7
-  native:
-    needs: artifacts
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            platform: linux/amd64
-            artifact: linux-amd64
-          - runner: ubuntu-24.04-arm
-            platform: linux/arm64
-            artifact: linux-arm64
-          - runner: windows-latest
-            platform: windows/amd64
-            artifact: windows-amd64
-          - runner: macos-15-intel
-            platform: darwin/amd64
-            artifact: darwin-amd64
-          - runner: macos-15
-            platform: darwin/arm64
-            artifact: darwin-arm64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.13'
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: pipelang-standalone
-          path: ${{ runner.temp }}/standalone
-      - name: Accept exact archive outside checkout on native host
-        shell: python
-        env:
-          MANIFEST_SHA256: ${{ needs.artifacts.outputs.manifest_sha256 }}
-          NATIVE_PLATFORM: ${{ matrix.platform }}
-          NATIVE_ARTIFACT: ${{ matrix.artifact }}
-        run: |
-          import os
-          from pathlib import Path
-          import subprocess
-          import sys
-          root = Path(os.environ['RUNNER_TEMP'])
-          subprocess.run([sys.executable, 'workflows/release/assets/scripts/qualify.py',
-                          '--directory', str(root / 'standalone'),
-                          '--manifest-sha256', os.environ['MANIFEST_SHA256'],
-                          '--source', os.environ['GITHUB_SHA'],
-                          '--platform', os.environ['NATIVE_PLATFORM'],
-                          '--output', str(root / 'native' / ('native-' + os.environ['NATIVE_ARTIFACT'] + '.json'))],
-                         check=True, timeout=300)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: native-${{ matrix.artifact }}
-          path: ${{ runner.temp }}/native
-          if-no-files-found: error
-  publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v0.1.')
-    needs: [artifacts, native]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: pipelang-standalone
-          path: ${{ runner.temp }}/standalone
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: native-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/standalone
-      - name: Validate complete accepted release
-        env:
-          MANIFEST_SHA256: ${{ needs.artifacts.outputs.manifest_sha256 }}
-        shell: python
-        run: |
-          import os
-          from pathlib import Path
-          import sys
-          sys.path.insert(0, 'workflows/release/assets/scripts')
-          import publish
-          publish.validate(Path(os.environ['RUNNER_TEMP']) / 'standalone',
-                           os.environ['MANIFEST_SHA256'], os.environ['GITHUB_SHA'])
-      - name: Attest exact archives, manifest and native receipts
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
-        with:
-          subject-path: ${{ runner.temp }}/standalone/*
-      - name: Publish or verify immutable staging prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MANIFEST_SHA256: ${{ needs.artifacts.outputs.manifest_sha256 }}
-        run: |
-          python3 workflows/release/assets/scripts/publish.py \
-            --directory "$RUNNER_TEMP/standalone" --manifest-sha256 "$MANIFEST_SHA256"

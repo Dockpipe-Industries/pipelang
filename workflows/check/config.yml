@@ -5,4 +5,4 @@ steps:
   - id: check
     kind: host
     cwd: repo
-    run: assets/scripts/check.py
+    cmd: cmake -DPIPELANG_OPERATION=check -P workflows/build/assets/scripts/dispatch.cmake

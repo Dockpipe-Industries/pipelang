@@ -1,0 +1,188 @@
+module App;
+import Values;
+
+public Class ConcurrentModel {
+    private ConcurrentDictionary<int,int> sharedMap;
+    private ConcurrentQueue<int> sharedQueue;
+    private ConcurrentStack<int> sharedStack;
+    private ConcurrentDictionary<string,Box<int>> boxes;
+    private Atomic<int> total;
+    private ConcurrentDictionary<int,string> textMap;
+    public int marker = 0;
+
+    public int DefaultCounts() {
+        return sharedMap.Count + sharedQueue.Count + sharedStack.Count + boxes.Count;
+    }
+
+    public bool CompoundOperations() {
+        ConcurrentDictionary<string,int> local = ConcurrentDictionary<string,int>.Empty();
+        bool first = local.TryAdd("key", 1);
+        bool duplicate = local.TryAdd("key", 99);
+        int existing = local.GetOrAdd("key", 8);
+        int inserted = local.GetOrAdd("new", 3);
+        bool mismatch = local.TryUpdate("key", 5, 9);
+        bool replaced = local.TryUpdate("key", 5, 1);
+        Optional<int> found = local.TryGet("key");
+        Optional<int> absent = local.TryGet("missing");
+        bool contains = local.ContainsKey("new");
+        Optional<int> removed = local.TryRemove("new");
+        Optional<int> removedAgain = local.TryRemove("new");
+        List<string> keys = local.Keys;
+        List<int> values = local.Values;
+        List<KeyValuePair<string,int>> entries = local.Entries;
+        bool valid = first && !duplicate && existing == 1 && inserted == 3
+            && !mismatch && replaced && found.Value == 5 && !absent.HasValue
+            && contains && removed.Value == 3 && !removedAgain.HasValue
+            && local.At("key") == 5 && keys.Count == 1 && values.At(0) == 5
+            && entries.At(0).Key == "key" && entries.At(0).Value == 5;
+        local.Clear();
+        return valid && local.Count == 0;
+    }
+
+    public bool SequenceOperations() {
+        ConcurrentQueue<int> fifo = ConcurrentQueue<int>.Empty();
+        ConcurrentStack<int> lifo = ConcurrentStack<int>.Empty();
+        Optional<int> emptyQueue = fifo.TryPeek();
+        Optional<int> emptyStack = lifo.TryPop();
+        fifo.Enqueue(1);
+        fifo.Enqueue(2);
+        lifo.Push(3);
+        lifo.Push(4);
+        List<int> queueSnapshot = fifo.ToList();
+        List<int> stackSnapshot = lifo.ToList();
+        ConcurrentQueue<int> alias = fifo;
+        alias.Enqueue(5);
+        Optional<int> queuePeek = fifo.TryPeek();
+        Optional<int> stackPeek = lifo.TryPeek();
+        Optional<int> dequeued = fifo.TryDequeue();
+        Optional<int> popped = lifo.TryPop();
+        bool valid = !emptyQueue.HasValue && !emptyStack.HasValue
+            && queueSnapshot.Count == 2 && queueSnapshot.At(0) == 1
+            && stackSnapshot.At(0) == 4 && fifo.Count == 2
+            && queuePeek.Value == 1 && stackPeek.Value == 4
+            && dequeued.Value == 1 && popped.Value == 4;
+        fifo.Clear();
+        lifo.Clear();
+        return valid && alias.Count == 0 && lifo.Count == 0;
+    }
+
+    private void PutBox<T>(ConcurrentDictionary<string,Box<T>> destination, T value) {
+        destination.Set("boxed", new Box<T> { Value = value });
+    }
+
+    public int GenericModuleHelper() {
+        PutBox<int>(boxes, 13);
+        return boxes.At("boxed").Value;
+    }
+
+    private void PutWorker(ConcurrentDictionary<int,int> destination, int value) {
+        destination.TryAdd(value, value * 2);
+        sharedQueue.Enqueue(value);
+        sharedStack.Push(value);
+        total.Add(value);
+    }
+
+    private void PutViaHelper(ConcurrentDictionary<int,int> destination, int value) {
+        PutWorker(destination, value);
+    }
+
+    public int ParallelShared(List<int> values) {
+        sharedMap.Clear();
+        sharedQueue.Clear();
+        sharedStack.Clear();
+        total.Store(0);
+        ConcurrentDictionary<int,int> alias = sharedMap;
+        parallel foreach (int item in values) {
+            PutViaHelper(alias, item);
+        }
+        return sharedMap.Count * 1000 + total.Load();
+    }
+
+    public int ParallelSnapshot() {
+        sharedQueue.Clear();
+        sharedQueue.Enqueue(0);
+        sharedQueue.Enqueue(1);
+        sharedQueue.Enqueue(2);
+        sharedQueue.Enqueue(3);
+        total.Store(0);
+        parallel foreach (int item in sharedQueue) {
+            sharedQueue.Enqueue(item + 10);
+            total.Add(item);
+        }
+        return sharedQueue.Count * 1000 + total.Load();
+    }
+
+    public int OrdinarySnapshot() {
+        sharedStack.Clear();
+        sharedStack.Push(1);
+        sharedStack.Push(2);
+        int sum = 0;
+        foreach (int item in sharedStack) {
+            sharedStack.Push(item + 10);
+            sum = sum + item;
+        }
+        return sharedStack.Count * 100 + sum;
+    }
+
+    public List<int> QueueSnapshot() {
+        return sharedQueue.ToList();
+    }
+
+    public int MapValue(int key) {
+        return sharedMap.At(key);
+    }
+
+    public int QueueCount() {
+        return sharedQueue.Count;
+    }
+
+    public int StackCount() {
+        return sharedStack.Count;
+    }
+
+    public void FailAfterSharedEffects() {
+        marker = 99;
+        sharedMap.Set(999, 5);
+        sharedQueue.Enqueue(99);
+        throw Error("after shared effects");
+    }
+
+    public void Cancelled(List<int> values, CancellationToken token) {
+        marker = 99;
+        sharedMap.Set(777, 7);
+        parallel foreach (int item in values) {
+            sharedMap.Set(item, item);
+        }
+    }
+
+    private async Task<Result<int,string>> AsyncChild(ConcurrentQueue<int> destination) {
+        destination.Enqueue(6);
+        return Result<int,string>.Success(destination.Count);
+    }
+
+    public async Task<Result<int,string>> AsyncLocalCapture() {
+        ConcurrentQueue<int> local = ConcurrentQueue<int>.Empty();
+        Result<int,string> outcome = await AsyncChild(local);
+        return Result<int,string>.Success(local.Count + outcome.Value);
+    }
+
+    public bool ByteLimitPersistent(string first, string second) {
+        marker = 100;
+        textMap.Set(1, first);
+        return textMap.TryAdd(2, second);
+    }
+
+    public int TextCount() {
+        return textMap.Count;
+    }
+
+    public bool FailedTextEntryAbsent() {
+        return !textMap.ContainsKey(2);
+    }
+
+    public async Task<Result<int,string>> PublicAsyncHandle(ConcurrentQueue<int> destination) {
+        destination.Enqueue(8);
+        return Result<int,string>.Success(destination.Count);
+    }
+
+}

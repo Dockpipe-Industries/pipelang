@@ -7,6 +7,8 @@
 namespace pipelang::models {
 
 std::string Type::text() const {
+    if (!sourceName.empty())
+        return sourceName;
     std::string result = name;
     if (!arguments.empty()) {
         result += '<';
@@ -24,19 +26,41 @@ namespace {
 
 class Parser {
 public:
-    explicit Parser(std::vector<native::Token> tokens) : tokens_(std::move(tokens)) {}
+    Parser(std::vector<native::Token> tokens, bool objectSyntax, std::size_t parameterLimit)
+        : tokens_(std::move(tokens)), objectSyntax_(objectSyntax), parameterLimit_(parameterLimit) {}
     Program program() {
         Program result;
+        result.tokenCount = tokens_.size();
+        if (take("module")) {
+            result.module = qualifiedName();
+            expect(";");
+        }
+        while (take("import")) {
+            result.imports.push_back(qualifiedName());
+            expect(";");
+        }
         while (!atEnd()) {
             expect("public");
             Declaration declaration;
             declaration.offset = current().start;
+            declaration.sourceInterface = take("source");
             declaration.kind = current().literal;
             if (declaration.kind != "Class" && declaration.kind != "Record" &&
                 declaration.kind != "Enum" && declaration.kind != "Interface")
                 fail("expected Class, Record, Enum or Interface");
             advance();
+            if (declaration.sourceInterface && declaration.kind != "Interface")
+                fail("source modifier requires Interface");
             declaration.name = identifier();
+            declaration.module = result.module;
+            declaration.typeParameters = typeParameters();
+            if (take(":")) {
+                if (declaration.kind != "Class" && !declaration.sourceInterface)
+                    fail("only Class or source Interface declarations accept source interface bases");
+                do {
+                    declaration.interfaces.push_back(type());
+                } while (take(","));
+            }
             expect("{");
             if (declaration.kind == "Enum") {
                 do {
@@ -51,12 +75,15 @@ public:
             if (result.declarations.size() > 128)
                 fail("declaration limit exceeded");
         }
+        result.expressionCount = expressionCount_;
         return result;
     }
 private:
     const native::Token& current() const { return tokens_.at(position_); }
     bool atEnd() const { return current().kind == "eof"; }
-    bool is(const std::string& value) const { return current().literal == value; }
+    bool is(const std::string& value) const {
+        return current().kind != "text" && current().literal == value;
+    }
     void advance() {
         if (atEnd())
             fail("unexpected end of source");
@@ -93,13 +120,31 @@ private:
             "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile",
             "wchar_t", "while", "xor", "not_eq", "and_eq", "or_eq", "xor_eq",
             "char8_t", "char16_t", "char32_t", "std", "pipelang",
-            "State", "snapshot", "poll", "pending", "foreach", "in", "finally"
+            "State", "snapshot", "poll", "pending", "foreach", "in", "finally", "parallel", "module", "import", "lock"
         };
         if (value.size() > 96 || (value.starts_with('_') || value.starts_with("pl_")) || value.find("__") != std::string::npos ||
-            reserved.contains(value))
+            reserved.contains(value) || (objectSyntax_ && (value == "base" || value == "override")))
             fail("identifier is reserved or exceeds the identifier limit");
         advance();
         return value;
+    }
+    std::string qualifiedName() {
+        std::string result = identifier();
+        while (take("."))
+            result += "." + identifier();
+        return result;
+    }
+    std::vector<std::string> typeParameters() {
+        std::vector<std::string> result;
+        if (!take("<"))
+            return result;
+        do {
+            result.push_back(identifier());
+            if (result.size() > 12)
+                fail("generic parameter limit exceeded");
+        } while (take(","));
+        expect(">");
+        return result;
     }
     Type type(unsigned depth = 0) {
         if (depth > 12)
@@ -108,6 +153,8 @@ private:
             fail("expected type");
         Type result{current().literal, {}};
         advance();
+        while (result.name != "float" && !isSynchronizationHandle(result.name) && take("."))
+            result.name += "." + identifier();
         if (take("<")) {
             do {
                 result.arguments.push_back(type(depth + 1));
@@ -119,16 +166,22 @@ private:
     void member(Declaration& declaration) {
         const auto offset = current().start;
         bool visible = true;
-        if (take("private"))
+        const bool protectedMember = objectSyntax_ && take("protected");
+        if (protectedMember || take("private"))
             visible = false;
         else if (declaration.kind != "Interface")
             expect("public");
         else
             take("public");
+        const bool virtualMethod = objectSyntax_ && take("virtual");
+        const bool overrideMethod = objectSyntax_ && take("override");
         const bool pure = take("pure");
         const bool asynchronous = take("async");
         Method method;
         method.visible = visible;
+        method.protectedMember = protectedMember;
+        method.virtualMethod = virtualMethod;
+        method.overrideMethod = overrideMethod;
         method.pure = pure;
         method.asynchronous = asynchronous;
         method.offset = offset;
@@ -140,14 +193,17 @@ private:
             method.result = type();
             method.name = identifier();
         }
+        method.typeParameters = typeParameters();
         if (!take("(")) {
-            if (pure || asynchronous || method.constructor || declaration.kind == "Interface")
+            if (!method.typeParameters.empty())
+                fail("generic fields are not supported");
+            if (pure || asynchronous || virtualMethod || overrideMethod || method.constructor || declaration.kind == "Interface")
                 fail("invalid field declaration");
             Expr initializer;
             if (take("="))
                 initializer = expression();
             expect(";");
-            declaration.fields.push_back({method.result, method.name, visible, offset, initializer});
+            declaration.fields.push_back({method.result, method.name, visible, offset, initializer, protectedMember, {}});
             return;
         }
         if (!is(")")) {
@@ -156,11 +212,25 @@ private:
                 const auto parameterOffset = current().start;
                 auto name = identifier();
                 method.parameters.push_back({std::move(parameterType), std::move(name), true, parameterOffset});
-                if (method.parameters.size() > 32)
+                if (method.parameters.size() > parameterLimit_)
                     fail("parameter limit exceeded");
             } while (take(","));
         }
         expect(")");
+        if (objectSyntax_ && take(":")) {
+            if (!method.constructor)
+                fail("only constructors accept a base initializer");
+            expect("base");
+            expect("(");
+            std::vector<Expr> arguments{make("name", "base", offset)};
+            if (!is(")")) {
+                do {
+                    arguments.push_back(expression());
+                } while (take(","));
+            }
+            expect(")");
+            method.baseConstructor = make("call", "", offset, std::move(arguments));
+        }
         if (declaration.kind == "Interface") {
             expect(";");
             method.asynchronous = method.result.name == "Task";
@@ -199,6 +269,14 @@ private:
         DepthGuard depthGuard{statementDepth_};
         Statement result;
         result.offset = current().start;
+        if (take("lock")) {
+            result.kind = "lock";
+            expect("(");
+            result.expression = expression();
+            expect(")");
+            result.body = is("{") ? block() : std::vector<Statement>{statement()};
+            return result;
+        }
         if (take("try")) {
             result.kind = "try";
             result.body = block();
@@ -238,8 +316,11 @@ private:
             result.body = is("{") ? block() : std::vector<Statement>{statement()};
             return result;
         }
+        const bool parallel = take("parallel");
+        if (parallel && !is("foreach"))
+            fail("parallel requires foreach");
         if (take("foreach")) {
-            result.kind = "foreach";
+            result.kind = parallel ? "parallel_foreach" : "foreach";
             expect("(");
             result.type = type();
             result.name = identifier();
@@ -328,6 +409,8 @@ private:
             fail("expression nesting limit exceeded");
         auto left = unary();
         for (;;) {
+            if (current().kind == "text")
+                break;
             const auto priority = precedence(current().literal);
             if (priority < minimum)
                 break;
@@ -357,26 +440,48 @@ private:
         Expr result;
         const auto token = current();
         if (take("new")) {
-            const auto name = identifier();
-            expect("{");
-            std::vector<Expr> fields;
-            if (!is("}")) {
-                do {
-                    const auto offset = current().start;
-                    const auto fieldName = identifier();
-                    expect("=");
-                    fields.push_back(make("named_field", fieldName, offset, {expression()}));
-                } while (take(",") && !is("}"));
+            const auto recordType = type();
+            const auto name = recordType.name;
+            if (take("(")) {
+                std::vector<Expr> arguments{make("name", name, token.start)};
+                if (!is(")")) {
+                    do {
+                        arguments.push_back(expression());
+                    } while (take(","));
+                }
+                expect(")");
+                result = make("new_construct", name, token.start, std::move(arguments));
+            } else {
+                expect("{");
+                std::vector<Expr> fields;
+                if (!is("}")) {
+                    do {
+                        const auto offset = current().start;
+                        const auto fieldName = identifier();
+                        expect("=");
+                        fields.push_back(make("named_field", fieldName, offset, {expression()}));
+                    } while (take(",") && !is("}"));
+                }
+                expect("}");
+                result = make("named_construct", name, token.start, std::move(fields));
             }
-            expect("}");
-            result = make("named_construct", name, token.start, std::move(fields));
+            result->type = recordType;
+        } else if (objectSyntax_ && take("base")) {
+            auto receiver = make("base", "base", token.start);
+            expect(".");
+            result = make("member", identifier(), token.start, {std::move(receiver)});
+        } else if (take("this")) {
+            result = make("this", "this", token.start);
         } else if (take("(")) {
             result = expression();
             expect(")");
         } else if (token.kind == "text" || token.kind == "integer" || token.kind == "float" || token.kind == "boolean") {
             advance();
             result = make(token.kind, token.literal, token.start);
-        } else if (is("Result") || is("Optional") || is("List") || is("float")) {
+        } else if (is("Result") || is("Optional") || is("List") || is("Atomic") || is("Array") ||
+                   is("Dictionary") || is("HashSet") || is("Queue") || is("Stack") ||
+                   is("KeyValuePair") || is("float") || is("Lock") || is("SemaphoreSlim") ||
+                   isConcurrentCollection(token.literal)) {
             const auto resultType = type();
             result = make("type", resultType.text(), token.start);
             result->type = resultType;
@@ -384,6 +489,25 @@ private:
             result = make("name", identifier(), token.start);
         }
         for (;;) {
+            if (is("<") && (result->kind == "name" || result->kind == "member")) {
+                const auto saved = position_;
+                try {
+                    advance();
+                    std::vector<Type> arguments;
+                    do {
+                        arguments.push_back(type());
+                    } while (take(","));
+                    expect(">");
+                    if (is("(")) {
+                        result->kind = result->kind == "name" ? "generic_name" : "generic_member";
+                        result->typeArguments = std::move(arguments);
+                        continue;
+                    }
+                } catch (const Diagnostic&) {
+                    // The enclosing expression parser owns the refusal.
+                }
+                position_ = saved;
+            }
             if (take(".")) {
                 const auto offset = current().start;
                 result = make("member", identifier(), offset, {result});
@@ -403,6 +527,8 @@ private:
         return result;
     }
     std::vector<native::Token> tokens_;
+    bool objectSyntax_ = false;
+    std::size_t parameterLimit_ = 32;
     std::size_t position_ = 0;
     std::size_t expressionCount_ = 0;
     unsigned blockDepth_ = 0;
@@ -412,7 +538,9 @@ private:
 
 }
 
-Program parse(const std::string& source) {
+Program parse(const std::string& source, bool objectSyntax, std::size_t parameterLimit) {
+    if (parameterLimit != 32 && parameterLimit != 64)
+        throw Diagnostic("unrecognized parser parameter bound", 0);
     if (source.size() > sourceLimit)
         throw Diagnostic("source byte limit exceeded", 0);
     auto lexed = native::lex(source, native::NumericSyntax::Binary64);
@@ -420,7 +548,7 @@ Program parse(const std::string& source) {
         throw Diagnostic(lexed.failure->message, lexed.failure->start);
     if (lexed.tokens.size() > 32768)
         throw Diagnostic("token limit exceeded", 0);
-    return Parser(std::move(lexed.tokens)).program();
+    return Parser(std::move(lexed.tokens), objectSyntax, parameterLimit).program();
 }
 
 }

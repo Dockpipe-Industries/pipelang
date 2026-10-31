@@ -1,12 +1,15 @@
 # PipeLang
 
 This repository owns the PipeLang compiler, SDKs, command line tools and language
-conformance fixtures. It depends on no Dockpipe Go source. Dockpipe consumes the
-versioned public compiler and materializer SDKs as an external module.
+conformance fixtures. It imports no DockPipe implementation source. Consumers use the installed,
+versioned native compiler and SDK.
 
-Keep existing reference compiler semantics in `src/lib/pipelang`, application IR in
-`src/lib/applicationir`, CLI orchestration in `src/lib/application`, and public
-materialization support in `sdk/materialize`. Workflow-specific scripts belong
+This repository must contain zero Go/Python source, scripts, manifests and
+toolchain dependencies. Implement active compiler/CLI/SDK contracts in C++ and
+run development operations through DockPipe. Unused historical
+language profiles, Go APIs and research harnesses may be removed; do not recreate
+them solely because they exist. Preserve inherited uncommitted work in a verified
+snapshot outside the checkout before retirement. Workflow-specific scripts belong
 beside their workflow in `workflows/<name>/assets/scripts`.
 
 New explicitly selected ordinary-model semantics live in
@@ -14,13 +17,16 @@ New explicitly selected ordinary-model semantics live in
 `src/native/model-view-compiler`. The owned-value/task runtime and exact installed
 SDK belong to `sdk/pipeview/model`. Keep headless model/runtime consumers free of
 ForgePipe/Qt dependencies; host-specific generated view bridges remain optional.
-Preserve legacy profiles as compatibility evidence while migrating consumers.
+Preserve frozen regression inputs; retired historical profiles are not executable support promises.
 
 Use `DOCKPIPE_BIN=/absolute/path/to/dockpipe` and invoke `workflows/check`,
 `workflows/build` and `workflows/test` through explicit `--workflow-file` paths.
-These run repository hygiene and bounded baseline checks. Generated compiler tests and
-resource campaigns require `tests/containedexec/run.py`; never claim full-suite
-coverage from the baseline workflow. Preserve frozen compatibility goldens.
+These run repository hygiene and bounded baseline checks. The default workflows use the independently qualified C++ `pipelang-contained` job/unit runner;
+use it through the declared workflows as documented in validation guidance.
+Keep compiler tests and resource campaigns within the unchanged verified caps.
+The old harness is retirement input, not a permanent dependency; do not
+add Go or Python build/test/packaging implementations. Never claim full-suite
+coverage from a selected native subset. Preserve frozen compatibility goldens.
 
 PipeLang's direction is a modern object-oriented language with familiar C#/Java
 readability and expressiveness for humans and AI. Read the language direction in
@@ -32,10 +38,8 @@ manual unrolling or awkward helpers. Bounded slices are verification steps, not
 the destination or an excuse for poor application architecture.
 
 Implement new compiler/runtime capabilities in C++ first; avoid new Go
-implementations that merely create future porting work. Existing Go remains the
-reference for behavior it already implements. Make shared semantic/IR changes
-deliberately and prove new behavior independently; do not automatically duplicate
-new capabilities in Go. Preserve compatibility, resource limits and explicit
+implementations that merely create future porting work. Retired Go code is not a build or correctness dependency. Make shared
+semantic/IR changes deliberately and prove behavior independently. Preserve compatibility, resource limits and explicit
 selection contracts, and label planned support separately from implemented support.
 AI-first means clear semantics, strong types, explicit effects/failures, useful
 diagnostics and inspectable behavior while preserving readable application code.

@@ -1,0 +1,9 @@
+
+public Class InitializerModel {
+    public int Value = Convert(-seed);
+    public InitializerModel(int seed) { }
+    public InitializerModel(float seed) { }
+    public pure int Convert(int value) => 1;
+    public pure int Convert(float value) => 2;
+}
+

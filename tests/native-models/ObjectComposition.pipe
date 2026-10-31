@@ -1,0 +1,143 @@
+public source Interface I {
+    pure int Read();
+    void Set(int value);
+}
+
+public Class Counter : I {
+    public int clone = 1;
+    public int validate = 2;
+    public int trace = 3;
+    public int logicalBytes = 4;
+    public int validateInitialized = 5;
+
+    public pure int InternalNameFields() {
+        return clone + validate + trace + logicalBytes + validateInitialized;
+    }
+
+    private int mypl_scopeValue;
+
+    public Counter(int initial) {
+        mypl_scopeValue = initial;
+    }
+
+    public pure int Read() {
+        return mypl_scopeValue;
+    }
+
+    public void Set(int replacement) {
+        mypl_scopeValue = replacement;
+    }
+
+    public pure string Text() {
+        return "pl_scope pl_transaction.commit() [this]";
+    }
+}
+
+public Class Bag {
+    private List<I> items = List<I>.Empty();
+    private Queue<Counter> waiting = Queue<Counter>.Empty();
+    private Dictionary<string,Counter> named = Dictionary<string,Counter>.Empty();
+
+    public void Add(Counter value) {
+        items.Add(value);
+        waiting.Enqueue(value);
+        named.Set("last", value);
+    }
+
+    public Counter Take() {
+        return waiting.Dequeue();
+    }
+
+    public void ChangeFirst(int value) {
+        items.At(0).Set(value);
+    }
+
+    public pure int Read() {
+        return items.At(0).Read() + named.At("last").Read();
+    }
+
+    public pure int Shape() {
+        return items.Count * 100 + waiting.Count * 10 + named.Count;
+    }
+}
+
+public Class PrivateBuilt {
+    private int stored = 0;
+
+    public PrivateBuilt() {
+    }
+
+    private PrivateBuilt(int initial) {
+        stored = initial;
+    }
+
+    public PrivateBuilt Make(int value) {
+        return new PrivateBuilt(value);
+    }
+
+    public pure int Read() {
+        return stored;
+    }
+}
+
+public Class App {
+    private Bag bag;
+    public int mypl_scopeMarker = 4;
+
+    public App() {
+        bag = new Bag();
+    }
+
+    public int BagWork() {
+        Counter first = new Counter(3);
+        bag.Add(first);
+        Counter returned = bag.Take();
+        returned.Set(7);
+        return bag.Read() * 1000 + bag.Shape();
+    }
+
+    public int BagState() {
+        return bag.Read() * 1000 + bag.Shape();
+    }
+
+    public void FailBagMutation() {
+        bag.Add(new Counter(9));
+        bag.ChangeFirst(99);
+        mypl_scopeMarker = 99;
+        throw Error("bag fault");
+    }
+
+    public int UpcastEnumeration() {
+        List<Counter> concrete = List<Counter>.Empty();
+        concrete.Add(new Counter(1));
+        concrete.Add(new Counter(2));
+        int sum = 0;
+        foreach (I item in concrete) {
+            item.Set(item.Read() + 10);
+            sum = sum + item.Read();
+        }
+        return sum;
+    }
+
+    public int PrivateFactory() {
+        PrivateBuilt factory = new PrivateBuilt();
+        PrivateBuilt result = factory.Make(42);
+        return result.Read();
+    }
+
+    public string Text() {
+        Counter value = new Counter(1);
+        return value.Text();
+    }
+
+    public int IncrementField() {
+        mypl_scopeMarker = mypl_scopeMarker + 1;
+        return mypl_scopeMarker;
+    }
+    public int InternalNames() {
+        Counter value = new Counter(0);
+        value.validate = 7;
+        return value.InternalNameFields();
+    }
+
+}

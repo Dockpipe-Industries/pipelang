@@ -1,0 +1,236 @@
+public source Interface ICounter {
+    pure int Read();
+    pure int Work(int iterations);
+    void Set(int value);
+    Task<Result<int,string>> Later(SemaphoreSlim gate);
+}
+
+public Class Counter : ICounter {
+    private int value;
+    public int Tag = 2;
+    public Optional<ICounter> Next;
+
+    public Counter(int initial) {
+        value = initial;
+    }
+
+    public pure int Read() {
+        return value;
+    }
+
+    public pure int Work(int iterations) {
+        int index = 0;
+        while (index < iterations) {
+            index = index + 1;
+        }
+        return index;
+    }
+
+    public void Set(int replacement) {
+        value = replacement;
+    }
+
+    public pure ICounter View() {
+        return this;
+    }
+
+    public pure bool Same(Counter other) {
+        return this == other;
+    }
+
+    public void LinkSelf() {
+        Next = Optional<ICounter>.Some(this);
+    }
+
+    public pure bool IsSelfLinked() {
+        return Next.HasValue && Next.Value == this;
+    }
+
+    public async Task<Result<int,string>> Later(SemaphoreSlim gate) {
+        await gate.WaitAsync();
+        return Result<int,string>.Success(value);
+    }
+}
+
+public Class Broken {
+    public Broken(Counter destination, Atomic<int> effects) {
+        destination.Set(99);
+        effects.Increment();
+        throw Error("constructor fault");
+    }
+
+    public pure int Read() {
+        return 0;
+    }
+}
+
+public Interface ProgressHost {
+    Task<Result<int,string>> Step();
+}
+
+public Class App {
+    private ProgressHost host;
+    private Counter first;
+    private Counter alias;
+    private List<ICounter> group = List<ICounter>.Empty();
+    private SemaphoreSlim signal;
+    private Atomic<int> constructorEffects;
+    public int marker = 0;
+
+    public App(ProgressHost service) {
+        host = service;
+        first = new Counter(1);
+        alias = first;
+        group.Add(first);
+        group.Add(alias);
+    }
+
+    private pure T Identity<T>(T value) {
+        return value;
+    }
+
+    private pure int Choose(Counter candidate) {
+        return 10 + candidate.Read();
+    }
+
+    private pure int Choose(ICounter candidate) {
+        return 20 + candidate.Read();
+    }
+
+    private pure int OnlyInterface(ICounter candidate) {
+        return candidate.Read() + 1;
+    }
+
+    public bool Identities() {
+        ICounter view = first;
+        ICounter returned = first.View();
+        Counter copied = Identity<Counter>(alias);
+        return first == alias && first == view && view == returned
+            && copied == alias && first.Same(copied) && first.Tag == 2;
+    }
+
+    public int Overloads() {
+        Counter local = new Counter(3);
+        ICounter view = local;
+        return Choose(local) * 100 + Choose(view) + OnlyInterface(local);
+    }
+
+    public int InterfaceMutation() {
+        ICounter view = group.At(0);
+        view.Set(23);
+        return first.Read() + alias.Read() + group.At(1).Read();
+    }
+
+    public bool Cycles() {
+        first.LinkSelf();
+        ICounter view = alias;
+        first.Next = Optional<ICounter>.Some(view);
+        return first.IsSelfLinked() && first.Next.Value == first;
+    }
+
+    public List<int> OwnedReadout() {
+        List<int> result = List<int>.Empty();
+        foreach (ICounter item in group) {
+            result.Add(item.Read());
+        }
+        return result;
+    }
+
+    public int CaughtPartial() {
+        try {
+            first.Set(12);
+            alias.Set(13);
+            throw Error("caught object fault");
+        } catch (Error error) {
+            return first.Read();
+        }
+    }
+
+    public void UncaughtGraph() {
+        first.Set(40);
+        alias.Set(41);
+        marker = 99;
+        throw Error("uncaught object fault");
+    }
+
+    public int ConstructorSavepoint() {
+        first.Set(5);
+        try {
+            Broken attempted = new Broken(first, constructorEffects);
+            return attempted.Read();
+        } catch (Error error) {
+            return first.Read();
+        }
+    }
+
+    public void UncaughtConstructor() {
+        first.Set(6);
+        Broken attempted = new Broken(first, constructorEffects);
+        marker = attempted.Read();
+    }
+
+    public int SharedConstructorEffects() {
+        return constructorEffects.Load();
+    }
+
+    public int FirstValue() {
+        return first.Read();
+    }
+
+    public int AliasValue() {
+        return alias.Read();
+    }
+
+    public int DispatchBudget() {
+        marker = 99;
+        ICounter view = first;
+        return view.Work(20000);
+    }
+
+    public int ReadExternal(Counter external) {
+        return external.Read();
+    }
+
+    public Counter Export() {
+        return first;
+    }
+
+    public async Task<Result<int,string>> CapturedReceiver() {
+        Result<int,string> result = await first.Later(signal);
+        return result;
+    }
+
+    public void ChangeWhileWaiting() {
+        alias.Set(7);
+        first = new Counter(50);
+    }
+
+    public void ReleaseSignal() {
+        signal.Release();
+    }
+
+    public async Task<Result<int,string>> Probe() {
+        Result<int,string> result = await host.Step();
+        return result;
+    }
+    public async Task<Result<int,string>> CommittedBeforeChild() {
+        marker = 17;
+        SemaphoreSlim ready = SemaphoreSlim.Create(1, 1);
+        Result<int,string> outcome = await first.Later(ready);
+        if (!outcome.IsSuccess)
+            return outcome;
+        return Result<int,string>.Success(marker);
+    }
+
+    private async Task<Result<int,string>> LocalGraphChild() {
+        first.Set(42);
+        return Result<int,string>.Success(marker);
+    }
+
+    public async Task<Result<int,string>> CommittedBeforeLocalChild() {
+        marker = 23;
+        Result<int,string> outcome = await LocalGraphChild();
+        return Result<int,string>.Success(marker + outcome.Value);
+    }
+
+}

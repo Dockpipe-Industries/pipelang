@@ -1,0 +1,6 @@
+
+module Data;
+public Record Work<T> {
+    public T Value;
+}
+

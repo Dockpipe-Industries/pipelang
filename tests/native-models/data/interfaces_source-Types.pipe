@@ -1,0 +1,8 @@
+module Types;
+import BaseTypes;
+public source Interface Derived : Base { pure int Read(); }
+public Class Value : Derived {
+    private int stored;
+    public Value(int initial) { stored = initial; }
+    public pure int Read() { return stored; }
+}

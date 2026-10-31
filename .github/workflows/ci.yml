@@ -1,4 +1,4 @@
-name: PipeLang
+name: Native PipeLang
 on:
   workflow_dispatch:
   push:
@@ -9,42 +9,48 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version: '1.26.10'
-      - name: Verify locked installation integrity
-        run: python3 -m unittest discover -s tooling -p test_bootstrap_dockpipe.py
-      - name: Install the locked Dockpipe version
-        run: python3 tooling/bootstrap_dockpipe.py --output "$RUNNER_TEMP/dockpipe"
-      - name: Build and verify through Dockpipe
-        run: |
-          "$DOCKPIPE_BIN" --workflow-file workflows/check/config.yml --
-          "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml --
-          "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml --
-  test-windows:
-    runs-on: windows-latest
-    permissions:
-      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.26.10'
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.13'
-      - name: Verify locked installation integrity
-        run: python -m unittest discover -s tooling -p test_bootstrap_dockpipe.py
-      - name: Install the official checksum-verified Dockpipe release
-        shell: pwsh
-        run: python tooling/bootstrap_dockpipe.py --output "$env:RUNNER_TEMP/dockpipe"
-      - name: Test through the native Dockpipe workflow
-        shell: pwsh
-        env:
-          DOCKPIPE_GO_SDK_INPUTS: ${{ runner.temp }}/sdk-inputs
+          persist-credentials: false
+      - name: Prepare native containment
         run: |
-          & $env:DOCKPIPE_BIN --workflow-file workflows/ci.windows/config.yml --
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cmake g++ strace
+          test -x /usr/bin/cmake
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          command -v cmake c++ strace systemd-run
+      - name: Install checksum-locked DockPipe
+        run: cmake -DOUTPUT_DIRECTORY="$RUNNER_TEMP/dockpipe" -P tooling/bootstrap-dockpipe.cmake
+      - name: Build, check, test and package through DockPipe
+        run: |
+          "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/check/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml
+  test-windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install checksum-locked DockPipe
+        shell: pwsh
+        run: cmake -DOUTPUT_DIRECTORY="$env:RUNNER_TEMP/dockpipe" -P tooling/bootstrap-dockpipe.cmake
+      - name: Build, check, test and package through native DockPipe workflows
+        shell: pwsh
+        run: |
+          & $env:DOCKPIPE_BIN --workflow-file workflows/build/config.yml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $env:DOCKPIPE_BIN --workflow-file workflows/check/config.yml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $env:DOCKPIPE_BIN --workflow-file workflows/test/config.yml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $env:DOCKPIPE_BIN --workflow-file workflows/release/config.yml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

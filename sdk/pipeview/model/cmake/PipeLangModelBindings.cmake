@@ -23,7 +23,7 @@ function(pipelang_add_model_bindings target)
     endif()
     file(GLOB_RECURSE runtime_headers CONFIGURE_DEPENDS "${PipeLangModel_SDK_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/pipelang/model/*.hpp")
     add_custom_command(OUTPUT ${outputs}
-        COMMAND "${Python3_EXECUTABLE}" -B "${PipeLangModel_GENERATOR}"
+        COMMAND "${PipeLangModel_GENERATOR}" bindings
             --sdk-prefix "${PipeLangModel_SDK_PREFIX}"
             --sdk-manifest "${PipeLangModel_MANIFEST}"
             --sdk-manifest-sha256 "${PipeLangModel_MANIFEST_SHA256}"

@@ -6,7 +6,11 @@ CMake target explicitly; consumers admit the executable's exact bytes before
 invoking it. The compiler uses the existing native lexer and pinned nlohmann JSON
 header. It emits typed C++ and a manifest, not a private application opcode list.
 
-Input is exactly one JSON object on stdin:
+Single-source input is exactly one JSON object on stdin. Closed multi-source
+modules use the explicitly selected v2 request described in the
+[composition and parallel contract](../../../docs/concepts/pipelang-native-model-composition.md),
+which also defines exact overloads, closed generics, parallel foreach, Atomic and
+the owned and shared concurrent collection surfaces:
 
 ```json
 {"protocol":"pipelang.native-model.v1","source":"public Class Counter { public int count = 0; public void Increment() { count = count + 1; } }","namespace":"counter_models"}
@@ -23,15 +27,23 @@ signatures and constructor parameters. Generic type names are canonical strings
 such as `Task<Result<SettingsValues,string>>`. Private implementation and service
 fields are absent from the public manifest.
 
-The grammar supports ordinary public records, enums, injected host interfaces and
-stateful classes. Values include signed64 integers, IEEE binary64 `float`, bool, owned strings, nested
+The [source-object profile](../../../docs/concepts/pipelang-objects.md) explicitly
+selects v3 requests with exported model roots, ordinary new C(args) instances,
+source Interface implementations and owner-confined reference identity. It adds
+alias-aware graph transactions, constructor savepoints and inherited-scope async
+calls. Its manifest v2 separates object declarations from owned root snapshots;
+view transport refuses that schema until separately qualified.
+
+The v1/v2 grammar supports ordinary public records, enums, injected host interfaces
+and stateful classes. Values include signed64 integers, IEEE binary64 `float`, bool, owned strings, nested
 records, enums and recursively owned `Result<T,string>` (including void and
 record payloads). Results preserve Success/Cancelled/Failure and expose checked
 Value, Error and outcome predicates. Default Result is Cancelled with empty error.
 Owned `Optional<T>` defaults to None, constructs with `Some(value)`/`None()`,
 exposes `HasValue` and checked `Value`, and composes recursively with records,
 Results and bounded `List<T>`. Services, tasks, tokens and void cannot be Optional
-or List payloads. Arbitrary user-defined generics remain unsupported.
+or List payloads. Closed generic records and local methods are described in the
+[composition and parallel contract](../../../docs/concepts/pipelang-native-model-composition.md).
 
 Records have primitive/value-expression defaults, positional construction and
 named `new Record { field = value }` construction; omitted named fields retain
@@ -80,6 +92,13 @@ uses the normal rollback/typed-failure boundary. Pure reads report ExecutionFail
 Actual host suspension begins a fresh segment; immediate closing/refused awaits
 and local-await completion do not reset the budget.
 
+[Source synchronization](../../../docs/concepts/pipelang-synchronization.md) adds
+reentrant `Lock` handles and scoped `lock`, plus explicit `SemaphoreSlim` permits.
+Its directly awaited WaitAsync intrinsic unwraps to void or bool; this does not
+admit general source Task<void>/Task<bool> declarations or escaping tasks. Blocking
+waits refuse async, lock and cleanup call closures. Shared handles retain their
+private/owned-value/host-transport restrictions.
+
 Async methods use `async Task<Result<T,string>>` and directly await typed host
 service calls in local initializers or assignments. They can call ordinary
 synchronous helpers and perform multiple sequential host awaits. The compiler
@@ -98,8 +117,10 @@ authoritative. Owned values and frames have deterministic native RAII cleanup;
 there are no source-owned external-resource handles in this capability.
 Source failure handling uses owned `Error` values, `throw`/rethrow and
 `try`/`catch (Error error)`/`finally`, as described below. Source resource disposal,
-inheritance, overloads, arbitrary references and implicit conversions remain
-refused. Parallel local task creation, Task escape and await inside general
+class inheritance, unmanaged references and implicit numeric conversions remain refused.
+V3 source object/interface references and checked interface upcasts follow their
+explicit owner/lifetime contract.
+Exact parameter-type method/constructor overloads are supported. Parallel local task creation, Task escape and await inside general
 expressions remain unsupported. There is no arbitrary exception hierarchy or
 asynchronous finally/disposal capability.
 

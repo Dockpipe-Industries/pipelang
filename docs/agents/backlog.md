@@ -1,3 +1,13 @@
+# Current native repository status — 2026-10-31
+
+The owner retired unused Go/Python implementations and historical executable
+profiles. The default build/check/test/package path is C++ and DockPipe. Earlier
+Go reference and publication plans below are historical evidence, superseded by
+[the native toolchain task](tasks/native-toolchain-20261030.md). Native language
+fundamentals remain the priority; broader language coverage, native UI, other
+platforms and publication still require their own qualification. Do not recreate
+retired profiles solely to preserve an old inventory.
+
 # Backlog and migration direction
 
 ## Language direction
@@ -51,10 +61,11 @@ PipeLang and the package ecosystem. This is incremental work, not a claim that
 the current Go implementation has been replaced.
 
 The intended end state is a native compiler and build path that does not require
-Go for ForgePipe application delivery. The lexer, bounded view parser and bounded
-C++ emitter are already explicit native components; ordinary source parsing,
-semantic/type analysis, IR lowering and compiler/SDK orchestration still have Go
-owners. Port these responsibilities behind defined contracts and equivalent
+Go for ForgePipe application delivery. The lexer, bounded view parser and
+admitted-Core C++ emitter remain explicit native components of the legacy pipeline.
+The separate C++20 ordinary-model compiler owns its source parsing, semantic/type
+analysis and native generation. Legacy Core/Application IR lowering and existing
+Go SDK orchestration retain their current owners. Port these responsibilities behind defined contracts and equivalent
 consumer coverage before retiring the reference path. Broader C++ language
 coverage follows the coherent capability direction above and remains a prerequisite; this is not a completed migration.
 
@@ -133,6 +144,37 @@ adds owned Error, throw/rethrow and try/catch/finally, including awaited recover
 and bounded cleanup. Source resource disposal, asynchronous finally and broader
 task orchestration remain unsupported. Consumer porting stays paused while
 compiler work continues.
+
+The [composition and parallel contract](../concepts/pipelang-native-model-composition.md)
+adds explicit v2 source modules, exact method/constructor overloads, closed generic
+records/methods, joined parallel foreach, explicit shared Atomic cells and owned
+Array/Dictionary/HashSet/Queue/Stack/KeyValuePair values. Worker safety, cancellation,
+normal/cleanup budgets and specialization limits are checked independently.
+View bindings refuse these new composition shapes pending separate qualification.
+Generic classes/interfaces, constraints, inference, package distribution and
+broader task orchestration remain planned; .NET API compatibility is not claimed.
+
+The [concurrent collection continuation](tasks/language-concurrent-collections-20261030.md)
+adds shared ConcurrentDictionary/ConcurrentQueue/ConcurrentStack handles with
+linearizable operations and owned snapshot iteration. Shared effects persist
+outside ordinary rollback; explicit ownership and pure/host-transport restrictions
+remain enforced. The [source synchronization continuation](tasks/language-synchronization-20261030.md)
+adds dedicated Lock/scoped lock and SemaphoreSlim with owner-polled async waits.
+Arbitrary Monitor/object locks, callback factories and channels remain separate
+capabilities.
+
+The [source-object contract](../concepts/pipelang-objects.md) adds explicit v3
+exported model roots, owner-confined reference-identity class instances and
+source-defined interfaces. Traced graph versions preserve alias identity,
+constructor savepoints and rollback across synchronous/async composition under
+existing call/effect budgets. Native owner-bound reference results are supported;
+public root snapshots remain owned and manifest v2 is refused by the view bridge.
+Source-interface inheritance now composes contracts with deterministic diamond
+merging and transitive upcasts; inherited dispatch retains the same owner/effect/
+call limits. Single-class inheritance now adds inherited physical state,
+base constructor chaining, protected access and explicit virtual/override dispatch
+under the same v3 identity, transaction and closed-analysis bounds. Generic classes/interfaces, source downcasts and
+frozen graph snapshots remain unsupported. Consumer porting stays paused.
 
 ## PipeView: modular typed UI roadmap
 

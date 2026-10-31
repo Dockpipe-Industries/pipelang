@@ -1,0 +1,245 @@
+public Class SynchronizationModel {
+    private Lock gate;
+    private SemaphoreSlim permits;
+    private SemaphoreSlim finishSignal;
+    private Atomic<int> total;
+    private Atomic<int> entered;
+    private Atomic<int> cleaned;
+    private Atomic<int> observedCleanup;
+    public int marker = 0;
+
+    private void Reenter() {
+        lock (gate) {
+            total.Store(total.Load() + 1);
+        }
+    }
+
+    public int ParallelLocked(List<int> values) {
+        total.Store(0);
+        Lock alias = gate;
+        parallel foreach (int item in values) {
+            lock (alias) {
+                total.Store(total.Load() + 1);
+                Reenter();
+            }
+        }
+        return total.Load();
+    }
+
+    public int LockReturn() {
+        lock (gate) {
+            return 3;
+        }
+    }
+
+    public void LockFault() {
+        marker = 99;
+        lock (gate) {
+            throw Error("locked fault");
+        }
+    }
+
+    public void LockBudget() {
+        marker = 99;
+        lock (gate) {
+            int index = 0;
+            while (true) {
+                index = index + 1;
+            }
+        }
+    }
+
+    public int LockLoop() {
+        int index = 0;
+        int sum = 0;
+        while (index < 3) {
+            index = index + 1;
+            lock (gate) {
+                if (index == 1)
+                    continue;
+                if (index == 3)
+                    break;
+                sum = sum + index;
+            }
+        }
+        return sum;
+    }
+
+    public bool LocalSemaphore() {
+        SemaphoreSlim local = SemaphoreSlim.Create(1, 2);
+        SemaphoreSlim alias = local;
+        int previous = alias.Release();
+        bool first = local.Wait(0);
+        bool second = local.Wait(0);
+        bool unavailable = local.Wait(0);
+        return previous == 1 && first && second && !unavailable && alias.CurrentCount == 0;
+    }
+
+    public int ExplicitLock() {
+        Lock local = Lock.Create();
+        lock (local) {
+            return 4;
+        }
+    }
+
+    public int SimpleWait() {
+        SemaphoreSlim local = SemaphoreSlim.Create(1);
+        local.Wait();
+        local.Release();
+        return local.CurrentCount;
+    }
+
+    public void InvalidCreate() {
+        SemaphoreSlim local = SemaphoreSlim.Create(2, 1);
+        local.Release();
+    }
+
+    private async Task<Result<bool,string>> AwaitParameter(SemaphoreSlim target) {
+        bool acquired = await target.WaitAsync(0);
+        return Result<bool,string>.Success(acquired);
+    }
+
+    public async Task<Result<bool,string>> AsyncAlias() {
+        SemaphoreSlim local = SemaphoreSlim.Create(1);
+        Result<bool,string> result = await AwaitParameter(local);
+        return result;
+    }
+
+    public async Task<Result<int,string>> AcquiredFault() {
+        await permits.WaitAsync();
+        try {
+            throw Error("acquired source fault");
+        } finally {
+            permits.Release();
+            cleaned.Increment();
+        }
+    }
+
+    public void EditMarker(int value) {
+        marker = value;
+    }
+
+    public int CleanupObserved() {
+        return observedCleanup.Load();
+    }
+
+    public async Task<Result<int,string>> ObserveCancelledWait(CancellationToken token) {
+        try {
+            await finishSignal.WaitAsync(token);
+            return Result<int,string>.Success(1);
+        } finally {
+            observedCleanup.Store(marker);
+        }
+    }
+
+    public int PermitCount() {
+        return permits.CurrentCount;
+    }
+
+    public int EnteredCount() {
+        return entered.Load();
+    }
+
+    public int CleanedCount() {
+        return cleaned.Load();
+    }
+
+    public int ReleasePermit(int count) {
+        return permits.Release(count);
+    }
+
+    public void FinishOne() {
+        finishSignal.Release();
+    }
+
+    public async Task<Result<int,string>> Work(int value, CancellationToken token) {
+        await permits.WaitAsync(token);
+        try {
+            entered.Increment();
+            await finishSignal.WaitAsync(token);
+            marker = marker + 1;
+            return Result<int,string>.Success(value);
+        } finally {
+            permits.Release();
+            cleaned.Increment();
+        }
+    }
+
+    public async Task<Result<bool,string>> Timed(int timeout, CancellationToken token) {
+        bool acquired = await permits.WaitAsync(timeout, token);
+        return Result<bool,string>.Success(acquired);
+    }
+
+    public async Task<Result<int,string>> ImmediateBudget() {
+        int index = 0;
+        while (index < 10000) {
+            bool acquired = await permits.WaitAsync(0);
+            if (acquired)
+                permits.Release();
+            index = index + 1;
+        }
+        return Result<int,string>.Success(index);
+    }
+
+    public async Task<Result<int,string>> SuspendedBudget(CancellationToken token) {
+        int first = 0;
+        while (first < 5000) {
+            first = first + 1;
+        }
+        await permits.WaitAsync(token);
+        try {
+            int second = 0;
+            while (second < 5000) {
+                second = second + 1;
+            }
+            return Result<int,string>.Success(first + second);
+        } finally {
+            permits.Release();
+        }
+    }
+
+    private void WorkerWait(SemaphoreSlim target) {
+        bool acquired = target.Wait(0);
+        if (acquired) {
+            total.Increment();
+            target.Release();
+        }
+    }
+
+    public int SynchronousWorkerWait(List<int> values) {
+        total.Store(0);
+        SemaphoreSlim local = SemaphoreSlim.Create(8, 8);
+        parallel foreach (int item in values) {
+            WorkerWait(local);
+        }
+        return total.Load();
+    }
+}
+
+public Interface ProgressHost {
+    Task<Result<int,string>> Step();
+}
+
+public Class HostProgressModel {
+    private ProgressHost host;
+    private SemaphoreSlim blocked;
+    public int cleanupCount = 0;
+
+    public HostProgressModel(ProgressHost service) {
+        host = service;
+    }
+
+    public async Task<Result<int,string>> Waiting() {
+        try {
+            await blocked.WaitAsync();
+            return Result<int,string>.Success(1);
+        } finally {
+            cleanupCount = cleanupCount + 1;
+        }
+    }
+
+    public async Task<Result<int,string>> Probe() {
+        Result<int,string> result = await host.Step();
+        return result;
+    }
+}

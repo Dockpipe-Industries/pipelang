@@ -9,7 +9,6 @@ endif()
 find_package(ForgePipe 0.9.0 EXACT CONFIG REQUIRED COMPONENTS ${forgepipe_components})
 find_package(PipeLangModel 0.1.0 EXACT CONFIG REQUIRED)
 find_package(Threads REQUIRED)
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 pipelang_add_model_bindings(settings-bindings
     STYLE_INSPECTION
@@ -42,12 +41,13 @@ if(BUILD_TESTING)
     target_link_libraries(pipeview-settings-inspection PRIVATE settings-application)
     add_test(NAME PipeViewSettingsInspection COMMAND pipeview-settings-inspection
         "${CMAKE_CURRENT_BINARY_DIR}/inspection-fixture" "${CMAKE_CURRENT_BINARY_DIR}/inspection.json")
-    add_test(NAME PipeViewInspectionAdmission COMMAND "${Python3_EXECUTABLE}" -B
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_model_inspection.py" "${CMAKE_CURRENT_BINARY_DIR}/inspection.json")
+    add_executable(pipeview-settings-inspection-tests inspection_tests.cpp
+        ../../src/native/support/sha256.cpp ../../src/native/support/files.cpp
+        ../../src/native/support/json.cpp)
+    target_compile_features(pipeview-settings-inspection-tests PRIVATE cxx_std_20)
+    add_test(NAME PipeViewInspectionAdmission COMMAND pipeview-settings-inspection-tests
+        frames "${CMAKE_CURRENT_BINARY_DIR}/inspection.json")
     set_tests_properties(PipeViewInspectionAdmission PROPERTIES DEPENDS PipeViewSettingsInspection)
-    add_test(NAME PipeViewStyleDescriptorAdmission COMMAND "${Python3_EXECUTABLE}" -B
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_style_inspection.py" "${CMAKE_CURRENT_BINARY_DIR}/compiled-ui")
-    # The former scalar/source-v2 adapter remains explicit compatibility evidence.
-    add_test(NAME LegacyPipeViewBindingAdmission COMMAND "${Python3_EXECUTABLE}" -B
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_bindings.py")
+    add_test(NAME PipeViewStyleDescriptorAdmission COMMAND pipeview-settings-inspection-tests
+        style "${CMAKE_CURRENT_BINARY_DIR}/compiled-ui")
 endif()

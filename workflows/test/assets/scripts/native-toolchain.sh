@@ -113,7 +113,7 @@ done
 compile_fixture class-inheritance tests/native-models/class_inheritance_runtime.cpp "$proof/class-inheritance"
 case "$PIPELANG_NATIVE_RUNTIME_SELECTION" in
     all)
-        for fixture in extended_collections parallel_runtime concurrent_runtime synchronization_runtime object_runtime object_transaction; do
+        for fixture in extended_collections parallel_runtime concurrent_runtime synchronization_runtime lazy_task_scope object_runtime object_transaction; do
             compile_fixture "$fixture" "tests/native-models/$fixture.cpp" "$sdk/include"
         done
         ;;

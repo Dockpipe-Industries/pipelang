@@ -43,7 +43,9 @@ public:
         line("#include <pipelang/model/runtime.hpp>");
         if (program_.objectEnabled)
             line("#include <pipelang/model/object_model.hpp>");
-        if (usesType("float"))
+        if (usesType("float32"))
+            line("#include <pipelang/model/binary32.hpp>");
+        if (usesType("float") || usesType("float32"))
             line("#include <pipelang/model/numeric.hpp>");
         if (usesType("List") || usesLoops() || usesLocalAsync() || usesFailureControl())
             line("#include <pipelang/model/collection.hpp>");
@@ -854,6 +856,8 @@ private:
         if ((value->resolution == "list_add" || value->resolution.starts_with("collection_mutate_")) &&
             value->kind == "call" && objectFieldRoot(value->children[0]->children[0]))
             return objectCollectionMutation(value);
+        if (value->kind == "float32")
+            return "std::bit_cast<float>(std::uint32_t{" + value->resolution + "U})";
         if (value->kind == "float")
             return "std::bit_cast<double>(std::uint64_t{" + value->resolution + "ULL})";
         if (value->kind == "integer")
@@ -878,7 +882,7 @@ private:
                 return "std::numeric_limits<std::int64_t>::min()";
             if (value->text == "!")
                 return "(!" + expression(value->children[0]) + ")";
-            if (value->type.name == "float")
+            if (value->type.name == "float" || value->type.name == "float32")
                 return "(-" + expression(value->children[0]) + ")";
             return "pipelang::model::negate(" + expression(value->children[0]) + ")";
         }
@@ -919,12 +923,18 @@ private:
             if (value->text == "&&" || value->text == "||")
                 return "(" + left + " " + value->text + " " + right + ")";
             std::string operation = "pl_left " + value->text + " pl_right";
-            if (value->type.name != "float" && (value->text == "+" || value->text == "-" || value->text == "*" || value->text == "/")) {
+            if (value->type.name != "float" && value->type.name != "float32" && (value->text == "+" || value->text == "-" || value->text == "*" || value->text == "/")) {
                 const std::map<std::string, std::string> functions = {
                     {"+", value->type.name == "string" ? "concatenate" : "add"},
                     {"-", "subtract"}, {"*", "multiply"}, {"/", "divide"}
                 };
                 operation = "pipelang::model::" + functions.at(value->text) + "(pl_left, pl_right)";
+            }
+            if (value->type.name == "float32") {
+                // A materialized binary32 result is a language rounding boundary;
+                // native contraction must not fuse adjacent source operations.
+                return "([&]() { auto pl_left = " + left + "; auto pl_right = " + right +
+                    "; volatile float pl_result = " + operation + "; return pl_result; }())";
             }
             return "([&]() { auto pl_left = " + left + "; auto pl_right = " + right + "; return " + operation + "; }())";
         }
@@ -1036,6 +1046,8 @@ private:
         throw Diagnostic("unsupported emitted expression", value->offset);
     }
     void validateParameters(const Method& method, unsigned indentation) {
+        if (usesType("float32"))
+            line("pipelang::model::requireBinary32Environment();", indentation);
         if (program_.objectEnabled)
             line("using pipelang::model::validate;", indentation);
         line("using pipelang::model::validate;", indentation);
@@ -1435,7 +1447,14 @@ private:
         }
         line("return State{" + publicValues + "};", 2);
         line("}", 1);
-        line("std::size_t poll() { return pl_scope.poll(); }", 1);
+        if (usesType("float32")) {
+            line("std::size_t poll() {", 1);
+            line("pipelang::model::requireBinary32Environment();", 2);
+            line("return pl_scope.poll();", 2);
+            line("}", 1);
+        } else {
+            line("std::size_t poll() { return pl_scope.poll(); }", 1);
+        }
         line("std::size_t pending() const { return pl_scope.pending(); }", 1);
         for (const auto& method : declaration.methods) {
             if (method.constructor || !method.visible)
@@ -1709,6 +1728,8 @@ std::string cppType(const Type& type, const Program& program) {
         return "pipelang::model::Error";
     if (type.name == "float")
         return "double";
+    if (type.name == "float32")
+        return "float";
     if (type.name == "string")
         return "std::string";
     if (type.name == "CancellationToken")

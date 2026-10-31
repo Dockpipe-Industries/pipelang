@@ -112,7 +112,7 @@ private:
             "consteval", "constexpr", "constinit", "const_cast", "continue", "co_await",
             "co_return", "co_yield", "decltype", "default", "delete", "do", "double",
             "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false",
-            "float", "for", "friend", "goto", "if", "inline", "int", "long", "mutable",
+            "float", "float32", "for", "friend", "goto", "if", "inline", "int", "long", "mutable",
             "namespace", "new", "noexcept", "not", "nullptr", "operator", "or", "private",
             "protected", "public", "register", "reinterpret_cast", "requires", "return",
             "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct",
@@ -153,7 +153,7 @@ private:
             fail("expected type");
         Type result{current().literal, {}};
         advance();
-        while (result.name != "float" && !isSynchronizationHandle(result.name) && take("."))
+        while (result.name != "float" && result.name != "float32" && !isSynchronizationHandle(result.name) && take("."))
             result.name += "." + identifier();
         if (take("<")) {
             do {
@@ -475,12 +475,12 @@ private:
         } else if (take("(")) {
             result = expression();
             expect(")");
-        } else if (token.kind == "text" || token.kind == "integer" || token.kind == "float" || token.kind == "boolean") {
+        } else if (token.kind == "text" || token.kind == "integer" || token.kind == "float" || token.kind == "float32" || token.kind == "boolean") {
             advance();
             result = make(token.kind, token.literal, token.start);
         } else if (is("Result") || is("Optional") || is("List") || is("Atomic") || is("Array") ||
                    is("Dictionary") || is("HashSet") || is("Queue") || is("Stack") ||
-                   is("KeyValuePair") || is("float") || is("Lock") || is("SemaphoreSlim") ||
+                   is("KeyValuePair") || is("float") || is("float32") || is("Lock") || is("SemaphoreSlim") ||
                    isConcurrentCollection(token.literal)) {
             const auto resultType = type();
             result = make("type", resultType.text(), token.start);

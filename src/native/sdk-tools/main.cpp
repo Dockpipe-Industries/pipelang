@@ -6,7 +6,7 @@
 int main(int argc, char** argv) {
     using namespace pipelang::tools;
     try {
-        require(argc >= 2, "usage: pipelang-sdk-tool manifest|verify|bindings [arguments]");
+        require(argc >= 2, "usage: pipelang-sdk-tool manifest|verify|bindings|model-bindings [arguments]");
         const std::string command = argv[1];
         Arguments arguments(argc, argv, 2);
         if (command == "sdk-package") {
@@ -47,19 +47,23 @@ int main(int argc, char** argv) {
                     selected.push_back(roots[index]);
                 recordManifest(prefix, manifest, selected);
             }
-        } else if (command == "bindings") {
+        } else if (command == "bindings" || command == "model-bindings") {
+            const bool withView = command == "bindings";
             const fs::path prefix = arguments.take("--sdk-prefix");
             const fs::path manifest = arguments.take("--sdk-manifest");
             const auto expected = arguments.take("--sdk-manifest-sha256");
             const fs::path modelTool = arguments.take("--model-compiler");
-            const fs::path viewTool = arguments.take("--view-compiler");
+            const fs::path viewTool = withView ? arguments.take("--view-compiler") : std::string{};
             const fs::path model = arguments.take("--model");
-            const fs::path view = arguments.take("--view");
+            const fs::path view = withView ? arguments.take("--view") : std::string{};
             const auto nameSpace = arguments.take("--namespace");
             const fs::path output = arguments.take("--output-directory");
-            const bool inspection = arguments.flag("--style-inspection");
+            const bool inspection = withView && arguments.flag("--style-inspection");
             arguments.finish();
-            generateBindings(prefix, manifest, expected, modelTool, viewTool, model, view, nameSpace, output, inspection);
+            if (withView)
+                generateBindings(prefix, manifest, expected, modelTool, viewTool, model, view, nameSpace, output, inspection);
+            else
+                generateModelBindings(prefix, manifest, expected, modelTool, model, nameSpace, output);
         } else {
             throw std::runtime_error("unknown SDK tool command");
         }

@@ -147,6 +147,28 @@ void admitModel(const Json& manifest, const std::string& nameSpace) {
     }
 }
 void requireViewCompatible(const Json& manifest) {
+    const auto rejectBinary32 = [&](const auto& self, const Json& value) -> void {
+        if (value.is_object()) {
+            for (const auto& [key, child] : value.items()) {
+                if ((key == "type" || key == "returnType") && child.is_string()) {
+                    const auto type = child.template get<std::string>();
+                    std::size_t position = 0;
+                    while ((position = type.find("float32", position)) != std::string::npos) {
+                        const auto end = position + 7;
+                        const bool startsToken = position == 0 || type[position - 1] == '<' || type[position - 1] == ',';
+                        const bool endsToken = end == type.size() || type[end] == '>' || type[end] == ',';
+                        require(!startsToken || !endsToken, "view bindings do not support float32 values");
+                        position = end;
+                    }
+                }
+                self(self, child);
+            }
+        } else if (value.is_array()) {
+            for (const auto& child : value)
+                self(self, child);
+        }
+    };
+    rejectBinary32(rejectBinary32, manifest);
     require(manifest.at("protocol") != "pipelang.native-model-manifest.v2", "view bindings do not support object model manifest v2");
     for (const auto& category : {"records", "enums", "interfaces", "classes"}) {
         for (const auto& declaration : manifest.at(category)) {

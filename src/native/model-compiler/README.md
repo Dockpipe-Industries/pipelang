@@ -35,7 +35,8 @@ calls. Its manifest v2 separates object declarations from owned root snapshots;
 view transport refuses that schema until separately qualified.
 
 The v1/v2 grammar supports ordinary public records, enums, injected host interfaces
-and stateful classes. Values include signed64 integers, IEEE binary64 `float`, bool, owned strings, nested
+and stateful classes. Values include signed64 integers, IEEE binary64 `float`, explicit IEEE binary32 `float32`,
+bool, owned strings, nested
 records, enums and recursively owned `Result<T,string>` (including void and
 record payloads). Results preserve Success/Cancelled/Failure and expose checked
 Value, Error and outcome predicates. Default Result is Cancelled with empty error.
@@ -75,6 +76,22 @@ NaNs; int/float conversions remain explicit refusals. `float.IsFinite`, `Abs`,
 math domain, not integer checked-arithmetic rules. Strict default floating modes
 are required; fast/finite-only compilation is refused. Signaling NaNs, nondefault
 rounding/flush modes and cross-platform math-library bit equality are unqualified.
+
+Binary32 is the explicit ordinary-model numeric primitive `float32`, emitted as
+native C++ `float`; existing `float` remains binary64. Decimal/exponent literals
+with lowercase `f` suffix (including `1f`) round directly to binary32, with
+finite range and underflow admission checked before exact bit-pattern emission.
+Arithmetic, negation, comparisons and `float32.IsFinite/Abs/Sqrt/Log` preserve
+the scalar type. No implicit conversions between int, float and float32 exist.
+Owned records, snapshots, containers, closed generic values and Atomic cells carry
+float32 normally. Unsupported view bridges reject float32 explicitly.
+Each binary32 arithmetic operation materializes its result before the next source
+operation, preventing contraction from changing rounding.
+Binary32 evaluation requires nominal-width strict IEEE arithmetic, nearest rounding
+and gradual subnormals; generated entrypoints refuse other thread modes. Runtime
+arithmetic retains signed zeros and IEEE nonfinite results. Native platform math
+library bit equality across platforms remains unqualified.
+
 The legacy lexer entrypoint retains its grammar; only modelc explicitly selects
 the additive Binary64 numeric syntax.
 

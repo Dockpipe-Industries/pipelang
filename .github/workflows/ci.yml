@@ -17,6 +17,9 @@ jobs:
           persist-credentials: false
       - name: Prepare native containment
         run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cmake g++ strace
+          test -x /usr/bin/cmake
           sudo loginctl enable-linger "$(id -un)"
           sudo systemctl start "user@$(id -u).service"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"

@@ -11,7 +11,7 @@ Cross-compilation, declarations and Wine do not establish native acceptance.
 The owner authorized existing physical M6 execution through DockPipe, the
 existing Windows VM and Linux VM/container execution. The M6 is a physical native
 macOS ARM64 host. Once required qualification passes, the owner authorized
-integration into `dev` through DockPipe's Git runtime. Integration has not occurred.
+integration into `dev` through DockPipe's Git runtime. PR #8 targets `dev`; integration is pending its final merge.
 No consumer edits, new paid infrastructure, credential changes, publication or
 hosted dispatch are part of this objective. The owner subsequently authorized
 visible startup of the existing Windows VM to log in and install its attached
@@ -36,10 +36,16 @@ replace that implementation. Earlier failed proof is retained.
 ## Current evidence
 
 Proof root: /tmp/pipelang-native-cross-platform-20261031. All failed attempts are
-retained. No commit, push, dev integration or publication has occurred.
+retained. The qualified implementation was committed as `7520a0e` and pushed
+through DockPipe Git runtime to PR #8. The current `dev` commit `01a7e60` was
+merged into the source branch through the same runtime. Conflicts retained the
+qualified native implementations and retired Go/Python files. The resulting
+source tree exactly matches `7520a0e` (tree `b4cee57b6074cfbc5859753b01f179a3a6cd6238`);
+only this evidence record changes afterward. All newer non-Go/Python `dev` files
+are already present in that qualified tree. No SDK release was published.
 
 - The receiver was clean at f10fcda7cdc0fb01a1707905fa24ed1ebc0f6268 on
-  codex/pipelang-editor-staging. Authored changes remain in that checkout; no
+  codex/pipelang-editor-staging. The authored implementation remains in that checkout; no
   worktree or consumer edit was made.
 - Linux default build 10 and repository check 2 passed under the unchanged
   cgroup caps and native-only PATH. Full default test 2 passed 111 base cases,

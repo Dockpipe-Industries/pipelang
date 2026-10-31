@@ -120,13 +120,29 @@ struct JobUsage {
 };
 JobUsage jobUsage(HANDLE job, DWORD maximumProcesses) {
     // Toolhelp's system snapshot is filtered to the kernel-reported job members.
-    const auto capacity = sizeof(JOBOBJECT_BASIC_PROCESS_ID_LIST) + sizeof(ULONG_PTR) * maximumProcesses;
-    std::vector<unsigned char> storage(capacity);
-    auto* members = reinterpret_cast<JOBOBJECT_BASIC_PROCESS_ID_LIST*>(storage.data());
-    require(QueryInformationJobObject(job, JobObjectBasicProcessIdList, members, static_cast<DWORD>(capacity), nullptr),
-        "cannot inspect native job members");
-    require(members->NumberOfProcessIdsInList == members->NumberOfAssignedProcesses,
-        "native job member inventory exceeds its capacity");
+    std::vector<unsigned char> storage;
+    JOBOBJECT_BASIC_PROCESS_ID_LIST* members = nullptr;
+    bool complete = false;
+    for (unsigned attempt = 0; attempt < 8; ++attempt) {
+        const auto identifierCapacity = maximumProcesses * (1U << std::min(attempt, 3U));
+        const auto capacity = sizeof(JOBOBJECT_BASIC_PROCESS_ID_LIST) + sizeof(ULONG_PTR) * identifierCapacity;
+        storage.assign(capacity, 0);
+        members = reinterpret_cast<JOBOBJECT_BASIC_PROCESS_ID_LIST*>(storage.data());
+        const bool queried = QueryInformationJobObject(job, JobObjectBasicProcessIdList, members,
+            static_cast<DWORD>(storage.size()), nullptr) != FALSE;
+        if (!queried)
+            require(GetLastError() == ERROR_MORE_DATA, "cannot inspect native job members");
+        if (queried && members->NumberOfProcessIdsInList == members->NumberOfAssignedProcesses &&
+            members->NumberOfProcessIdsInList <= identifierCapacity) {
+            complete = true;
+            break;
+        }
+        // Process churn can invalidate the count while Windows fills the list.
+        // Retry with bounded metadata storage; never account an incomplete list.
+        if (attempt + 1 < 8)
+            Sleep(1);
+    }
+    require(complete, "native job member inventory did not stabilize");
     std::set<DWORD> identifiers;
     JobUsage usage;
     for (DWORD index = 0; index < members->NumberOfProcessIdsInList; ++index) {

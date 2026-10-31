@@ -143,3 +143,13 @@ The owning DockPipe documentation currently describes `dockpipe.lock.json` as a
 producer CLI checksum pin, not a package dependency selection lock. The queued
 package-store alignment must verify the supported owning contract; do not present
 this repository's metadata as an implemented package selection schema.
+
+Fresh Windows CI subsequently passed build, repository checks and full tests,
+then exposed a changing Job Object process snapshot during packaging. Sampling
+now retries with bounded, increasingly large metadata buffers and still requires
+assigned and returned counts to match before accounting. Incomplete snapshots
+remain a hard failure after eight attempts. Kernel process/commit caps, sampled
+memory/thread stops and ownership checks remain unchanged. A fifteenth independent
+admission case runs 96 short-lived children across four workers. Bounded
+containment errors are now reported on stderr as well as in receipts. Fresh
+Windows CI must qualify these focused changes before merge.

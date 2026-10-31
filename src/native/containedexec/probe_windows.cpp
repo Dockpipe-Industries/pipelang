@@ -2,6 +2,8 @@
 #include "../support/support.hpp"
 #include "../../../tests/native-models/windows_junction.hpp"
 #include <csignal>
+#include <array>
+#include <exception>
 #include <iostream>
 #include <thread>
 #ifndef NOMINMAX
@@ -16,6 +18,30 @@ void workload(const std::string& mode, const fs::path& marker) {
     atomicWrite(marker, "started\n");
     if (mode == "normal")
         return;
+    if (mode == "process-churn") {
+        const auto self = executablePath().string();
+        std::array<std::exception_ptr, 4> failures{};
+        std::vector<std::thread> workers;
+        for (std::size_t worker = 0; worker < failures.size(); ++worker) {
+            workers.emplace_back([&, worker] {
+                try {
+                    for (int iteration = 0; iteration < 24; ++iteration) {
+                        const auto result = process({self, "--churn-child"});
+                        require(result.exit == 0, "short-lived native child failed");
+                    }
+                } catch (...) {
+                    failures[worker] = std::current_exception();
+                }
+            });
+        }
+        for (auto& worker : workers)
+            worker.join();
+        for (const auto& failure : failures) {
+            if (failure)
+                std::rethrow_exception(failure);
+        }
+        return;
+    }
     if (mode == "reparse-accounting") {
         const fs::path target = marker.string() + ".target";
         const fs::path link = marker.string() + ".junction";
@@ -126,6 +152,7 @@ void inside(const fs::path& runner, const fs::path& self, const fs::path& output
         cases.push_back(mode);
     };
     unit("normal", true);
+    unit("process-churn", true, 30);
     unit("reparse-accounting", true);
     unit("nonzero", false);
     unit("timeout", false, 1);
@@ -186,6 +213,8 @@ int main(int argc, char** argv) {
         using namespace pipelang::tools;
         require(argc >= 2, "native probe requires a mode");
         const std::string mode = argv[1];
+        if (mode == "--churn-child")
+            return 0;
         if (mode == "--orphan" && argc == 3) {
             atomicWrite(std::string(argv[2]) + ".pid", std::to_string(GetCurrentProcessId()));
             while (true)
@@ -203,7 +232,7 @@ int main(int argc, char** argv) {
             require(fileHash(argv[3]) == argv[4], "native policy receipt hash differs");
             const auto receipt = parseJson(readFile(argv[3], 65536));
             require(receipt.at("status") == "passed" && receipt.at("policy") == "windows.job-commit.v1" &&
-                receipt.at("runner_sha256") == fileHash(argv[2]) && receipt.at("cases").size() == 14, "native policy receipt is incomplete");
+                receipt.at("runner_sha256") == fileHash(argv[2]) && receipt.at("cases").size() == 15, "native policy receipt is incomplete");
             return 0;
         }
         require(mode == "--suite" && argc == 4, "usage: native probe --suite RUNNER OUTPUT");
@@ -217,7 +246,7 @@ int main(int argc, char** argv) {
         const auto result = process({runner.string(), "job", "--output", (output / "job").string(), "--estate", output.string(),
             "--timeout", "120", "--", executablePath().string(), "--inside", runner.string(), output.string()}, {}, std::chrono::seconds(140), 1U << 20);
         require(result.exit == 0 && fs::exists(output / "acceptance.json"), "native policy probes failed: " + result.output + result.diagnostic);
-        std::cout << "Windows native policy: fourteen workload probes and uncontained-entry refusal passed\n";
+        std::cout << "Windows native policy: fifteen workload probes and uncontained-entry refusal passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Windows native policy probe: " << error.what() << '\n';

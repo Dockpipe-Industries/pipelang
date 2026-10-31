@@ -211,7 +211,7 @@ not reset or multiply either allowance. Cleanup depth is local to each worker,
 while consumption of the reserve is shared. Resource exhaustion is a failure,
 and source Error handling cannot turn an evaluation limit into an unbounded run.
 
-`Atomic<T>` is an explicit shared-lifetime cell for `int`, `bool` or `float`.
+`Atomic<T>` is an explicit shared-lifetime cell for `int`, `bool`, `float` or `float32`.
 Default construction creates a zero/false cell; `Atomic<T>.Create(value)` supplies
 an initial value. Copying a handle shares the cell. Atomic operations use
 sequential consistency and expose values rather than mutable storage references.
@@ -227,7 +227,7 @@ sequential consistency and expose values rather than mutable storage references.
 Integer updates check signed 64-bit overflow before changing the cell.
 CAS retries consume the shared evaluation budget and are independently capped;
 contention cannot create an unbounded retry loop. Float
-compare-exchange compares binary64 bits, including signed zero and quiet NaN
+compare-exchange compares the declared binary64/binary32 bits, including signed zero and quiet NaN
 payloads; atomic floating arithmetic is unsupported. Return values from mutating
 atomic operations may be discarded. This exception does not permit discarding
 ordinary non-void helper results.

@@ -119,12 +119,20 @@ void admissionAndPublication(const fs::path& root, const fs::path& self) {
     require(first.at("generated").contains("style.json") && fs::exists(output / "style.json"), "style output missing");
     const auto second = generate(false);
     require(!second.at("generated").contains("style.json") && !fs::exists(output / "style.json"), "stale style output survived publication");
+    const auto headless = generateModelBindings(prefix, manifest, hash, model, modelSource, "fixture", output);
+    require(headless.at("protocol") == "pipelang.native-model-artifacts.v1" &&
+            !headless.contains("view_source_sha256") && !headless.at("tools").contains("view"),
+        "headless model receipt depends on a view");
+    require(fs::exists(output / "Model.hpp") && fs::exists(output / "model.json") &&
+            !fs::exists(output / "ModelView.hpp") && !fs::exists(output / "view.json"),
+        "headless publication retained stale view artifacts");
     std::map<std::string, std::string> before;
     for (const auto& entry : fs::directory_iterator(output))
         before[entry.path().filename().string()] = readFile(entry.path(), 1U << 20);
     for (const auto& invalid : {"refuse", "flood", "stderr", "duplicate"}) {
         atomicWrite(modelSource, invalid);
         refuse([&] { generate(false); });
+        refuse([&] { generateModelBindings(prefix, manifest, hash, model, modelSource, "fixture", output); });
         for (const auto& [name, bytes] : before)
             require(readFile(output / name, 1U << 20) == bytes, "failed generation modified published artifacts");
     }
@@ -138,6 +146,18 @@ void admissionAndPublication(const fs::path& root, const fs::path& self) {
     bad = modelManifest();
     bad["classes"][0]["methods"] = {{{"name", "Read"}, {"returnType", "int"}, {"parameters", Json::array()}, {"pure", 1}, {"async", false}}};
     refuse([&] { admitModel(bad, "fixture"); });
+    auto binary32 = modelManifest();
+    binary32["classes"][0]["fields"] = {{{"name", "value"}, {"type", "float32"}}};
+    admitModel(binary32, "fixture");
+    refuse([&] { requireViewCompatible(binary32); }, "binary32 model in unsupported view bridge");
+    fs::remove(view);
+    recordManifest(prefix, manifest, Json::array({"bin"}));
+    const auto modelOnlyHash = fileHash(manifest);
+    generateModelBindings(prefix, manifest, modelOnlyHash, model, modelSource, "fixture", root / "model-only");
+    require(fs::exists(root / "model-only/Model.hpp"), "headless SDK requires an unselected view compiler");
+    refuse([&] {
+        generateModelBindings(prefix, manifest, modelOnlyHash, self, modelSource, "fixture", root / "unpinned-model");
+    }, "model compiler outside the pinned SDK");
 }
 
 void installedSdk(const fs::path& source, const fs::path& prefix, const fs::path& output) {
@@ -182,6 +202,19 @@ int main() {
             "-DVIEW_SOURCE=" + (source / "tests/native-model-views/Fixture.pipe").string()});
     invoke({nativeTool("cmake").string(), "--build", (consumer / "build").string(), "--parallel", "1"});
     invoke({nativeExecutable(consumer / "build/consumer").string()});
+    const auto headless = output / "headless-consumer";
+    invoke({nativeTool("cmake").string(), "-S", (source / "tests/sdk-headless-consumer").string(),
+            "-B", headless.string(), "-DCMAKE_PREFIX_PATH=" + prefix.string(),
+            "-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE", "-DCMAKE_CXX_COMPILER=" + nativeTool("c++").string(),
+#ifdef _WIN32
+            "-G", "Ninja", "-DCMAKE_EXE_LINKER_FLAGS=-static",
+#endif
+            "-DCMAKE_BUILD_TYPE=Release"});
+    invoke({nativeTool("cmake").string(), "--build", headless.string(), "--parallel", "1"});
+    require(fs::exists(headless / "generated/Model.hpp") &&
+            !fs::exists(headless / "generated/ModelView.hpp") && !fs::exists(headless / "generated/view.json"),
+        "headless installed consumer generated UI artifacts");
+    invoke({nativeExecutable(headless / "pipelang-headless-consumer").string()});
 }
 }
 

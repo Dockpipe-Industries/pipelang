@@ -64,3 +64,30 @@ and action semantics. Unstyled source retains its prior generated artifacts.
 It adds an atomically published `style.json` covered by the binding receipt.
 Default generation still owns exactly five outputs. The descriptor contains
 resolved authored values; it is not an effective runtime-style report.
+
+## Headless model generation
+
+Engine and domain code can compile an ordinary model without authoring a view:
+
+```cmake
+find_package(PipeLangModel 0.1.0 EXACT CONFIG REQUIRED)
+pipelang_add_model(contact-policy
+    MODEL "${CMAKE_CURRENT_SOURCE_DIR}/ContactPolicy.pipe"
+    NAMESPACE contact_policy
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated/contact")
+target_link_libraries(engine PRIVATE contact-policy)
+```
+
+This generates `Model.hpp`, `model.json` and `bindings.json`. It does not compile
+or generate a view, discover Python, or introduce a renderer/UI dependency. The
+native `pipelang-sdk-tool model-bindings` command verifies the selected model
+compiler against the exact installed SDK manifest before and after compilation,
+then publishes owned outputs atomically. Failed compilation preserves the prior
+published directory; unowned files cause refusal. Receipts use
+`pipelang.native-model-artifacts.v1` and contain only the selected model source,
+compiler and generated file hashes.
+
+The existing `pipelang_add_model_bindings` interface continues to require a model
+and view. Types unsupported by the view bridge, including binary32, remain
+explicit refusals there. A controlled consumer must select and verify its exact
+SDK identity; the package version alone does not authorize mutable SDK selection.

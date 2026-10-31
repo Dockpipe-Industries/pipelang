@@ -3,6 +3,7 @@
 #include "../../../tests/native-models/windows_junction.hpp"
 #include <csignal>
 #include <array>
+#include <atomic>
 #include <exception>
 #include <iostream>
 #include <thread>
@@ -13,6 +14,122 @@
 
 namespace {
 using namespace pipelang::tools;
+using CleanupClock = std::chrono::steady_clock;
+
+class ProbeHandle {
+public:
+    explicit ProbeHandle(HANDLE value) : value_(value) {
+        require(value_ != INVALID_HANDLE_VALUE, "cannot open owned cleanup probe handle");
+    }
+    ProbeHandle(const ProbeHandle&) = delete;
+    ProbeHandle& operator=(const ProbeHandle&) = delete;
+    ~ProbeHandle() { close(); }
+
+    bool close() noexcept {
+        if (value_ == INVALID_HANDLE_VALUE)
+            return true;
+        if (!CloseHandle(value_))
+            return false;
+        value_ = INVALID_HANDLE_VALUE;
+        return true;
+    }
+private:
+    HANDLE value_;
+};
+
+bool retryableOwnedRemovalError(const std::error_code& error) {
+    if (!error)
+        return true;
+    if (error.category() == std::system_category()) {
+        switch (error.value()) {
+        case ERROR_FILE_NOT_FOUND:
+        case ERROR_PATH_NOT_FOUND:
+        case ERROR_ACCESS_DENIED:
+        case ERROR_SHARING_VIOLATION:
+        case ERROR_DIR_NOT_EMPTY:
+        case ERROR_DELETE_PENDING:
+            return true;
+        default:
+            return false;
+        }
+    }
+    if (error.category() == std::generic_category()) {
+        return error == std::errc::no_such_file_or_directory || error == std::errc::permission_denied ||
+            error == std::errc::directory_not_empty || error == std::errc::device_or_resource_busy;
+    }
+    return false;
+}
+
+void removeOwnedDirectory(const fs::path& directory, CleanupClock::time_point deadline) {
+    for (;;) {
+        std::error_code removalError;
+        fs::remove_all(directory, removalError);
+        if (!retryableOwnedRemovalError(removalError))
+            throw fs::filesystem_error("cannot remove owned probe directory", directory, removalError);
+
+        const auto attributes = GetFileAttributesW(directory.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            const auto error = GetLastError();
+            if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+                return;
+            removalError = std::error_code(static_cast<int>(error), std::system_category());
+            if (!retryableOwnedRemovalError(removalError))
+                throw fs::filesystem_error("cannot verify owned probe directory removal", directory, removalError);
+        } else if (!removalError) {
+            removalError = std::error_code(ERROR_DELETE_PENDING, std::system_category());
+        }
+
+        // The read-only estate sampler may still own a share-delete handle.
+        // Do not reuse the name until the last close makes absence observable.
+        if (CleanupClock::now() >= deadline)
+            throw fs::filesystem_error("owned probe directory removal deadline exceeded", directory, removalError);
+        Sleep(1);
+    }
+}
+
+void checkOwnedDirectoryCleanup(const fs::path& marker, CleanupClock::time_point deadline) {
+    const fs::path sharing = marker.string() + ".sharing";
+    fs::create_directories(sharing);
+    ProbeHandle heldDirectory(CreateFileW(sharing.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    const bool removedWhileHeld = RemoveDirectoryW(sharing.c_str()) != FALSE;
+    const auto sharingError = GetLastError();
+    require(!removedWhileHeld && (sharingError == ERROR_SHARING_VIOLATION || sharingError == ERROR_ACCESS_DENIED),
+        "owned no-delete-share directory did not refuse removal");
+    std::atomic<bool> handleClosed = false;
+    std::jthread release([&] {
+        Sleep(50);
+        handleClosed.store(heldDirectory.close());
+    });
+    removeOwnedDirectory(sharing, deadline);
+    require(fs::create_directory(sharing), "removed owned directory name cannot be reused");
+    release.join();
+    require(handleClosed.load(), "cannot close owned sharing-denial probe handle");
+    removeOwnedDirectory(sharing, deadline);
+
+    const fs::path denied = marker.string() + ".denied";
+    const auto protectedFile = denied / "value";
+    atomicWrite(protectedFile, "owned protected publication\n");
+    ProbeHandle heldFile(CreateFileW(protectedFile.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    const auto started = CleanupClock::now();
+    bool refused = false;
+    try {
+        removeOwnedDirectory(denied, started + std::chrono::milliseconds(100));
+    } catch (const fs::filesystem_error& failure) {
+        refused = retryableOwnedRemovalError(failure.code()) &&
+            std::string(failure.what()).find("deadline exceeded") != std::string::npos;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(CleanupClock::now() - started).count();
+    require(refused && elapsed < 2000, "persistent owned removal denial was not bounded and refused");
+    require(readFile(protectedFile, 128) == "owned protected publication\n", "denied cleanup changed protected fixture bytes");
+    require(heldFile.close(), "cannot close owned denial probe handle");
+    removeOwnedDirectory(denied, deadline);
+    atomicWrite(marker.string() + ".cleanup.json", canonical({{"sharing_denial_observed", true},
+        {"initial_removal_error", sharingError}, {"permanent_denial_refused", true},
+        {"denial_elapsed_ms", elapsed}, {"name_reuse_after_absence", true}}));
+}
 void workload(const std::string& mode, const fs::path& marker) {
     require(std::getenv("PIPELANG_WINDOWS_COORDINATOR"), "probe has no native coordinator");
     atomicWrite(marker, "started\n");
@@ -43,16 +160,20 @@ void workload(const std::string& mode, const fs::path& marker) {
         return;
     }
     if (mode == "directory-churn") {
+        const auto deadline = CleanupClock::now() + std::chrono::seconds(20);
+        checkOwnedDirectoryCleanup(marker, deadline);
         const fs::path directories = marker.string() + ".directories";
         fs::create_directories(directories);
         for (int round = 0; round < 25; ++round) {
             for (int index = 0; index < 25; ++index)
                 atomicWrite(directories / std::to_string(index) / "new" / "value", "owned publication\n");
             for (int index = 0; index < 25; ++index)
-                fs::remove_all(directories / std::to_string(index));
+                removeOwnedDirectory(directories / std::to_string(index), deadline);
             Sleep(1);
         }
-        fs::remove(directories);
+        removeOwnedDirectory(directories, deadline);
+        atomicWrite(marker.string() + ".churn.json", canonical({{"rounds", 25}, {"entries_per_round", 25},
+            {"publications", 625}, {"verified_removals", 625}, {"directory_absent", true}}));
         return;
     }
     if (mode == "reparse-accounting") {

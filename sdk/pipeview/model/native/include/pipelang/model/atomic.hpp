@@ -19,9 +19,10 @@ namespace pipelang::model {
 template<class T>
 class Atomic {
     static_assert(std::is_same_v<T, std::int64_t> ||
-                  std::is_same_v<T, bool> || std::is_same_v<T, double>,
-                  "Atomic supports only int, bool and float64");
-    using Storage = std::conditional_t<std::is_same_v<T, double>, std::uint64_t, T>;
+                  std::is_same_v<T, bool> || std::is_same_v<T, double> || std::is_same_v<T, float>,
+                  "Atomic supports only int, bool, float64 and float32");
+    using Storage = std::conditional_t<std::is_same_v<T, double>, std::uint64_t,
+        std::conditional_t<std::is_same_v<T, float>, std::uint32_t, T>>;
 
 public:
     Atomic() : Atomic(T{}) {
@@ -86,15 +87,15 @@ private:
     }
 
     static Storage encode(T value) {
-        if constexpr (std::is_same_v<T, double>)
-            return std::bit_cast<std::uint64_t>(value);
+        if constexpr (std::is_floating_point_v<T>)
+            return std::bit_cast<Storage>(value);
         else
             return value;
     }
 
     static T decode(Storage value) {
-        if constexpr (std::is_same_v<T, double>)
-            return std::bit_cast<double>(value);
+        if constexpr (std::is_floating_point_v<T>)
+            return std::bit_cast<T>(value);
         else
             return value;
     }

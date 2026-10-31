@@ -15,6 +15,7 @@ namespace {
 const Type booleanType{"bool", {}};
 const Type integerType{"int", {}};
 const Type floatType{"float", {}};
+const Type float32Type{"float32", {}};
 const Type stringType{"string", {}};
 const Type voidType{"void", {}};
 const Type errorType{"Error", {}};
@@ -232,7 +233,7 @@ private:
         return result;
     }
     static bool primitive(const std::string& name) {
-        return name == "void" || name == "bool" || name == "int" || name == "float" || name == "string" || name == "Error";
+        return name == "void" || name == "bool" || name == "int" || name == "float" || name == "float32" || name == "string" || name == "Error";
     }
     Declaration* declaration(const std::string& name) const {
         auto found = types_.find(name);
@@ -264,8 +265,8 @@ private:
         }
         if (value.name == "Atomic") {
             if (value.arguments.size() != 1 ||
-                (value.arguments[0] != integerType && value.arguments[0] != booleanType && value.arguments[0] != floatType))
-                fail("Atomic requires int, bool or float", offset);
+                (value.arguments[0] != integerType && value.arguments[0] != booleanType && value.arguments[0] != floatType && value.arguments[0] != float32Type))
+                fail("Atomic requires int, bool, float or float32", offset);
             return;
         }
         if (extended(value.name)) {
@@ -724,6 +725,14 @@ private:
             if (conversion.ec != std::errc{} || conversion.ptr != node->text.data() + node->text.size())
                 fail("integer literal outside signed64 range", node->offset);
             result = integerType;
+        } else if (node->kind == "float32") {
+            float parsed = 0;
+            const auto* end = node->text.data() + node->text.size() - 1;
+            const auto conversion = std::from_chars(node->text.data(), end, parsed);
+            if (conversion.ec != std::errc{} || conversion.ptr != end || !std::isfinite(parsed))
+                fail("float32 literal outside finite binary32 range", node->offset);
+            node->resolution = std::to_string(std::bit_cast<std::uint32_t>(parsed));
+            result = float32Type;
         } else if (node->kind == "float") {
             double parsed = 0;
             const auto conversion = std::from_chars(node->text.data(), node->text.data() + node->text.size(), parsed);
@@ -781,8 +790,8 @@ private:
                 result = expression(node->children[0]);
                 if (node->text == "!")
                     same(result, booleanType, node->offset);
-                else if (result != integerType && result != floatType)
-                    fail("negation requires int or float", node->offset);
+                else if (result != integerType && result != floatType && result != float32Type)
+                    fail("negation requires int, float or float32", node->offset);
             }
         } else if (node->kind == "binary") {
             const auto left = expression(node->children[0]);
@@ -804,8 +813,8 @@ private:
             } else if (operation == "+" && left == stringType) {
                 result = stringType;
             } else {
-                if (left != integerType && left != floatType)
-                    fail("numeric operation requires int or float", node->offset);
+                if (left != integerType && left != floatType && left != float32Type)
+                    fail("numeric operation requires int, float or float32", node->offset);
                 result = operation == "+" || operation == "-" || operation == "*" || operation == "/"
                     ? left : booleanType;
             }
@@ -1072,13 +1081,13 @@ private:
             node->resolution = "list_construct";
             return receiver->type;
         }
-        if (receiver->kind == "type" && receiver->type == floatType) {
+        if (receiver->kind == "type" && (receiver->type == floatType || receiver->type == float32Type)) {
             if (target->text != "IsFinite" && target->text != "Abs" &&
                 target->text != "Sqrt" && target->text != "Log")
-                fail("unknown float operation", target->offset);
-            arguments(node, {{floatType, "value", true, node->offset}});
+                fail("unknown " + receiver->type.name + " operation", target->offset);
+            arguments(node, {{receiver->type, "value", true, node->offset}});
             node->resolution = "float_math";
-            return target->text == "IsFinite" ? booleanType : floatType;
+            return target->text == "IsFinite" ? booleanType : receiver->type;
         }
         if (receiver->kind == "type" && receiver->type.name == "Optional") {
             type(receiver->type, receiver->offset);

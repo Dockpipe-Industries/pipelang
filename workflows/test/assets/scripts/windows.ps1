@@ -77,7 +77,7 @@ if (!$runtimeSelection) {
     $runtimeSelection = 'all'
 }
 if ($runtimeSelection -eq 'all') {
-    foreach ($fixture in @('extended_collections', 'parallel_runtime', 'concurrent_runtime', 'synchronization_runtime', 'object_runtime', 'object_transaction')) {
+    foreach ($fixture in @('extended_collections', 'parallel_runtime', 'concurrent_runtime', 'synchronization_runtime', 'lazy_task_scope', 'object_runtime', 'object_transaction')) {
         Compile-Fixture $fixture (Join-Path $script:SourceRoot "tests/native-models/$fixture.cpp") (Join-Path $sdk 'include') $sdk $tools
     }
 } elseif ($runtimeSelection -ne 'none') {

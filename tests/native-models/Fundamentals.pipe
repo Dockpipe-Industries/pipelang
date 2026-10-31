@@ -85,3 +85,53 @@ public Class Fundamentals {
         }
     }
 }
+
+public Record Numeric32Box<T> { public T Value; }
+public Class Binary32 {
+    private Atomic<float32> cell = Atomic<float32>.Create(0f);
+    public pure T Identity<T>(T value) => value;
+    public pure float32 Generic() {
+        Numeric32Box<float32> box = new Numeric32Box<float32> { Value = 0.1f };
+        return Identity<float32>(box.Value);
+    }
+    public float32 Exchange(float32 value) => cell.Exchange(value);
+    public float32 CompareExchange(float32 value, float32 comparand) => cell.CompareExchange(value, comparand);
+    public float32 stored = 0f;
+    public List<float32> values = List<float32>.Empty();
+    public pure float32 Decimal() => 0.1f;
+    public pure float32 Tie() => 1.000000059604644775390625f;
+    public pure float32 Smallest() => 1.401298464324817e-45f;
+    public pure float32 Largest() => 3.4028234663852886e38f;
+    public pure float32 NegativeZero() => -0f;
+    public pure float32 Add(float32 first, float32 second) => first + second;
+    public pure float32 Subtract(float32 first, float32 second) => first - second;
+    public pure float32 Multiply(float32 first, float32 second) => first * second;
+    public pure float32 Divide(float32 first, float32 second) => first / second;
+    public pure float32 Negative(float32 value) => -value;
+    public pure float32 MultiplyAdd(float32 first, float32 second, float32 third) => first * second + third;
+    public pure float32 FirstMinimum(float32 first, float32 second) => second < first ? second : first;
+    public pure bool LessEqual(float32 first, float32 second) => first <= second;
+    public pure bool Greater(float32 first, float32 second) => first > second;
+    public pure bool GreaterEqual(float32 first, float32 second) => first >= second;
+    public pure bool Less(float32 first, float32 second) => first < second;
+    public pure bool Equal(float32 first, float32 second) => first == second;
+    public pure bool Different(float32 first, float32 second) => first != second;
+    public pure bool Finite(float32 value) => float32.IsFinite(value);
+    public pure float32 Absolute(float32 value) => float32.Abs(value);
+    public pure float32 Root(float32 value) => float32.Sqrt(value);
+    public pure float32 Logarithm(float32 value) => float32.Log(value);
+    public pure float32 Contact(float32 friction, float32 impulse, float32 speed) {
+        float32 scale = friction * impulse / speed;
+        return scale < 1f ? scale : 1f;
+    }
+    public float32 Store(float32 value) {
+        stored = value;
+        values.Add(value);
+        return stored;
+    }
+    public float32 Rollback() {
+        stored = 7f;
+        values.Add(8f);
+        return Optional<float32>.None().Value;
+    }
+}

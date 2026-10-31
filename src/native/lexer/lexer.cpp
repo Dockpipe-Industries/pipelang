@@ -173,7 +173,12 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
                 while (offset < source.size() && isDigit(source[offset]))
                     ++offset;
             }
-            append(floatingPoint ? "float" : "integer", start, offset);
+            if (numericSyntax == NumericSyntax::Binary64 && offset < source.size() && source[offset] == 'f') {
+                ++offset;
+                append("float32", start, offset);
+            } else {
+                append(floatingPoint ? "float" : "integer", start, offset);
+            }
             continue;
         }
         if (character == '"') {

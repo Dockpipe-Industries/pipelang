@@ -1,0 +1,3 @@
+public Class ContactModel {
+    public pure float32 Half(float32 value) => value * 0.5f;
+}

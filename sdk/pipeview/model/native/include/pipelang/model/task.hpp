@@ -173,9 +173,9 @@ struct Coroutine {
     Handle handle;
 };
 
-// One owner executor, one worker, bounded admitted coroutines. Host jobs and
-// completions have FIFO order. Worker callbacks never access model state. The
-// owner must pump poll(); no continuation is run by the worker or another owner.
+// One owner executor, one lazily started worker, bounded admitted coroutines.
+// Host jobs and completions have FIFO order. Worker callbacks never access model
+// state. The owner must pump poll(); no continuation runs on the worker or another owner.
 class TaskScope {
     struct PollState {
         std::function<std::optional<bool>()> check;
@@ -193,7 +193,6 @@ public:
         : owner_(std::this_thread::get_id()), capacity_(options.capacity) {
         if (capacity_ == 0 || capacity_ > TaskOptions::maximumCapacity)
             throw ExecutionFailure("task capacity must be between 1 and 32");
-        worker_ = std::thread([this] { work(); });
     }
     TaskScope(const TaskScope&) = delete;
     TaskScope& operator=(const TaskScope&) = delete;
@@ -209,7 +208,8 @@ public:
             stopping_ = true;
         }
         wake_.notify_one();
-        worker_.join();
+        if (worker_.joinable())
+            worker_.join();
         // Preserve authoritative host outcomes already produced, including a
         // successful external commit whose completion has not yet been polled.
         // The generated owner destroys this scope before its state and services.
@@ -481,6 +481,16 @@ private:
         if (stopping_ || jobs_.size() >= capacity_)
             throw ExecutionFailure("host queue unavailable");
         jobs_.push_back({std::move(execute), std::move(complete)});
+        if (!worker_.joinable()) {
+            try {
+                // Hold the queue lock until startup succeeds: a failed thread
+                // construction must leave no job or continuation admitted.
+                worker_ = std::thread([this] { work(); });
+            } catch (...) {
+                jobs_.pop_back();
+                throw;
+            }
+        }
         wake_.notify_one();
     }
     void work() {

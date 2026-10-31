@@ -74,19 +74,27 @@ std::string source(const fs::path& path) {
 }
 }
 
-Json generateBindings(const fs::path& prefix, const fs::path& manifest, const std::string& manifestHash,
+namespace {
+Json generateArtifacts(const fs::path& prefix, const fs::path& manifest, const std::string& manifestHash,
                       const fs::path& modelTool, const fs::path& viewTool,
                       const fs::path& model, const fs::path& view, const std::string& nameSpace,
-                      const fs::path& output, bool styleInspection) {
+                      const fs::path& output, bool styleInspection, bool withView) {
+    require(withView || !styleInspection, "headless model generation cannot inspect view styles");
     text(nameSpace, "namespace", 1024);
     outputPreflight(output);
-    for (const auto& input : {model, view}) {
+    std::vector<fs::path> inputs{model};
+    if (withView)
+        inputs.push_back(view);
+    for (const auto& input : inputs) {
         const auto relative = input.lexically_relative(output).generic_string();
         require(input != output && (relative.empty() || relative == ".." || relative.starts_with("../")), "output cannot own an input source");
     }
     const auto sdk = verifyManifest(prefix, manifest, manifestHash);
     std::map<std::string, std::string> hashes;
-    for (const auto& [name, tool] : std::map<std::string, fs::path>{{"model", modelTool}, {"view", viewTool}}) {
+    std::map<std::string, fs::path> tools{{"model", modelTool}};
+    if (withView)
+        tools.emplace("view", viewTool);
+    for (const auto& [name, tool] : tools) {
         require(tool.is_absolute(), "native tool must be absolute");
         regularFile(tool);
 #ifndef _WIN32
@@ -101,44 +109,72 @@ Json generateBindings(const fs::path& prefix, const fs::path& manifest, const st
         require(found != sdk.at("files").end(), "native tool is absent from the pinned SDK inventory");
     }
     const auto modelBytes = source(model);
-    const auto viewBytes = source(view);
+    const auto viewBytes = withView ? source(view) : std::string{};
     const auto modelResponse = compile(modelTool, {{"protocol", modelProtocol}, {"source", modelBytes}, {"namespace", nameSpace}}, modelProtocol);
     const auto& modelManifest = modelResponse.at("manifest");
     admitModel(modelManifest, nameSpace);
-    requireViewCompatible(modelManifest);
-    Json request{{"protocol", viewProtocol}, {"source", viewBytes}, {"model_manifest", modelManifest},
-                 {"namespace", nameSpace}, {"model_header", "Model.hpp"}};
-    if (styleInspection)
-        request["style_inspection"] = styleProtocol;
-    const auto viewResponse = compile(viewTool, request, viewProtocol, styleInspection);
-    const auto& viewManifest = viewResponse.at("manifest");
-    exactObject(viewManifest, {"protocol", "name", "adapter", "model", "namespace"}, {}, "view manifest");
-    require(viewManifest.at("protocol") == "pipelang.native-model-view-manifest.v1" && viewManifest.at("namespace") == nameSpace,
-            "view manifest protocol or namespace mismatch");
-    for (const auto& name : {"name", "adapter", "model"})
-        text(viewManifest.at(name), std::string("view ") + name, 1024);
-    require(std::any_of(modelManifest.at("classes").begin(), modelManifest.at("classes").end(), [&](const auto& modelClass) {
-        return modelClass.at("name") == viewManifest.at("model");
-    }), "view refers to an unadmitted model");
-    if (styleInspection)
-        admitStyle(viewResponse.at("style_descriptor"), viewManifest);
-    require(source(model) == modelBytes && source(view) == viewBytes, "source changed during compilation");
-    require(fileHash(modelTool) == hashes.at("model") && fileHash(viewTool) == hashes.at("view"), "native executable changed during compilation");
+    Json viewResponse;
+    if (withView) {
+        requireViewCompatible(modelManifest);
+        Json request{{"protocol", viewProtocol}, {"source", viewBytes}, {"model_manifest", modelManifest},
+                     {"namespace", nameSpace}, {"model_header", "Model.hpp"}};
+        if (styleInspection)
+            request["style_inspection"] = styleProtocol;
+        viewResponse = compile(viewTool, request, viewProtocol, styleInspection);
+        const auto& viewManifest = viewResponse.at("manifest");
+        exactObject(viewManifest, {"protocol", "name", "adapter", "model", "namespace"}, {}, "view manifest");
+        require(viewManifest.at("protocol") == "pipelang.native-model-view-manifest.v1" && viewManifest.at("namespace") == nameSpace,
+                "view manifest protocol or namespace mismatch");
+        for (const auto& name : {"name", "adapter", "model"})
+            text(viewManifest.at(name), std::string("view ") + name, 1024);
+        require(std::any_of(modelManifest.at("classes").begin(), modelManifest.at("classes").end(), [&](const auto& modelClass) {
+            return modelClass.at("name") == viewManifest.at("model");
+        }), "view refers to an unadmitted model");
+        if (styleInspection)
+            admitStyle(viewResponse.at("style_descriptor"), viewManifest);
+    }
+    require(source(model) == modelBytes && (!withView || source(view) == viewBytes), "source changed during compilation");
+    for (const auto& [name, tool] : tools)
+        require(fileHash(tool) == hashes.at(name), "native executable changed during compilation");
     verifyManifest(prefix, manifest, manifestHash);
     std::map<std::string, std::string> outputs{
-        {"Model.hpp", modelResponse.at("header").get<std::string>()}, {"model.json", canonical(modelManifest)},
-        {"ModelView.hpp", viewResponse.at("header").get<std::string>()}, {"view.json", canonical(viewManifest)}
+        {"Model.hpp", modelResponse.at("header").get<std::string>()}, {"model.json", canonical(modelManifest)}
     };
+    if (withView) {
+        outputs["ModelView.hpp"] = viewResponse.at("header").get<std::string>();
+        outputs["view.json"] = canonical(viewResponse.at("manifest"));
+    }
     if (styleInspection)
         outputs["style.json"] = canonical(viewResponse.at("style_descriptor"));
-    Json receipt{{"protocol", "pipelang.native-model-bindings.v1"}, {"sdk_version", "0.1.0"}, {"sdk_manifest_sha256", manifestHash},
-                 {"namespace", nameSpace}, {"model_source_sha256", sha256(modelBytes)}, {"view_source_sha256", sha256(viewBytes)},
-                 {"tools", {{"model", {{"protocol", modelProtocol}, {"sha256", hashes.at("model")}}},
-                            {"view", {{"protocol", viewProtocol}, {"sha256", hashes.at("view")}}}}}, {"generated", Json::object()}};
+    Json receipt{{"protocol", withView ? "pipelang.native-model-bindings.v1" : "pipelang.native-model-artifacts.v1"},
+                 {"sdk_version", "0.1.0"}, {"sdk_manifest_sha256", manifestHash}, {"namespace", nameSpace},
+                 {"model_source_sha256", sha256(modelBytes)},
+                 {"tools", {{"model", {{"protocol", modelProtocol}, {"sha256", hashes.at("model")}}}}},
+                 {"generated", Json::object()}};
+    if (withView) {
+        receipt["view_source_sha256"] = sha256(viewBytes);
+        receipt["tools"]["view"] = {{"protocol", viewProtocol}, {"sha256", hashes.at("view")}};
+    }
     for (const auto& [name, bytes] : outputs)
         receipt["generated"][name] = sha256(bytes);
     outputs["bindings.json"] = canonical(receipt);
     publishDirectory(output, outputs);
     return receipt;
+}
+}
+
+Json generateBindings(const fs::path& prefix, const fs::path& manifest, const std::string& manifestHash,
+                      const fs::path& modelTool, const fs::path& viewTool,
+                      const fs::path& model, const fs::path& view, const std::string& nameSpace,
+                      const fs::path& output, bool styleInspection) {
+    return generateArtifacts(prefix, manifest, manifestHash, modelTool, viewTool,
+        model, view, nameSpace, output, styleInspection, true);
+}
+
+Json generateModelBindings(const fs::path& prefix, const fs::path& manifest, const std::string& manifestHash,
+                           const fs::path& modelTool, const fs::path& model,
+                           const std::string& nameSpace, const fs::path& output) {
+    return generateArtifacts(prefix, manifest, manifestHash, modelTool, {},
+        model, {}, nameSpace, output, false, false);
 }
 }

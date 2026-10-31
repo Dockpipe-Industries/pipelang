@@ -181,6 +181,37 @@ void fundamentals(Oracle& oracle, const fs::path& root) {
         }
     }
     require(stored && label, "fundamentals field manifest differs");
+    bool singleState = false;
+    bool singleCollection = false;
+    bool singleMethod = false;
+    for (const auto& model : result.at("manifest").at("classes")) {
+        if (model.at("name") != "Binary32")
+            continue;
+        for (const auto& field : model.at("fields")) {
+            singleState |= field.at("name") == "stored" && field.at("type") == "float32";
+            singleCollection |= field.at("name") == "values" && field.at("type") == "List<float32>";
+        }
+        for (const auto& method : model.at("methods")) {
+            if (method.at("name") == "Add") {
+                singleMethod = method.at("returnType") == "float32" &&
+                    method.at("parameters").at(0).at("type") == "float32" &&
+                    method.at("parameters").at(1).at("type") == "float32";
+            }
+        }
+    }
+    require(singleState && singleCollection && singleMethod, "binary32 public manifest differs");
+    for (const auto& refusal : std::vector<Case>{
+        {"binary32-int", "public Class M { public float32 value = 1; }", ""},
+        {"binary32-double", "public Class M { public float32 value = 1.0; }", ""},
+        {"binary64-single", "public Class M { public float value = 1f; }", ""},
+        {"binary32-mixed", "public Class M { public pure float32 Read(float32 x) => x + 1.0; }", ""},
+        {"binary32-compare", "public Class M { public pure bool Read(float32 x) => x < 1; }", ""},
+        {"binary32-math", "public Class M { public pure float32 Read() => float32.Sqrt(1.0); }", ""},
+        {"binary32-overflow", "public Class M { public float32 value = 3.4028236e38f; }", ""},
+        {"binary32-underflow", "public Class M { public float32 value = 1e-99f; }", ""},
+        {"binary32-exponent", "public Class M { public float32 value = 1e+f; }", ""},
+        {"binary32-container", "public Class M { public List<float32> value = List<float>.Empty(); }", ""}})
+        oracle.refused(refusal);
     const std::string service = "public Interface Store { Task<Result<void,string>> Save(CancellationToken token); } ";
     const std::vector<Case> cases{
         {"float-from-int", "public Class M { public float value = 1; }", ""},
@@ -214,7 +245,7 @@ void fundamentals(Oracle& oracle, const fs::path& root) {
     require(cases.size() == 28, "fundamentals refusal inventory differs");
     for (const auto& item : cases)
         oracle.refused(item);
-    const auto defaults = oracle.admitted("numeric-defaults", "public Record NumericDefaults { public bool finite = float.IsFinite(0.0); } public Class DefaultOwner { public NumericDefaults value; }");
+    const auto defaults = oracle.admitted("numeric-defaults", "public Record NumericDefaults { public bool finite = float.IsFinite(0.0); public float32 single = 0.1f; } public Class DefaultOwner { public NumericDefaults value; }");
     require(defaults.at("header").get<std::string>().find("#include <pipelang/model/numeric.hpp>") != std::string::npos, "numeric default omitted numeric runtime");
     oracle.generated("NumericDefaults", defaults);
     oracle.refused({"exponent-overflow", "public Class M { public float value = 1e309; }", ""});

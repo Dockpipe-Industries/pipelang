@@ -96,7 +96,7 @@ inline std::size_t indexOf(std::int64_t index, std::size_t size) {
 }
 
 template<class T>
-inline constexpr bool supportedKey = std::is_same_v<T, std::int64_t> ||
+inline constexpr bool supportedKey = std::is_same_v<T, std::int64_t> || std::is_same_v<T, std::uint32_t> ||
     std::is_same_v<T, bool> || std::is_same_v<T, std::string> || std::is_enum_v<T>;
 
 // Immutable internal nodes may share storage between semantic value copies.

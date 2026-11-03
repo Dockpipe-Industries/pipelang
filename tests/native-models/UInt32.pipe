@@ -1,0 +1,99 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Record WordBox {
+    public uint32 word;
+}
+
+public Interface WordHost {
+    Result<WordBox,string> Echo(WordBox value);
+}
+
+public Class WordTransport {
+    private WordHost host;
+    public uint32 stored = 0u;
+
+    public WordTransport(WordHost service) {
+        host = service;
+    }
+
+    public Result<WordBox,string> Echo(uint32 value) {
+        stored = value;
+        return host.Echo(WordBox(value));
+    }
+}
+
+public Class WordStream {
+    private uint32 state = 1u;
+
+    public WordStream(uint32 seed) {
+        state = seed == 0u ? 1u : seed;
+    }
+
+    public pure uint32 Word() => state;
+
+    public uint32 Next() {
+        state = state ^ (state << 13);
+        state = state ^ (state >> 17);
+        state = state ^ (state << 5);
+        return state;
+    }
+
+    public float32 Sample() {
+        uint32 word = Next();
+        return float32.FromUInt32(word >> 8) / 16777216f;
+    }
+
+    public pure uint32 MixedSeed(uint32 seed, int rider) {
+        return seed ^ uint32.WrappingMultiply(0x9e3779b9u, uint32.FromInt(rider + 1));
+    }
+}
+
+public Class WordMath {
+    public uint32 stored = 7u;
+    public pure uint32 Maximum() => 4294967295u;
+    public pure uint32 Hexadecimal() => 0xffffffffu;
+    public pure uint32 UppercaseHex() => 0XABCDEF01u;
+    public pure uint32 BitAnd(uint32 left, uint32 right) => left & right;
+    public pure uint32 BitOr(uint32 left, uint32 right) => left | right;
+    public pure uint32 BitXor(uint32 left, uint32 right) => left ^ right;
+    public pure uint32 BitNot(uint32 value) => ~value;
+    public pure uint32 ShiftLeft(uint32 value, int count) => value << count;
+    public pure uint32 ShiftRight(uint32 value, int count) => value >> count;
+    public pure uint32 WrappingAdd(uint32 left, uint32 right) => uint32.WrappingAdd(left, right);
+    public pure uint32 WrappingSubtract(uint32 left, uint32 right) => uint32.WrappingSubtract(left, right);
+    public pure uint32 WrappingMultiply(uint32 left, uint32 right) => uint32.WrappingMultiply(left, right);
+    public pure bool Less(uint32 left, uint32 right) => left < right;
+    public pure bool Equal(uint32 left, uint32 right) => left == right;
+    public pure uint32 Precedence() => 1u | 2u ^ 3u & 4u;
+    public pure uint32 UnaryPrecedence() => ~1u << 1;
+    public pure uint32 ShiftPrecedence() => 1u << 1 + 2;
+    public pure uint32 ArithmeticPrecedence() => 1u + 2u << 1;
+    public pure uint32 FromInt(int value) => uint32.FromInt(value);
+    public pure int ToInt(uint32 value) => int.FromUInt32(value);
+    public pure uint32 FromDouble(float value) => uint32.FromFloat(value);
+    public pure uint32 FromSingle(float32 value) => uint32.FromFloat32(value);
+    public pure float ToDouble(uint32 value) => float.FromUInt32(value);
+    public pure float32 ToSingle(uint32 value) => float32.FromUInt32(value);
+
+    public uint32 Calculate(uint32 left, uint32 right, int operation) {
+        stored = left;
+        if (operation == 0)
+            return left + right;
+        if (operation == 1)
+            return left - right;
+        if (operation == 2)
+            return left * right;
+        if (operation == 3)
+            return left / right;
+        return left % right;
+    }
+
+    public uint32 ShiftRollback(uint32 value, int count) {
+        stored = value;
+        return value << count;
+    }
+
+    public uint32 ConversionRollback(float value) {
+        stored = 99u;
+        return uint32.FromFloat(value);
+    }
+}

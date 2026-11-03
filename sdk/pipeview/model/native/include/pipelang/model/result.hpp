@@ -227,7 +227,18 @@ inline std::int64_t divide(std::int64_t left, std::int64_t right) {
     return left / right;
 }
 
+inline std::int64_t remainder(std::int64_t left, std::int64_t right) {
+    if (right == 0)
+        throw ExecutionFailure("integer remainder by zero");
+    // The mathematical truncated remainder is zero even though the associated
+    // quotient cannot be represented. Never evaluate C++ MIN % -1, which is UB.
+    if (left == std::numeric_limits<std::int64_t>::min() && right == -1)
+        return 0;
+    return left % right;
+}
+
 inline std::int64_t negate(std::int64_t value) {
+
     return subtract(0, value);
 }
 

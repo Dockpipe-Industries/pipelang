@@ -2,6 +2,7 @@
 #pragma once
 
 #include "compiler.hpp"
+#include "CompiledProject.hpp"
 #include "../lexer/lexer.hpp"
 #include <map>
 #include <memory>
@@ -15,6 +16,7 @@ struct Type {
     std::vector<Type> arguments;
     std::string sourceName = {};
     std::string text() const;
+    std::string displayText() const;
     bool operator==(const Type& other) const {
         return name == other.name && arguments == other.arguments;
     }
@@ -48,6 +50,7 @@ struct Expression {
     std::string owner = {};
     std::vector<std::string> targets = {};
     Type convertTo = {};
+    std::shared_ptr<Expression> constantValue = {};
 };
 using Expr = std::shared_ptr<Expression>;
 
@@ -59,6 +62,7 @@ struct Field {
     Expr initializer = {};
     bool protectedMember = false;
     std::string declaringClass = {};
+    Expr constantValue = {};
 };
 
 struct Statement {
@@ -114,26 +118,48 @@ struct Declaration {
     std::vector<std::string> typeParameters = {};
     std::string sourceName = {};
     std::string module = {};
+    std::string originPath = {};
     bool sourceInterface = false;
     bool modelExported = false;
+    bool modelDeclared = false;
+    // Project-only lowering facets share one authored identity.
+    std::string sourceObjectFacet = {};
+    bool generatedObjectFacet = false;
+    std::string genericSourceName = {};
+    std::vector<Type> genericArguments = {};
     std::vector<Type> interfaces = {};
     std::string baseClass = {};
     std::vector<std::string> ancestors = {};
+    std::vector<Field> constants = {};
 };
 
 struct Program {
     std::vector<Declaration> declarations;
     std::string module = {};
     std::vector<std::string> imports = {};
+    std::vector<std::size_t> importOffsets = {};
     std::size_t tokenCount = 0;
     std::size_t expressionCount = 0;
     bool objectEnabled = false;
+    bool projectEnabled = false;
+    std::map<std::string, std::size_t> projectGenericRecords = {};
     std::vector<std::string> modelExports = {};
 };
 
-Program parse(const std::string& source, bool objectSyntax = false, std::size_t parameterLimit = 32);
+Program parse(const std::string& source, bool objectSyntax = false, std::size_t parameterLimit = 32, bool projectSyntax = false);
+// Inspect only the module/import prefix using the owning lexer and parser.
+Program parseModuleHeader(const std::string& source);
+// Project convention uses one ordinary source identifier as its implicit module.
+std::string moduleIdentityFromStem(const std::string& stem);
 void check(Program& program);
 std::string generate(const Program& program, const std::string& nameSpace);
+CompiledProject generateCompiledProject(const Program& program, const std::string& nameSpace);
+
+std::string generateProjectTypes(const Program& program, const std::string& nameSpace);
+Expr foldConstant(const Expr& expression);
+std::string constantLiteral(const Expr& expression);
+std::string constantsHeader(const Program& program, const std::string& nameSpace);
+nlohmann::json constantsManifest(const Program& program, const std::string& nameSpace);
 nlohmann::json manifest(const Program& program, const std::string& nameSpace);
 std::string cppType(const Type& type, const Program& program);
 

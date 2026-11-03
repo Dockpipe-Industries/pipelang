@@ -2,6 +2,9 @@
 #include "bindings.hpp"
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <cstdint>
+#include <limits>
 
 namespace pipelang::tools {
 namespace {
@@ -76,7 +79,7 @@ void admitModel(const Json& manifest, const std::string& nameSpace) {
         required.insert("objects");
         required.insert("sourceInterfaces");
     }
-    exactObject(manifest, required, {}, "model manifest");
+    exactObject(manifest, required, {"constants"}, "model manifest");
     require(manifest.at("protocol") == (objects ? "pipelang.native-model-manifest.v2" : "pipelang.native-model-manifest.v1") &&
             manifest.at("namespace") == nameSpace, "model manifest protocol or namespace mismatch");
     if (objects)
@@ -145,20 +148,87 @@ void admitModel(const Json& manifest, const std::string& nameSpace) {
             }
         }
     }
+    if (manifest.contains("constants")) {
+        const auto& constants = manifest.at("constants");
+        array(constants, "constant exports", 32768);
+        require(!constants.empty(), "constant exports must not be empty");
+        std::set<std::string> owners;
+        for (const auto& category : {"classes", "objects"}) {
+            if (!manifest.contains(category))
+                continue;
+            for (const auto& declaration : manifest.at(category))
+                owners.insert(declaration.value("sourceName", declaration.at("name").get<std::string>()));
+        }
+        std::set<std::string> identities;
+        for (const auto& constant : constants) {
+            exactObject(constant, {"module", "owner", "name", "type", "encoding", "cpp_name", "value"}, {}, "constant export");
+            require(constant.at("module").is_string(), "constant module must be text");
+            const auto module = constant.at("module").get<std::string>();
+            require(module.size() <= 1024, "constant module exceeds its limit");
+            const auto owner = text(constant.at("owner"), "constant owner", 4096);
+            const auto name = text(constant.at("name"), "constant name", 1024);
+            identifier(constant.at("name"));
+            require(owners.contains(owner) && identities.insert(owner + '.' + name).second,
+                "constant export has unknown owner or duplicate identity");
+            const auto separator = owner.rfind('.');
+            const auto className = separator == std::string::npos ? owner : owner.substr(separator + 1);
+            identifier(className);
+            require(owner == (module.empty() ? className : module + '.' + className), "constant module and owner disagree");
+            std::string cppOwner;
+            std::size_t begin = 0;
+            while (begin < module.size()) {
+                const auto end = module.find('.', begin);
+                const auto part = module.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+                identifier(part);
+                cppOwner += part + "::";
+                if (end == std::string::npos)
+                    break;
+                begin = end + 1;
+            }
+            require(module.empty() || module.back() != '.', "constant module has empty component");
+            cppOwner += className;
+            require(constant.at("cpp_name") == nameSpace + "::constants::" + cppOwner + "::" + name,
+                "constant C++ identity mismatch");
+            const auto type = text(constant.at("type"), "constant type", 32);
+            const auto value = text(constant.at("value"), "constant value", 32);
+            static const std::map<std::string, std::string> encodings{
+                {"bool", "boolean"}, {"int", "signed64-decimal"}, {"uint32", "unsigned32-decimal"},
+                {"float32", "ieee754-binary32-bits"}, {"float", "ieee754-binary64-bits"}
+            };
+            require(encodings.contains(type) && constant.at("encoding") == encodings.at(type), "constant type or encoding mismatch");
+            if (type == "bool") {
+                require(value == "true" || value == "false", "invalid boolean constant");
+            } else if (type == "int") {
+                std::int64_t parsed = 0;
+                const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+                require(result.ec == std::errc{} && result.ptr == value.data() + value.size() && std::to_string(parsed) == value,
+                    "invalid signed64 constant");
+            } else {
+                std::uint64_t parsed = 0;
+                const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+                require(result.ec == std::errc{} && result.ptr == value.data() + value.size() && std::to_string(parsed) == value,
+                    "invalid constant bit value");
+                if (type == "uint32" || type == "float32")
+                    require(parsed <= std::numeric_limits<std::uint32_t>::max(), "constant value exceeds32bits");
+            }
+        }
+    }
 }
 void requireViewCompatible(const Json& manifest) {
-    const auto rejectBinary32 = [&](const auto& self, const Json& value) -> void {
+    const auto rejectUnsupportedPrimitive = [&](const auto& self, const Json& value) -> void {
         if (value.is_object()) {
             for (const auto& [key, child] : value.items()) {
                 if ((key == "type" || key == "returnType") && child.is_string()) {
                     const auto type = child.template get<std::string>();
-                    std::size_t position = 0;
-                    while ((position = type.find("float32", position)) != std::string::npos) {
-                        const auto end = position + 7;
-                        const bool startsToken = position == 0 || type[position - 1] == '<' || type[position - 1] == ',';
-                        const bool endsToken = end == type.size() || type[end] == '>' || type[end] == ',';
-                        require(!startsToken || !endsToken, "view bindings do not support float32 values");
-                        position = end;
+                    for (const std::string primitive : {"float32", "uint32"}) {
+                        std::size_t position = 0;
+                        while ((position = type.find(primitive, position)) != std::string::npos) {
+                            const auto end = position + primitive.size();
+                            const bool startsToken = position == 0 || type[position - 1] == '<' || type[position - 1] == ',';
+                            const bool endsToken = end == type.size() || type[end] == '>' || type[end] == ',';
+                            require(!startsToken || !endsToken, "view bindings do not support " + primitive + " values");
+                            position = end;
+                        }
                     }
                 }
                 self(self, child);
@@ -168,7 +238,7 @@ void requireViewCompatible(const Json& manifest) {
                 self(self, child);
         }
     };
-    rejectBinary32(rejectBinary32, manifest);
+    rejectUnsupportedPrimitive(rejectUnsupportedPrimitive, manifest);
     require(manifest.at("protocol") != "pipelang.native-model-manifest.v2", "view bindings do not support object model manifest v2");
     for (const auto& category : {"records", "enums", "interfaces", "classes"}) {
         for (const auto& declaration : manifest.at(category)) {

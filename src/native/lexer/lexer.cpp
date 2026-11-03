@@ -16,7 +16,13 @@ bool isDigit(unsigned char character) {
     return character >= '0' && character <= '9';
 }
 
+bool isHexDigit(unsigned char character) {
+    return isDigit(character) || (character >= 'a' && character <= 'f') ||
+           (character >= 'A' && character <= 'F');
+}
+
 bool isIdentifierStart(unsigned char character) {
+
     return (character >= 'a' && character <= 'z') ||
            (character >= 'A' && character <= 'Z') || character == '_';
 }
@@ -151,6 +157,18 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
         }
         if (isDigit(character)) {
             const auto start = offset++;
+            if (numericSyntax == NumericSyntax::Binary64 && character == '0' &&
+                offset < source.size() && (source[offset] == 'x' || source[offset] == 'X')) {
+                ++offset;
+                const auto digits = offset;
+                while (offset < source.size() && isHexDigit(source[offset]))
+                    ++offset;
+                if (offset == digits || offset == source.size() || source[offset] != 'u')
+                    return failure("PL1002", "uint32 hexadecimal literal requires digits and lowercase u suffix", start, offset);
+                ++offset;
+                append("uint32", start, offset);
+                continue;
+            }
             while (offset < source.size() && isDigit(source[offset]))
                 ++offset;
             bool floatingPoint = false;
@@ -173,7 +191,12 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
                 while (offset < source.size() && isDigit(source[offset]))
                     ++offset;
             }
-            if (numericSyntax == NumericSyntax::Binary64 && offset < source.size() && source[offset] == 'f') {
+            if (numericSyntax == NumericSyntax::Binary64 && offset < source.size() && source[offset] == 'u') {
+                if (floatingPoint)
+                    return failure("PL1002", "uint32 literal cannot contain a fraction or exponent", start, offset + 1);
+                ++offset;
+                append("uint32", start, offset);
+            } else if (numericSyntax == NumericSyntax::Binary64 && offset < source.size() && source[offset] == 'f') {
                 ++offset;
                 append("float32", start, offset);
             } else {
@@ -256,6 +279,26 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
             break;
         case '/':
             kind = "slash";
+            break;
+        case '&':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "bit_and";
+            break;
+        case '|':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "bit_or";
+            break;
+        case '^':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "bit_xor";
+            break;
+        case '~':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "bit_not";
+            break;
+        case '%':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "percent";
             break;
         case '=':
             kind = "assign";

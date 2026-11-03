@@ -1,6 +1,7 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include "result.hpp"
+#include "limits.hpp"
 #include <cstdint>
 #include <atomic>
 #include <functional>
@@ -87,6 +88,13 @@ inline std::size_t addOwnedBytes(std::size_t left, std::size_t right) {
 
 class EvaluationBudget {
 public:
+    static EvaluationBudget forInitialization(std::size_t requested) {
+        requireInitializationSteps(requested);
+        EvaluationBudget budget;
+        budget.remaining_ = requested;
+        return budget;
+    }
+
     class CleanupRegion {
     public:
         explicit CleanupRegion(EvaluationBudget& budget) : budget_(budget) { ++budget_.cleanupDepth_; }
@@ -97,6 +105,19 @@ public:
         EvaluationBudget& budget_;
     };
     void step() {
+        if (cleanupDepth_ == 0 && !cancellationCheck_ && !shared_ && remaining_ != 0) {
+            --remaining_;
+            return;
+        }
+        slowStep();
+    }
+private:
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    void slowStep() {
         if (cleanupDepth_ == 0 && cancellationCheck_ && cancellationCheck_())
             throw OperationCancelled("parallel operation cancelled");
         if (shared_) {
@@ -116,6 +137,7 @@ public:
                 ? "source evaluation budget exceeded" : "cleanup evaluation budget exceeded");
         --remaining;
     }
+public:
     bool inCleanup() const noexcept {
         return cleanupDepth_ != 0;
     }
@@ -152,7 +174,7 @@ public:
             return inherited() || (check && check());
         };
     }
-    static constexpr std::size_t maximumSteps = 65536;
+    static constexpr std::size_t maximumSteps = defaultEvaluationSteps;
 private:
     struct SharedCounters {
         SharedCounters(std::size_t normalSteps, std::size_t cleanupSteps)

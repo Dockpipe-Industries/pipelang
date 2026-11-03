@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "../../src/native/support/support.hpp"
+#include "NativeXmlViewTests.hpp"
 #include <iostream>
 
 namespace {
@@ -26,13 +27,18 @@ public:
         require(response == invoke(request, view), "nondeterministic generation: " + name);
         atomicWrite(output_ / (name + ".hpp"), response.at("header").get<std::string>());
         atomicWrite(output_ / (name + ".manifest.json"), canonical(response.at("manifest")));
+        if (response.contains("constants_header"))
+            atomicWrite(output_ / (name + ".constants.hpp"), response.at("constants_header").get<std::string>());
         record(name, request, "admitted");
         return response;
     }
-    void refused(const std::string& name, const Json& request, bool view = false) {
+    void refused(const std::string& name, const Json& request, bool view = false, const std::string& expected = {}) {
         const auto response = invoke(request, view);
         require(response.at("ok") == false && !response.contains("header") && !response.contains("manifest") &&
             response.at("diagnostics").is_array() && !response.at("diagnostics").empty(), "expected refusal " + name + ": " + response.dump());
+        if (!expected.empty())
+            require(response.at("diagnostics").front().at("message").get<std::string>().find(expected) != std::string::npos,
+                    "refusal diagnostic changed: " + name + ": " + response.dump());
         for (const auto& diagnostic : response.at("diagnostics")) {
             require(!text(diagnostic.at("message"), "diagnostic").empty(), "empty refusal diagnostic");
             const auto position = diagnostic.at(view ? "start" : "offset").get<std::int64_t>();
@@ -66,6 +72,180 @@ std::string replace(std::string source, const std::string& old, const std::strin
     return source;
 }
 void run(Oracle& oracle) {
+    const auto pureHostValues = oracle.admitted("PureHostValues", sourceRequest(
+        "public Interface Math { pure float32 Support(float32 compression, float32 speed); } "
+        "public Class App { private Math math; public App(Math service) { math = service; } "
+        "public pure float32 Read(float32 value) => math.Support(value, 0f); }", "pure_host_values"));
+    require(pureHostValues.at("header").get<std::string>().find("float Support(float compression, float speed) const = 0") != std::string::npos,
+        "Pure owned-value host method lost its const native interface");
+    require(pureHostValues.at("header").get<std::string>().find(
+        "using pipelang::model::validate; auto pl_receiver =") != std::string::npos,
+        "Pure owned-value host lowering omitted its receiver and validation scope");
+    const std::string pureProjectSource =
+        "module PureMath; public Interface Math { pure float32 Support(float32 value); } "
+        "public model Class App { private Math math; public App(Math service) { math = service; } "
+        "public pure float32 Read(float32 value) => math.Support(value); }";
+    const auto pureProject = oracle.admitted("PureHostProject", {
+        {"protocol", "pipelang.native-model-project.v1"}, {"entry", "PureMath"},
+        {"namespace", "pure_host_project"}, {"modules", Json::array({{
+            {"name", "PureMath"}, {"path", "PureMath.pipe"}, {"source", pureProjectSource}}})}});
+    require(pureProject.at("types_header").get<std::string>().find("float Support(float value) const = 0") != std::string::npos,
+        "Pure host project Types interface lost its const owned-value return");
+    const auto refusePureHost = [&](const std::string& name, const std::string& source,
+                                   const std::string& expected, bool objects = false) {
+        oracle.refused("pure-host-" + name, sourceRequest(source, "pure_host_refusal", objects), false, expected);
+    };
+    refusePureHost("nonpure-raw", "public Interface Host { int Read(); }", "host interfaces declare synchronous Result");
+    refusePureHost("void", "public Interface Host { pure void Read(); }", "pure method requires a synchronous value return");
+    refusePureHost("task-raw", "public Interface Host { Task<int> Read(); }", "Task is supported only as Task<Result");
+    refusePureHost("task-pure", "public Interface Host { pure Task<Result<int,string>> Read(); }", "pure method requires a synchronous value return");
+    refusePureHost("service", "public Interface Service { Result<int,string> Read(); } public Interface Host { pure Service Read(); }", "service references");
+    refusePureHost("atomic", "public Interface Host { pure Atomic<int> Read(); }", "service references");
+    refusePureHost("nullable-service", "public Interface Service { Result<int,string> Read(); } public Interface Host { pure Service? Read(); }", "owned value payload");
+    const std::string reference = "public Class Value { public pure int Read() => 1; } ";
+    refusePureHost("reference", reference + "public Interface Host { pure Value Read(); } public Class App {}", "deeply owned values", true);
+    refusePureHost("record-reference", reference + "public Record Box { public Value value; } public Interface Host { pure Box Read(); } public Class App {}", "records contain owned value fields only", true);
+    refusePureHost("argument-reference", reference + "public Record Box { public Value value; } public Interface Host { pure int Read(Box value); } public Class App {}", "records contain owned value fields only", true);
+    refusePureHost("parallel", "public Interface Host { pure float32 Read(float32 value); } public Class App { private Host host; public App(Host service) { host = service; } public void Run(List<float32> values) { parallel foreach (float32 value in values) { float32 result = host.Read(value); } } }", "parallel workers cannot access host services");
+    oracle.admitted("PureHostNestedVoidResult", sourceRequest(
+        "public Interface Host { pure List<Result<void,string>> Read(); }", "pure_host_nested"));
+    std::string sharedRecords = "public Record R0 { public int value; } ";
+    for (int index = 1; index <= 30; ++index) {
+        const auto child = "R" + std::to_string(index - 1);
+        sharedRecords += "public Record R" + std::to_string(index) + " { public " + child +
+            " first; public " + child + " second; } ";
+    }
+    oracle.refused("pure-host-shared-record-budget", sourceRequest(sharedRecords +
+        "public Interface Host { pure R30 Read(); }", "pure_host_record_budget"), false,
+        "expanded value layout limit exceeded");
+    oracle.admitted("PureHostSharedRecord", sourceRequest(
+        "public Record Leaf { public int value; } "
+        "public Record Pair { public Leaf first; public Leaf second; } "
+        "public Interface Host { pure Pair Read(); }", "pure_host_shared_record"));
+    const auto nullable = [&](const std::string& name, const std::string& body,
+                              const std::string& expected) {
+        oracle.refused("nullable-" + name, sourceRequest("public Class App { " + body + " }", "nullable_refusal"), false, expected);
+    };
+    nullable("old-type", "public Optional<int> Value;", "replaced by T?");
+    nullable("old-constructor", "public pure int? Read() => Optional<int>.None();", "replaced by T?");
+    nullable("suffix-constructor", "public pure int? Read() => int?.Some(1);", "typed values or null");
+    nullable("null-into-int", "public pure int Read() => null;", "expected int, got null");
+    nullable("null-into-record", "public int Value = null;", "expected int, got null");
+    nullable("no-unwrap", "public pure int Read(int? value) => value;", "expected int, got int?");
+    nullable("wrong-payload", "public pure string? Read() => 1;", "expected string?, got int");
+    nullable("untyped-null-equality", "public pure bool Read() => null == null;", "nullable target type");
+    nullable("malformed-suffix", "public int?<> Value;", "expected identifier");
+    nullable("nullable-void", "public void? Value;", "void is not a value type");
+    nullable("null-argument", "private pure int Read(int value) => value; public pure int Invoke() => Read(null);", "no exact matching method overload");
+    nullable("ambiguous-null", "private pure int Read(int? value) => 1; private pure int Read(string? value) => 2; public pure int Invoke() => Read(null);", "ambiguous nullable method overload");
+    nullable("suffix-depth", "public int????????????? Value;", "type nesting limit exceeded");
+    nullable("mixed-depth", "public List<int??????????" ">?? Value;", "type nesting limit exceeded");
+    oracle.admitted("NullableDepthBoundary", sourceRequest(
+        "public Record Boundary { public List<int??????????" ">? Value; }", "nullable_boundary"));
+    const std::string oldNullableSource = "public Class App { public Optional<int> Value; }";
+    const auto oldNullableDiagnostic = oracle.invoke(sourceRequest(oldNullableSource, "nullable_origin"));
+    require(!oldNullableDiagnostic.at("ok").get<bool>()
+        && oldNullableDiagnostic.at("diagnostics").at(0).at("offset") == oldNullableSource.find("Optional"),
+        "Old nullable syntax lost its exact authored token offset");
+    const auto nullableSyntax = oracle.admitted("NullableSyntax", sourceRequest(
+        "public Record Box<T> { public T? Value; } "
+        "public Class App { public Box<int?> Nested; "
+        "public pure Result<float32?,string> Sample() => Result<float32?,string>.Success(null); "
+        "public pure int? Spacing(bool choose) => choose ? 3 : null; "
+        "public pure int? BothAbsent(bool choose) => choose ? null : null; "
+        "public pure int?? Layers() { int? inner = null; return inner; } }", "nullable_syntax"));
+    require(nullableSyntax.at("header").get<std::string>().find("$null") == std::string::npos,
+        "Internal untyped null marker escaped into generated C++");
+    oracle.refused("nullable-nominal-display", sourceRequest(
+        "public Record MyOptional<T> { public T Value; } "
+        "public Class App { public MyOptional<int> Value = 0; }", "nullable_nominal"),
+        false, "expected MyOptional<int>, got int");
+    oracle.refused("nullable-nominal-nested-display", sourceRequest(
+        "public Record MyOptional<T> { public T Value; } "
+        "public Class App { public MyOptional<int?> Value = 0; }", "nullable_nominal_nested"),
+        false, "expected MyOptional<int?>, got int");
+    const auto foundation = oracle.admitted("Foundation", sourceRequest(
+        oracle.source("tests/native-models/Foundation.pipe"), "foundation"));
+    require(foundation.at("constants_header").get<std::string>().find("pipelang/model") == std::string::npos &&
+            foundation.at("manifest").at("constants").size() >= 12,
+        "typed standalone constants lost their exports or acquired runtime headers");
+    oracle.admitted("FoundationObjects", sourceRequest(
+        oracle.source("tests/native-models/FoundationObjects.pipe"), "foundation_objects", true));
+
+    oracle.admitted("UInt32Objects", sourceRequest(
+        oracle.source("tests/native-models/UInt32Objects.pipe"), "uint32_objects", true));
+    oracle.admitted("SyncHostObjects",
+ sourceRequest(
+        oracle.source("tests/native-models/SyncHostObjects.pipe"), "sync_host_objects", true));
+    oracle.admitted("InitializationObjects", sourceRequest(
+        oracle.source("tests/native-models/InitializationObjects.pipe"), "initialization_objects", true));
+    oracle.admitted("ListReadObjects", sourceRequest(
+        oracle.source("tests/native-models/ListReadObjects.pipe"), "pipelang_list_read_objects", true));
+    const std::string constantPrefix = "public Class App { ";
+    const auto refuseConstant = [&](const std::string& name, const std::string& body, const std::string& expected) {
+        oracle.refused("constant-" + name, sourceRequest(constantPrefix + body + " }", "constant_refusal"), false, expected);
+    };
+    refuseConstant("missing-initializer", "public const int Value;", "expected '='");
+    refuseConstant("owned-type", "public const string Value = \"text\";", "const requires bool, int, uint32, float or float32");
+    refuseConstant("state-reference", "public int value = 1; public const int Value = value;", "cannot reference model state");
+    refuseConstant("arbitrary-call", "public pure int Compute() => 3; public const int Value = Compute();", "closed scalar values");
+    refuseConstant("cycle", "public const int First = Second; public const int Second = First;", "constant dependency cycle");
+    refuseConstant("signed-overflow", "public const int Value = 9223372036854775807 + 1;", "invalid constant");
+    refuseConstant("unsigned-underflow", "public const uint32 Value = 0u - 1u;", "invalid constant");
+    refuseConstant("unsigned-overflow", "public const uint32 Value = 4294967295u + 1u;", "invalid constant");
+    refuseConstant("divide-zero", "public const int Value = 1 / 0;", "invalid constant");
+    refuseConstant("remainder-zero", "public const int Value = 1 % 0;", "invalid constant");
+    refuseConstant("divide-minimum", "public const int Value = -9223372036854775808 / -1;", "invalid constant");
+    refuseConstant("shift-negative", "public const uint32 Value = 1u << -1;", "invalid constant");
+    refuseConstant("shift-high", "public const uint32 Value = 1u >> 32;", "invalid constant");
+    refuseConstant("conversion-negative", "public const uint32 Value = uint32.FromInt(-1);", "invalid constant");
+    refuseConstant("conversion-nan", "public const int Value = int.FromFloat(float.NaN);", "invalid constant");
+    refuseConstant("mutation", "public const int Value = 1; public void Change() { Value = 2; }", "cannot assign to const member");
+    refuseConstant("mixed-width", "public const float32 Value = 1.0f + 2.0;", "expected float32");
+    oracle.refused("constant-private-access", sourceRequest(
+        "public Class Values { private const int Hidden = 1; } public Class App { public const int Value = Values.Hidden; }",
+        "constant_private"), false, "constant is private");
+    oracle.refused("constant-instance-access", sourceRequest(
+        "public Class Cell { public const int Value = 1; } public Class App { private Cell cell = new Cell(); public pure int Read() => cell.Value; }",
+        "constant_instance", true), false, "requires its class name");
+    oracle.refused("constant-inherited-field", sourceRequest(
+        "public Class Base { public const int Value = 1; } public Class Child : Base { public int Value = 2; } public Class App { }",
+        "constant_inheritance", true), false, "inherited constants cannot be hidden");
+    oracle.refused("constant-namespace-collision", sourceRequest(
+        "public Class constants { } public Class App { public const int Value = 1; }", "constant_namespace"),
+        false, "constant export namespace conflicts");
+    const Json importedConstantFailure{{"protocol", "pipelang.native-model.v2"}, {"entry", "App"},
+        {"namespace", "constant_origin"}, {"modules", {
+            {{"name", "App"}, {"source", "module App; import Values; public Class App { public const int Value = Numbers.Bad; }"}},
+            {{"name", "Values"}, {"source", "module Values; public Class Numbers { public const int Bad = 1 / 0; }"}}
+        }}};
+    oracle.refused("constant-imported-diagnostic", importedConstantFailure, false, "invalid constant");
+    require(oracle.invoke(importedConstantFailure).at("diagnostics")[0].at("module") == "Values",
+        "folded constant diagnostic lost its defining source module");
+    oracle.refused("constant-inherited-method", sourceRequest(
+        "public Class Base { public pure int Read() => 1; } public Class Child : Base { public const int Read = 2; } public Class App { }",
+        "constant_method", true), false, "cannot be hidden");
+    const Json constantNamespaceConflict{{"protocol", "pipelang.native-model.v2"}, {"entry", "App"},
+        {"namespace", "constant_namespace_path"}, {"modules", {
+            {{"name", "App"}, {"source", "module App; import Values; import Values.Root; public Class App { }"}},
+            {{"name", "Values"}, {"source", "module Values; public Class Root { public const int Child = 1; }"}},
+            {{"name", "Values.Root"}, {"source", "module Values.Root; public Class Child { public const int Value = 2; }"}}
+        }}};
+    oracle.refused("constant-module-value-namespace", constantNamespaceConflict, false, "constant export name conflicts");
+    const std::string pureHost = "public Interface Math { pure Result<int,string> Read(int value); } ";
+    const std::string injected = "public Class App { private Math math; public App(Math query) { math = query; } ";
+    oracle.refused("pure-host-transitive-worker", sourceRequest(pureHost + injected +
+        "private pure int Get(int value) => math.Read(value).Value; public void Run(List<int> values) { parallel foreach (int value in values) { int result = Get(value); } } }",
+        "pure_worker"), false, "parallel helper cannot access host services");
+    oracle.refused("pure-host-effectful-call", sourceRequest(
+        "public Interface Math { Result<int,string> Height(); } public Class App { private Math math; public App(Math query) { math = query; } public pure Result<int,string> Read() => math.Height(); }",
+        "pure_effect"), false, "pure methods cannot call effectful host services");
+    oracle.refused("prefix-wrong-type", sourceRequest(
+        "public Class App { public pure bool Read() => string.StartsWith(1, \"x\"); }", "prefix_type"));
+    oracle.refused("prefix-wrong-arity", sourceRequest(
+        "public Class App { public pure bool Read() => string.StartsWith(\"x\"); }", "prefix_arity"));
+    oracle.refused("ieee-unknown-name", sourceRequest(
+        "public Class App { public pure float32 Read() => float32.Infinity; }", "ieee_name"), false, "unknown typed IEEE constant");
     const auto data = [&](const std::string& name) { return oracle.source("tests/native-models/data/" + name + ".pipe"); };
     for (const auto& [name, space] : std::map<std::string, std::string>{
         {"Collections", "pipelang_models"}, {"Parallel", "pipelang_models"}, {"Synchronization", "synchronization_models"},
@@ -105,10 +285,17 @@ void run(Oracle& oracle) {
         {{"name", "App"}, {"source", "module App; public Class App {}"}}, {{"name", "App"}, {"source", "module App; public Class App {}"}}}));
 
     const auto model = oracle.admitted("FixtureModel", sourceRequest(oracle.source("tests/native-model-views/FixtureModel.pipe"), "pipelang_models"));
-    const auto source = oracle.source("tests/native-model-views/Fixture.pipe");
+    const auto source = oracle.source("tests/native-model-views/Fixture.pview");
     Json view{{"protocol", "pipelang.native-model-view.v1"}, {"source", source}, {"namespace", "pipelang_models"},
         {"model_header", "Model.hpp"}, {"model_manifest", model.at("manifest")}};
     const auto plain = oracle.admitted("View", view, true);
+    pipelang::tests::nativeXmlViewTests(oracle, view, plain);
+    for (const std::string type : {"uint32", "List<uint32>", "Result<uint32,string>"}) {
+        auto unsupported = view;
+        unsupported["model_manifest"]["classes"][0]["fields"].push_back({{"name", "unsignedWord"}, {"type", type}});
+        oracle.refused("view/unsupported-" + type, unsupported, true, "view bindings do not support uint32 values");
+    }
+
     std::size_t mutation = 0;
     for (const auto& [old, value] : std::vector<std::pair<std::string, std::string>>{
         {"model.Draft.Name", "model.Draft.Missing"}, {"model.Draft.Name", "model.Saving"},
@@ -121,7 +308,7 @@ void run(Oracle& oracle) {
         oracle.refused("view/mutation-" + std::to_string(mutation++), candidate, true);
     }
     auto styled = view;
-    styled["source"] = oracle.source("tests/native-model-views/Theme.pipe") + replace(source, "FixtureModel) {", "FixtureModel) style Compact {");
+    styled["source"] = oracle.source("tests/native-model-views/Theme.pview") + replace(source, "FixtureModel) {", "FixtureModel) style Compact {");
     const auto themed = oracle.admitted("StyledView", styled, true);
     require(themed.at("manifest") == plain.at("manifest"), "style changed view identity");
     styled["style_inspection"] = "pipelang.native-style-descriptor.v1";

@@ -1,11 +1,16 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "composition.hpp"
+#include "ProjectModelFacets.hpp"
+#include "DiagnosticOriginScope.hpp"
+#include "ModuleDiagnosticScope.hpp"
 
 #include <algorithm>
 #include <functional>
 #include <map>
 #include <set>
 #include <utility>
+#include <tuple>
+#include <iterator>
 
 namespace pipelang::models {
 namespace {
@@ -16,12 +21,13 @@ using Substitutions = std::map<std::string, Type>;
                        const std::string& module = {}) {
     Diagnostic diagnostic(message, offset);
     diagnostic.module = module;
+    diagnostic.path = DiagnosticOriginScope::current();
     throw diagnostic;
 }
 
 bool builtin(const std::string& name) {
     static const std::set<std::string> names = {
-        "void", "bool", "int", "float", "float32", "string", "Error", "CancellationToken",
+        "void", "bool", "int", "uint32", "float", "float32", "string", "Error", "CancellationToken",
         "Result", "Task", "Optional", "List", "Atomic", "Array", "Dictionary",
         "HashSet", "Queue", "Stack", "KeyValuePair",
         "ConcurrentDictionary", "ConcurrentQueue", "ConcurrentStack", "Lock", "SemaphoreSlim"
@@ -112,9 +118,82 @@ public:
         claim(offset, module);
         for (const auto& member : value.fields)
             field(member, offset, module);
+        for (const auto& member : value.constants)
+            field(member, offset, module);
+    }
+
+    // Project facets copy a normalized declaration, including semantic metadata.
+    // Keep this complete traversal separate from legacy specialization admission.
+    void projectDeclaration(const Declaration& value) {
+        claim(value.offset, value.module);
+        for (const auto& argument : value.genericArguments)
+            projectType(argument, value.offset, value.module);
+        for (const auto& contract : value.interfaces)
+            projectType(contract, value.offset, value.module);
+        for (const auto& member : value.fields)
+            projectField(member, value.module);
+        for (const auto& constant : value.constants)
+            projectField(constant, value.module);
+        for (const auto& method : value.methods) {
+            claim(method.offset, value.module);
+            projectType(method.result, method.offset, value.module);
+            for (const auto& parameter : method.parameters)
+                projectField(parameter, value.module);
+            projectExpression(method.baseConstructor, value.module);
+            for (const auto& initializer : method.fieldInitializers)
+                projectExpression(initializer, value.module);
+            for (const auto& statement : method.body)
+                projectStatement(statement, value.module);
+        }
     }
 
 private:
+    void projectType(const Type& value, std::size_t offset, const std::string& module, unsigned depth = 0) {
+        if (value.name.empty() && value.sourceName.empty() && value.arguments.empty())
+            return;
+        if (depth > 12)
+            fail("closed type nesting limit exceeded", offset, module);
+        claim(offset, module);
+        for (const auto& argument : value.arguments)
+            projectType(argument, offset, module, depth + 1);
+    }
+
+    void projectExpression(const Expr& value, const std::string& module) {
+        if (!value)
+            return;
+        claim(value->offset, module);
+        projectType(value->type, value->offset, module);
+        projectType(value->convertTo, value->offset, module);
+        for (const auto& argument : value->typeArguments)
+            projectType(argument, value->offset, module);
+        for (const auto& child : value->children)
+            projectExpression(child, module);
+        projectExpression(value->constantValue, module);
+    }
+
+    void projectField(const Field& value, const std::string& module) {
+        claim(value.offset, module);
+        projectType(value.type, value.offset, module);
+        projectExpression(value.initializer, module);
+        projectExpression(value.constantValue, module);
+    }
+
+    void projectStatement(const Statement& value, const std::string& module) {
+        claim(value.offset, module);
+        projectType(value.type, value.offset, module);
+        projectType(value.itemConvertTo, value.offset, module);
+        projectExpression(value.expression, module);
+        projectExpression(value.target, module);
+        for (const auto& capture : value.parallelCaptures)
+            projectField(capture, module);
+        for (const auto& child : value.body)
+            projectStatement(child, module);
+        for (const auto& child : value.alternative)
+            projectStatement(child, module);
+        for (const auto& child : value.cleanup)
+            projectStatement(child, module);
+    }
+
     void claim(std::size_t offset, const std::string& module) {
         if (used_ == maximumNodes)
             fail("closed specialization AST/type node budget exceeded", offset, module);
@@ -129,6 +208,7 @@ Expr cloneExpression(const Expr& original) {
     if (!original)
         return {};
     auto result = std::make_shared<Expression>(*original);
+    result->constantValue = cloneExpression(original->constantValue);
     result->children.clear();
     for (const auto& child : original->children)
         result->children.push_back(cloneExpression(child));
@@ -142,8 +222,10 @@ Statement cloneStatement(const Statement& original) {
     result.body.clear();
     result.alternative.clear();
     result.cleanup.clear();
-    for (auto& capture : result.parallelCaptures)
+    for (auto& capture : result.parallelCaptures) {
         capture.initializer = cloneExpression(capture.initializer);
+        capture.constantValue = cloneExpression(capture.constantValue);
+    }
     for (const auto& statement : original.body)
         result.body.push_back(cloneStatement(statement));
     for (const auto& statement : original.alternative)
@@ -156,11 +238,14 @@ Statement cloneStatement(const Statement& original) {
 Method cloneMethod(const Method& original) {
     Method result = original;
     result.body.clear();
+    result.baseConstructor = cloneExpression(original.baseConstructor);
     result.fieldInitializers.clear();
     for (const auto& initializer : original.fieldInitializers)
         result.fieldInitializers.push_back(cloneExpression(initializer));
-    for (auto& parameter : result.parameters)
+    for (auto& parameter : result.parameters) {
         parameter.initializer = cloneExpression(parameter.initializer);
+        parameter.constantValue = cloneExpression(parameter.constantValue);
+    }
     for (const auto& statement : original.body)
         result.body.push_back(cloneStatement(statement));
     return result;
@@ -183,28 +268,79 @@ std::string appliedName(const std::string& name, const std::vector<Type>& argume
     return result;
 }
 
+std::vector<std::reference_wrapper<Field>> fieldsAndConstants(Declaration& declaration) {
+    std::vector<std::reference_wrapper<Field>> members;
+    members.reserve(declaration.fields.size() + declaration.constants.size());
+    for (auto& field : declaration.fields)
+        members.push_back(field);
+    for (auto& constant : declaration.constants)
+        members.push_back(constant);
+    return members;
+}
+
+std::vector<std::reference_wrapper<const Field>> fieldsAndConstants(const Declaration& declaration) {
+    std::vector<std::reference_wrapper<const Field>> members;
+    members.reserve(declaration.fields.size() + declaration.constants.size());
+    for (const auto& field : declaration.fields)
+        members.push_back(field);
+    for (const auto& constant : declaration.constants)
+        members.push_back(constant);
+    return members;
+}
+
 class ModuleLinker {
 public:
-    Program run(const std::vector<ModuleSource>& sources, const std::string& entry, bool objectSyntax) {
-        if (sources.empty() || sources.size() > 128 || !moduleName(entry))
-            fail("closed module graph requires 1..128 modules and a valid entry", 0);
+    Program run(const std::vector<ModuleSource>& sources, const std::string& entry, bool objectSyntax, bool projectSyntax) {
+        DiagnosticOriginScope compilationOrigin(std::string{});
+        const std::size_t sourceCountLimit = projectSyntax ? 4096 : 128;
+        if (sources.empty() || sources.size() > sourceCountLimit || !moduleName(entry))
+            fail(projectSyntax ? "project graph requires 1..4096 fragments and a valid entry"
+                               : "closed module graph requires 1..128 modules and a valid entry", 0);
+        std::vector<const ModuleSource*> fragments;
+        for (const auto& source : sources)
+            fragments.push_back(&source);
+        if (projectSyntax) {
+            std::sort(fragments.begin(), fragments.end(), [](const ModuleSource* left, const ModuleSource* right) {
+                return std::tie(left->name, left->path) < std::tie(right->name, right->path);
+            });
+        }
         std::size_t sourceBytes = 0;
+        std::size_t originBytes = 0;
         std::size_t declarationCount = 0;
         std::size_t tokenCount = 0;
         std::size_t expressionCount = 0;
-        for (const auto& source : sources) {
-            if (!moduleName(source.name) || programs_.contains(source.name))
+        std::set<std::string> sourcePaths;
+        std::map<std::string, bool> explicitModules;
+        for (const auto* fragment : fragments) {
+            const auto& source = *fragment;
+            if (projectSyntax) {
+                if (source.path.size() > messageLimit - originBytes)
+                    fail("project fragment origin receipt byte limit exceeded", 0, source.name);
+                originBytes += source.path.size();
+            }
+            DiagnosticOriginScope origin(source.path);
+            if (!moduleName(source.name) || (!projectSyntax && programs_.contains(source.name)))
                 fail("invalid or duplicate supplied module '" + source.name + "'", 0, source.name);
+            if (projectSyntax)
+                validateProjectModuleName(source.name);
+            if (projectSyntax && !source.path.empty()) {
+                if (!projectSourcePath(source.path) || !sourcePaths.insert(source.path).second)
+                    fail("invalid or duplicate project fragment path '" + source.path + "'", 0, source.name);
+            }
             if (source.source.size() > sourceLimit - sourceBytes)
                 fail("aggregate module source byte limit exceeded", 0, source.name);
             sourceBytes += source.source.size();
             Program program;
             try {
-                program = parse(source.source, objectSyntax);
+                program = parse(source.source, objectSyntax, 32, projectSyntax);
             } catch (Diagnostic& diagnostic) {
                 diagnostic.module = source.name;
+                diagnostic.path = source.path;
                 throw;
             }
+            const bool explicitModule = !program.module.empty();
+            if (projectSyntax && program.module.empty())
+                program.module = source.name;
             if (program.module != source.name)
                 fail("source module declaration must match its supplied module identity", 0, source.name);
             if (program.tokenCount > 32768 - tokenCount)
@@ -216,15 +352,57 @@ public:
             declarationCount += program.declarations.size();
             if (declarationCount > 128)
                 fail("aggregate module declaration limit exceeded", 0, source.name);
-            programs_.emplace(source.name, std::move(program));
+            if (programs_.contains(source.name)) {
+                if (!explicitModule || !explicitModules.at(source.name) || source.path.empty() ||
+                    modulePaths_.at(source.name).empty())
+                    fail("duplicate project module requires distinct explicit source parts: " +
+                         modulePaths_.at(source.name) + " and " + source.path, 0, source.name);
+            } else {
+                if (programs_.size() == 128)
+                    fail("project import closure exceeds 128 modules", 0, source.name);
+                explicitModules.emplace(source.name, explicitModule);
+                modulePaths_.emplace(source.name, source.path);
+            }
+            std::set<std::string> imports;
+            for (std::size_t index = 0; index < program.imports.size(); ++index) {
+                if (!projectSyntax)
+                    continue;
+                const auto& dependency = program.imports[index];
+                if (dependency == source.name || !imports.insert(dependency).second)
+                    fail("self or duplicate module import", program.importOffsets.at(index), source.name);
+                importOrigins_.emplace(std::make_pair(source.name, dependency),
+                                       std::make_pair(source.path, program.importOffsets.at(index)));
+            }
+            lexicalImports_.emplace(std::make_pair(source.name, source.path), program.imports);
+            for (auto& declaration : program.declarations) {
+                declaration.originPath = source.path;
+                if (projectSyntax)
+                    declaration.module = source.name;
+            }
+            if (const auto existing = programs_.find(source.name); existing != programs_.end()) {
+                auto& combined = existing->second;
+                combined.declarations.insert(combined.declarations.end(),
+                    std::make_move_iterator(program.declarations.begin()), std::make_move_iterator(program.declarations.end()));
+                std::set<std::string> dependencies(combined.imports.begin(), combined.imports.end());
+                dependencies.insert(program.imports.begin(), program.imports.end());
+                combined.imports.assign(dependencies.begin(), dependencies.end());
+            } else {
+                programs_.emplace(source.name, std::move(program));
+            }
         }
         if (!programs_.contains(entry))
             fail("entry module was not supplied", 0, entry);
         for (const auto& [name, program] : programs_) {
             std::set<std::string> imported;
             for (const auto& dependency : program.imports) {
-                if (!programs_.contains(dependency))
+                if (!programs_.contains(dependency)) {
+                    if (projectSyntax) {
+                        const auto& [path, offset] = importOrigins_.at({name, dependency});
+                        DiagnosticOriginScope origin(path);
+                        fail("imported module was not supplied: " + dependency, offset, name);
+                    }
                     fail("imported module was not supplied: " + dependency, 0, name);
+                }
                 if (dependency == name || !imported.insert(dependency).second)
                     fail("self or duplicate module import", 0, name);
             }
@@ -237,8 +415,14 @@ public:
             if (visited.contains(name))
                 return;
             visiting.insert(name);
-            for (const auto& dependency : programs_.at(name).imports)
+            for (const auto& dependency : programs_.at(name).imports) {
+                if (projectSyntax && visiting.contains(dependency)) {
+                    const auto& [path, offset] = importOrigins_.at({name, dependency});
+                    DiagnosticOriginScope origin(path);
+                    fail("module import cycle", offset, name);
+                }
                 visit(dependency);
+            }
             visiting.erase(name);
             visited.insert(name);
         };
@@ -258,24 +442,38 @@ public:
 
         std::size_t identity = 0;
         for (auto& [name, program] : programs_) {
-            std::set<std::string> localNames;
+            std::map<std::string, const Declaration*> localNames;
             for (auto& declaration : program.declarations) {
-                if (!localNames.insert(declaration.name).second || builtin(declaration.name))
+                DiagnosticOriginScope origin(declaration.originPath);
+                if (const auto previous = localNames.find(declaration.name); previous != localNames.end()) {
+                    if (!projectSyntax)
+                        fail("duplicate or reserved module type", declaration.offset, name);
+                    const auto& first = *previous->second;
+                    fail("duplicate module declaration '" + name + '.' + declaration.name + "' in " +
+                         first.originPath + " at offset " + std::to_string(first.offset) + " and " +
+                         declaration.originPath + " at offset " + std::to_string(declaration.offset),
+                         declaration.offset, name);
+                }
+                if (builtin(declaration.name))
                     fail("duplicate or reserved module type", declaration.offset, name);
+                localNames.emplace(declaration.name, &declaration);
                 const auto canonical = name + '.' + declaration.name;
                 // Preserve the entry class names used by native host consumers.
-                names_[canonical] = name == entry ? declaration.name
+                names_[canonical] = name == entry && !projectSyntax ? declaration.name
                     : "pl_module_type_" + std::to_string(identity++);
             }
         }
         const auto inheritedNames = objectSyntax ? inheritedClassNames() : std::map<std::string, std::set<std::string>>{};
         Program linked;
         linked.module = entry;
+        linked.projectEnabled = projectSyntax;
         linked.tokenCount = tokenCount;
         linked.expressionCount = expressionCount;
         for (auto& [name, program] : programs_) {
             current_ = &program;
             for (auto& declaration : program.declarations) {
+                DiagnosticOriginScope origin(declaration.originPath);
+                currentImports_ = &lexicalImports_.at({name, declaration.originPath});
                 const auto canonical = name + '.' + declaration.name;
                 declaration.sourceName = canonical;
                 declaration.module = name;
@@ -285,11 +483,11 @@ public:
                 for (auto& interface : declaration.interfaces)
                     rewriteType(interface, parameters, declaration.offset);
                 std::set<std::string> values;
-                for (const auto& field : declaration.fields)
+                for (const Field& field : fieldsAndConstants(declaration))
                     values.insert(field.name);
                 if (const auto inherited = inheritedNames.find(canonical); inherited != inheritedNames.end())
                     values.insert(inherited->second.begin(), inherited->second.end());
-                for (auto& field : declaration.fields) {
+                for (Field& field : fieldsAndConstants(declaration)) {
                     rewriteType(field.type, parameters, field.offset);
                     rewriteExpression(field.initializer, parameters, values);
                 }
@@ -320,11 +518,13 @@ private:
         std::map<std::string, std::vector<std::string>> bases;
         for (auto& [module, program] : programs_) {
             for (const auto& declaration : program.declarations) {
+                DiagnosticOriginScope origin(declaration.originPath);
+                currentImports_ = &lexicalImports_.at({module, declaration.originPath});
                 if (declaration.kind != "Class")
                     continue;
                 const auto canonical = module + '.' + declaration.name;
                 classes.emplace(canonical, &declaration);
-                for (const auto& field : declaration.fields)
+                for (const Field& field : fieldsAndConstants(declaration))
                     members[canonical].insert(field.name);
                 for (const auto& method : declaration.methods) {
                     if (!method.constructor)
@@ -335,6 +535,8 @@ private:
         for (auto& [module, program] : programs_) {
             current_ = &program;
             for (const auto& declaration : program.declarations) {
+                DiagnosticOriginScope origin(declaration.originPath);
+                currentImports_ = &lexicalImports_.at({module, declaration.originPath});
                 if (declaration.kind != "Class")
                     continue;
                 const auto canonical = module + '.' + declaration.name;
@@ -355,8 +557,10 @@ private:
                     for (const auto& name : members[ancestor]) {
                         if (members[owner].contains(name))
                             continue;
-                        if (members[owner].size() == 256)
+                        if (members[owner].size() == 256) {
+                            DiagnosticOriginScope origin(classes.at(owner)->originPath);
                             fail("class inherited member name limit exceeded", classes.at(owner)->offset, classes.at(owner)->module);
+                        }
                         members[owner].insert(name);
                         changed = true;
                     }
@@ -376,7 +580,7 @@ private:
         if (names_.contains(local))
             return local;
         std::vector<std::string> candidates;
-        for (const auto& dependency : current_->imports) {
+        for (const auto& dependency : *currentImports_) {
             const auto candidate = dependency + '.' + name;
             if (names_.contains(candidate))
                 candidates.push_back(candidate);
@@ -389,7 +593,7 @@ private:
             const auto separator = name.rfind('.');
             const auto owner = name.substr(0, separator);
             if (owner == current_->module ||
-                std::find(current_->imports.begin(), current_->imports.end(), owner) != current_->imports.end())
+                std::find(currentImports_->begin(), currentImports_->end(), owner) != currentImports_->end())
                 return name;
             fail("qualified type requires an explicit direct import", offset, current_->module);
         }
@@ -474,28 +678,69 @@ private:
         }
     }
 
+    static void validateProjectModuleName(const std::string& module) {
+        std::size_t begin = 0;
+        while (begin < module.size()) {
+            const auto end = module.find('.', begin);
+            const auto segment = module.substr(begin, end == std::string::npos ? end : end - begin);
+            try {
+                moduleIdentityFromStem(segment);
+            } catch (const Diagnostic& diagnostic) {
+                fail("invalid project module identifier '" + segment + "': " + diagnostic.what(), 0, module);
+            }
+            if (end == std::string::npos)
+                return;
+            begin = end + 1;
+        }
+    }
+    static bool projectSourcePath(const std::string& path) {
+        if (path.empty() || path.size() > sourceLimit || path.front() == '/' || !path.ends_with(".pipe") ||
+            path.find_first_of("\\:\r\n;") != std::string::npos || path.find('\0') != std::string::npos)
+            return false;
+        std::size_t begin = 0;
+        while (begin < path.size()) {
+            const auto end = path.find('/', begin);
+            const auto component = path.substr(begin, end == std::string::npos ? end : end - begin);
+            if (component.empty() || component == "." || component == "..")
+                return false;
+            if (end == std::string::npos)
+                return true;
+            begin = end + 1;
+        }
+        return false;
+    }
     std::map<std::string, Program> programs_;
+    std::map<std::string, std::string> modulePaths_;
+    std::map<std::pair<std::string, std::string>, std::vector<std::string>> lexicalImports_;
+    std::map<std::pair<std::string, std::string>, std::pair<std::string, std::size_t>> importOrigins_;
+    const std::vector<std::string>* currentImports_ = nullptr;
     std::map<std::string, std::string> names_;
     Program* current_ = nullptr;
 };
 
 class CompositionNormalizer {
 public:
-    explicit CompositionNormalizer(Program& program) : program_(program) {}
+    explicit CompositionNormalizer(Program& program) : program_(program) {
+        for (const auto& declaration : program_.declarations)
+            declarationOrigins_.emplace(declaration.name, std::make_pair(declaration.module, declaration.originPath));
+    }
 
     void run() {
         resolveModelExports();
         // Store templates separately so vector growth never invalidates their identity.
         std::vector<Declaration> concrete;
         for (auto& declaration : program_.declarations) {
+            DiagnosticOriginScope origin(declaration.originPath);
             validateParameters(declaration.typeParameters, declaration.offset, declaration.module);
             if (!declaration.typeParameters.empty()) {
+                if (program_.projectEnabled)
+                    program_.projectGenericRecords.emplace(declaration.sourceName, declaration.typeParameters.size());
                 if (declaration.kind != "Record")
                     fail("user generic declarations currently require Record", declaration.offset, declaration.module);
                 if (!declaration.methods.empty())
                     fail("generic records declare owned value fields only", declaration.offset, declaration.module);
                 std::set<std::string> fieldNames;
-                for (const auto& field : declaration.fields) {
+                for (const Field& field : fieldsAndConstants(declaration)) {
                     if (!field.visible || !fieldNames.insert(field.name).second)
                         fail("generic record fields must be public and unique", field.offset, declaration.module);
                 }
@@ -510,6 +755,7 @@ public:
         }
         program_.declarations = std::move(concrete);
         for (auto& declaration : program_.declarations) {
+            DiagnosticOriginScope origin(declaration.originPath);
             if (records_.contains(declaration.name))
                 fail("generic and ordinary type names collide", declaration.offset, declaration.module);
             std::vector<Method> methods;
@@ -534,7 +780,8 @@ public:
         for (std::size_t index = 0; index < ordinaryCount; ++index) {
             auto declaration = std::move(program_.declarations[index]);
             currentModule_ = declaration.module;
-            for (auto& field : declaration.fields) {
+            DiagnosticOriginScope origin(declaration.originPath);
+            for (Field& field : fieldsAndConstants(declaration)) {
                 normalizeType(field.type, {}, field.offset);
                 normalizeExpression(field.initializer, declaration.name, {});
             }
@@ -549,11 +796,21 @@ public:
                 fail("internal generic method owner was lost", 0);
             for (auto& method : methods)
                 found->methods.push_back(std::move(method));
-            if (found->fields.size() + found->methods.size() > 256)
+            if (found->fields.size() + found->constants.size() + found->methods.size() > 256) {
+                DiagnosticOriginScope origin(found->originPath);
                 fail("closed class member limit exceeded", found->offset, found->module);
+            }
         }
         resolveClassHierarchy();
         flattenSourceInterfaces();
+        lowerProjectModelFacets(program_, [&](const Declaration& declaration) {
+            try {
+                budget_.projectDeclaration(declaration);
+            } catch (Diagnostic& diagnostic) {
+                diagnostic.path = declaration.originPath;
+                throw;
+            }
+        });
     }
 
 private:
@@ -577,6 +834,7 @@ private:
         for (auto& declaration : program_.declarations)
             declarations.emplace(declaration.name, &declaration);
         for (auto& declaration : program_.declarations) {
+            DiagnosticOriginScope origin(declaration.originPath);
             if (declaration.kind != "Class")
                 continue;
             std::vector<Type> interfaces;
@@ -587,7 +845,7 @@ private:
                         fail("class inheritance requires v3 and one nongeneric base class", declaration.offset, declaration.module);
                     if (!interfaces.empty())
                         fail("the base class must precede source interfaces", declaration.offset, declaration.module);
-                    if (declaration.modelExported || found->second->modelExported)
+                    if (!program_.projectEnabled && (declaration.modelExported || found->second->modelExported))
                         fail("exported model roots cannot participate in class inheritance", declaration.offset, declaration.module);
                     declaration.baseClass = base.name;
                 } else {
@@ -595,13 +853,14 @@ private:
                 }
             }
             declaration.interfaces = std::move(interfaces);
-            for (auto& field : declaration.fields)
+            for (Field& field : fieldsAndConstants(declaration))
                 field.declaringClass = declaration.name;
         }
         std::map<std::string, unsigned> states;
         std::size_t copies = 0;
         std::size_t identityBytes = 0;
         std::function<void(Declaration&, unsigned)> visit = [&](Declaration& owner, unsigned depth) {
+            DiagnosticOriginScope origin(owner.originPath);
             if (depth > 32)
                 fail("class inheritance depth limit exceeded", owner.offset, owner.module);
             if (states[owner.name] == 1)
@@ -623,7 +882,7 @@ private:
                 }
                 for (const auto& ancestorName : owner.ancestors) {
                     const auto& ancestor = *declarations.at(ancestorName);
-                    for (const auto& field : owner.fields) {
+                    for (const Field& field : fieldsAndConstants(owner)) {
                         if (std::any_of(ancestor.fields.begin(), ancestor.fields.end(), [&](const Field& inherited) {
                             return inherited.name == field.name;
                         }) || std::any_of(ancestor.methods.begin(), ancestor.methods.end(), [&](const Method& inherited) {
@@ -639,10 +898,10 @@ private:
                     }
                 }
             }
-            std::size_t members = owner.fields.size() + owner.methods.size();
+            std::size_t members = owner.fields.size() + owner.constants.size() + owner.methods.size();
             for (const auto& ancestor : owner.ancestors) {
                 const auto& base = *declarations.at(ancestor);
-                members += base.fields.size() + base.methods.size();
+                members += base.fields.size() + base.constants.size() + base.methods.size();
                 if (++copies > 65536 || ancestor.size() > messageLimit - identityBytes)
                     fail("class inheritance metadata expansion limit exceeded", owner.offset, owner.module);
                 identityBytes += ancestor.size();
@@ -652,6 +911,7 @@ private:
             states[owner.name] = 2;
         };
         for (auto& declaration : program_.declarations) {
+            DiagnosticOriginScope origin(declaration.originPath);
             if (declaration.kind == "Class")
                 visit(declaration, 1);
         }
@@ -673,12 +933,14 @@ private:
         std::size_t methodCopies = 0;
         std::size_t identityBytes = 0;
         auto baseDeclaration = [&](const Type& base, const Declaration& owner) -> Declaration& {
+            DiagnosticOriginScope origin(owner.originPath);
             const auto found = declarations.find(base.name);
             if (!base.arguments.empty() || found == declarations.end() || !found->second->sourceInterface)
                 fail("inheritance requires an existing nongeneric source interface", owner.offset, owner.module);
             return *found->second;
         };
         auto claimMethod = [&](const Declaration& owner, const std::string& slot, const Method& method) {
+            DiagnosticOriginScope origin(owner.originPath);
             const auto bytes = owner.name.size() + 1 + slot.size();
             if (methodCopies == 65536 || bytes > messageLimit - identityBytes)
                 fail("source interface inheritance method or identity expansion limit exceeded", owner.offset, owner.module);
@@ -687,6 +949,7 @@ private:
             identityBytes += bytes;
         };
         std::function<void(Declaration&, unsigned)> flatten = [&](Declaration& owner, unsigned activeDepth) {
+            DiagnosticOriginScope origin(owner.originPath);
             if (activeDepth > 32)
                 fail("source interface inheritance depth limit exceeded", owner.offset, owner.module);
             if (states[owner.name] == 1)
@@ -772,10 +1035,12 @@ private:
             states[owner.name] = 2;
         };
         for (auto& declaration : program_.declarations) {
+            DiagnosticOriginScope origin(declaration.originPath);
             if (declaration.sourceInterface)
                 flatten(declaration, 1);
         }
         for (auto& declaration : program_.declarations) {
+            DiagnosticOriginScope origin(declaration.originPath);
             if (declaration.kind != "Class")
                 continue;
             std::vector<Type> closure = declaration.interfaces;
@@ -798,13 +1063,14 @@ private:
 
     void resolveModelExports() {
         for (const auto& declaration : program_.declarations) {
+            DiagnosticOriginScope origin(declaration.originPath);
             if (!program_.objectEnabled && (declaration.sourceInterface || !declaration.interfaces.empty()))
                 fail("source interfaces and object implementations require pipelang.native-model.v3",
                      declaration.offset, declaration.module);
         }
         if (!program_.objectEnabled)
             return;
-        if (program_.modelExports.empty() || program_.modelExports.size() > 128)
+        if ((!program_.projectEnabled && program_.modelExports.empty()) || program_.modelExports.size() > 128)
             fail("object compilation requires 1..128 explicit model roots", 0, program_.module);
         std::vector<std::string> resolved;
         std::set<std::string> selected;
@@ -813,6 +1079,7 @@ private:
                 ? program_.module + '.' + requested : requested;
             Declaration* found = nullptr;
             for (auto& declaration : program_.declarations) {
+            DiagnosticOriginScope origin(declaration.originPath);
                 if ((!declaration.sourceName.empty() && declaration.sourceName == canonical) ||
                     (declaration.sourceName.empty() && declaration.name == requested)) {
                     found = &declaration;
@@ -887,6 +1154,10 @@ private:
         Declaration specialized = record;
         specialized.name = nativeName;
         specialized.sourceName = canonical;
+        if (program_.projectEnabled) {
+            specialized.genericSourceName = authoredName(record);
+            specialized.genericArguments = arguments;
+        }
         specialized.typeParameters.clear();
         {
             struct ModuleScope {
@@ -897,7 +1168,8 @@ private:
                 ~ModuleScope() { target = std::move(previous); }
             };
             ModuleScope moduleScope(currentModule_, record.module);
-            for (auto& field : specialized.fields) {
+            DiagnosticOriginScope origin(record.originPath);
+            for (Field& field : fieldsAndConstants(specialized)) {
                 field.initializer = cloneExpression(field.initializer);
                 normalizeType(field.type, bindings, field.offset, depth + 1);
                 normalizeExpression(field.initializer, {}, bindings);
@@ -909,6 +1181,9 @@ private:
     }
 
     void normalizeMethod(Method& method, const std::string& owner, const Substitutions& substitutions) {
+        const auto& [module, path] = declarationOrigins_.at(owner);
+        ModuleDiagnosticScope moduleScope(currentModule_, program_.projectEnabled ? module : currentModule_);
+        DiagnosticOriginScope origin(path);
         normalizeType(method.result, substitutions, method.offset);
         for (auto& parameter : method.parameters)
             normalizeType(parameter.type, substitutions, parameter.offset);
@@ -1023,14 +1298,31 @@ private:
     std::map<std::string, std::vector<Method>> generatedMethods_;
     std::set<std::string> activeRecords_;
     std::set<std::string> activeMethods_;
+    std::map<std::string, std::pair<std::string, std::string>> declarationOrigins_;
     std::string currentModule_;
     std::size_t methodCount_ = 0;
 };
 
 }
 
-Program linkModules(const std::vector<ModuleSource>& sources, const std::string& entry, bool objectSyntax) {
-    return ModuleLinker().run(sources, entry, objectSyntax);
+Program linkModules(const std::vector<ModuleSource>& sources, const std::string& entry, bool objectSyntax, bool projectSyntax) {
+    return ModuleLinker().run(sources, entry, objectSyntax, projectSyntax);
+}
+
+Declaration cloneDeclaration(const Declaration& declaration) {
+    auto result = declaration;
+    for (auto& field : result.fields) {
+        field.initializer = cloneExpression(field.initializer);
+        field.constantValue = cloneExpression(field.constantValue);
+    }
+    for (auto& constant : result.constants) {
+        constant.initializer = cloneExpression(constant.initializer);
+        constant.constantValue = cloneExpression(constant.constantValue);
+    }
+    result.methods.clear();
+    for (const auto& method : declaration.methods)
+        result.methods.push_back(cloneMethod(method));
+    return result;
 }
 
 void normalizeComposition(Program& program) {

@@ -6,6 +6,13 @@ CMake target explicitly; consumers admit the executable's exact bytes before
 invoking it. The compiler uses the existing native lexer and pinned nlohmann JSON
 header. It emits typed C++ and a manifest, not a private application opcode list.
 
+The opt-in [native project contract](../../../docs/concepts/pipelang-projects.md)
+discovers conventional source roots and resolves normal module imports without
+authored source/export JSON inventories. `public model Class` declares an existing
+transactional root; ordinary public types retain object/value semantics and receive
+stable module-qualified native names. The SDK exposes PROJECT_ROOT/SOURCE_ROOT/ENTRY
+and retains old protocols for explicit compatibility fixtures.
+
 Single-source input is exactly one JSON object on stdin. Closed multi-source
 modules use the explicitly selected v2 request described in the
 [composition and parallel contract](../../../docs/concepts/pipelang-native-model-composition.md),
@@ -71,13 +78,54 @@ Binary64 literals support decimal and exponent forms, are rounded once by the
 native frontend and emitted as exact bits. Overflow/underflow outside finite
 literal admission is refused. Unary minus, arithmetic, comparisons and owned
 transport preserve IEEE values, signed zero, subnormals, infinities and quiet
-NaNs; int/float conversions remain explicit refusals. `float.IsFinite`, `Abs`,
+NaNs; implicit numeric conversions remain refused. `float.IsFinite`, `Abs`,
 `Sqrt` and `Log` are pure numeric operations; domain errors follow the host IEEE
 math domain, not integer checked-arithmetic rules. Strict default floating modes
 are required; fast/finite-only compilation is refused. Signaling NaNs, nondefault
 rounding/flush modes and cross-platform math-library bit equality are unqualified.
 
-Binary32 is the explicit ordinary-model numeric primitive `float32`, emitted as
+Signed64 `int` arithmetic includes checked `+`, `-`, `*`, `/` and `%`. Integer
+`%` shares multiplication/division precedence and is left-associative. It is the
+remainder of division with the quotient truncated toward zero: a nonzero result
+has the dividend's sign. A zero divisor raises `integer remainder by zero` through
+the ordinary failure/transaction boundary. `MIN % -1` is zero; `MIN / -1` still
+fails because its quotient overflows. `%` requires two `int` operands; floating
+remainder and numeric conversions are not implicit.
+
+`uint32` is an owned unsigned 32-bit primitive, emitted as `std::uint32_t`, with default
+zero. Decimal literals require lowercase `u` (`4294967295u`); hexadecimal literals
+use `0x`/`0X` and lowercase `u` (`0xffffffffu`). Values outside `0..4294967295`
+refuse admission. There are no implicit conversions to or from other primitives.
+Ordinary `+`, `-`, `*` check overflow/underflow, and `/`, `%` check zero divisors.
+Explicit `uint32.WrappingAdd`, `WrappingSubtract` and `WrappingMultiply` instead
+return the low 32 bits. Unary minus is not admitted for unsigned values.
+
+`&`, `|`, `^` and `~` require unsigned 32-bit operands and operate on exactly 32 bits.
+`uint32 << int` discards high bits; `uint32 >> int` is logical. Shift counts must
+be `0..31`; other counts fail through the ordinary transaction/rollback boundary.
+Counts are explicit signed indices, not a numeric coercion. Precedence follows
+multiplication, addition, shifts, comparisons, equality, `&`, `^`, `|`, `&&`, `||`
+from tightest to loosest; binary operators associate left. Shift recognition is
+expression-only and does not consume the closing angles of nested generic types.
+
+Explicit conversions are `uint32.FromInt/FromFloat/FromFloat32` and
+`int/float/float32.FromUInt32`. Signed-to-unsigned conversion checks the original
+integer range. Floating-to-unsigned conversion requires a finite value, truncates
+toward zero and then checks `0..4294967295`: `-0.5` becomes zero, while `-1.0`,
+`2^32`, NaN and infinity fail. Unsigned-to-int/binary64 widening is exact;
+unsigned-to-binary32 rounds to its IEEE precision under the existing float32
+thread environment guard. These checked failures preserve ordinary rollback.
+
+Unsigned values participate in records, model fields, snapshots, results,
+closed generics and owned collections, including stable dictionary/set keys.
+`Atomic<uint32>` is explicitly refused in this capability; no atomic arithmetic
+contract is inferred. Exposed unsigned values are refused by typed view bridges.
+Integer-only unsigned models do not include strict floating headers or require
+floating thread modes; only actual floating conversions introduce that dependency.
+
+Binary32 is the explicit ordinary-model numeric primitive
+
+ `float32`, emitted as
 native C++ `float`; existing `float` remains binary64. Decimal/exponent literals
 with lowercase `f` suffix (including `1f`) round directly to binary32, with
 finite range and underflow admission checked before exact bit-pattern emission.
@@ -92,7 +140,31 @@ and gradual subnormals; generated entrypoints refuse other thread modes. Runtime
 arithmetic retains signed zeros and IEEE nonfinite results. Native platform math
 library bit equality across platforms remains unqualified.
 
-The legacy lexer entrypoint retains its grammar; only modelc explicitly selects
+Both floating types also provide same-type `Sin`, `Cos`, `Tan`, `Asin`, `Acos`,
+`Atan`, `Atan2`, `Exp`, `Expm1`, `Pow`, `Hypot`, `Fmod`, `Remainder`, `CopySign`,
+`Cbrt`, `Tanh`, `Floor` and `Ceiling`. `Hypot` accepts two or three same-type
+arguments. Their results follow the native IEEE math
+library, including domain NaNs, infinities and signed zeros. `Fmod` uses a
+truncated quotient; IEEE `Remainder` uses a nearest/even quotient. There is no
+implicit conversion of either argument. Binary32 calls materialize a binary32
+result before further source arithmetic. Cross-platform libm bit identity,
+NaN payload preservation and signaling NaNs are not promised.
+
+Explicit numeric conversions are `float.FromInt`, `float32.FromInt`,
+`int.FromFloat`, `int.FromFloat32`, `float.FromFloat32` and `float32.FromFloat`.
+Integer-to-floating conversion rounds to the target IEEE precision; widening
+binary32 to binary64 is exact. Narrowing uses nearest/even rounding, including
+gradual subnormals, signed underflow-to-zero and signed overflow-to-infinity.
+Finite values above binary32 maximum are handled without an out-of-range C++
+cast: values below `2^128 - 2^103` round to maximum finite, and that exact
+midpoint or greater rounds to infinity. Cross-float NaNs become quiet canonical
+NaNs with their sign retained; payloads are not an identity contract.
+Floating-to-integer conversion truncates toward zero after refusing nonfinite
+values and values outside `[-2^63, 2^63)`. Failures use the ordinary rollback
+boundary; IEEE floating domain results remain successful values.
+
+The legacy lexer entrypoint retains its grammar;
+ only modelc explicitly selects
 the additive Binary64 numeric syntax.
 
 `List<T>.Empty()` creates an owned list; `Add(value)` mutates an admitted local or
@@ -193,3 +265,160 @@ capacity is independently bounded as described in the SDK runtime README.
 Focused fixtures live in `tests/native-models`. Compiler execution, generated
 compilation and native test execution must use the existing `containedexec`
 `job.py` and `run.py`; these files are not permission to run outside containment.
+
+
+## Synchronous injected host calls
+
+An injected `public Interface` may declare effectful synchronous
+`Result<T,string>` methods alongside existing `Task<Result<T,string>>` methods.
+The synchronous method is called normally; the async method still requires a
+source `await` and retains its bounded FIFO host-worker behavior. A synchronous
+host call executes directly on the model owner thread, without a task, worker,
+suspension or implicit transaction commit. Pure model methods, parallel bodies
+and helpers reachable from parallel workers cannot call host services.
+
+Host parameters and Result payloads remain recursively owned values; existing
+explicit cancellation-token parameters remain available. Source object
+references, services and shared synchronization/collection handles cannot cross
+this boundary. `source Interface` still means a source-implemented, closed object
+contract, not an injected native adapter.
+
+The generated call captures its service and evaluates each argument exactly once
+from left to right, validating owned arguments before invocation. The runtime
+validates the complete returned Result, including Failure/Cancelled errors.
+Synchronous callbacks cannot reenter the same model through its public actions,
+queries, snapshots or polling. Calls into another independent model remain
+permitted. The callback guard is owner-affine, move-only and exception-safe;
+destroying the model during its callback is a contract violation that terminates
+rather than invalidating an active invocation. Callbacks must be bounded and must
+not retain borrowed native scene state beyond the adapter's declared lifetime.
+Service ownership remains constructor-fixed `std::shared_ptr<Interface>`; a native
+adapter may scope a borrowed environment to a synchronous invocation without
+exposing raw references in PipeLang.
+
+Native adapters must leave the caller's floating-point controls unchanged on
+both normal and exceptional return, including rounding and platform subnormal
+handling controls. Existing `float32` invocation/poll admission guards remain in
+force. The runtime does not write or restore floating-point modes or check every
+arithmetic operation after a native callback. This boundary executes trusted
+native C++; it provides no isolation from native code that violates its owner,
+lifetime, bounded-work or floating-point contract. Concrete adapters should
+qualify their control preservation before and after representative calls.
+
+Returned Success/Failure/Cancelled outcomes are source values: an authored normal
+return commits model state regardless of outcome. Host exceptions become source
+`ExecutionFailure` faults, so normal source `catch (Error)`/`finally` recovery
+applies. Thrown `OperationCancelled` remains cancellation, runs source cleanup,
+and maps to a Cancelled action outcome when uncaught. An uncaught fault or thrown
+cancellation rolls back the current model transaction; it does not undo external
+host effects. Immediate effects remain visible to subsequent host queries in
+source order. There is no effect buffering, distributed transaction or automatic
+retry. Explicit cancellation tokens are cooperative; a synchronous callback has
+no worker or hard interruption mechanism. Existing async commit/refresh points and
+authoritative completed host outcomes are unchanged.
+
+
+## Explicit one-time initialization budget
+
+`pipelang::model::TaskOptions::initializationSteps` selects a generated root
+constructor's normal evaluation allowance. It defaults to 65,536 steps. A host may
+explicitly select 1 through 1,048,576 steps for bounded one-time setup; zero or a
+larger value is refused before source field initializers or constructor work.
+The installed SDK manifest pins this runtime/compiler API together. Existing
+`TaskOptions{capacity}` aggregate calls retain the default allowance.
+
+`EvaluationBudget::forInitialization(requested)` sets only the initial normal
+allowance. Source field initializers, constructor helpers, nested ordinary object
+constructors and their field initializers share that same outer budget. They do
+not receive fresh allowances. Parallel child budgets share its remaining normal
+counter; cleanup remains a separate shared 65,536-step allowance. Reset retains
+the existing 65,536-step normal and cleanup defaults.
+
+Public queries and actions start independent default 65,536-step invocation
+budgets after initialization, regardless of the constructor's selected allowance.
+Async suspension/reset behavior, cleanup limits, collection ownership bounds and
+native process/cgroup containment caps are unchanged. This is explicit bounded
+initialization policy, not a way for source code to raise or reset its limits.
+
+Stored object-owned `List` reads keep the receiver's object root alive through
+`Count` or a call-free `At` index. They inspect the stored count or decode only
+the selected element into an owned value; stored object edges and borrowed
+references never escape. Record-member list fields use the same path. An index
+containing a call retains the full owned receiver snapshot before evaluating the
+index, so replacing or appending to the field preserves evaluation order and
+transaction rollback. Every source evaluation tick remains in its original order.
+
+The evaluation budget has a small inline local-counter path. Cancellation,
+shared counters, cleanup and exhausted counters use the existing outlined path;
+this does not change work limits or combine source ticks.
+
+### Pure synchronous host queries
+
+An injected host interface can explicitly declare `pure Result<T,string>`
+synchronous queries. Their native virtual methods are `const`. Pure source
+methods can call these declarations and return Failure or Cancelled deliberately;
+effectful host methods remain forbidden in pure code. All host calls remain
+forbidden in parallel workers, including through helpers. Declared host purity is
+a trusted native contract, not an isolation guarantee: `const` does not prevent
+native I/O or mutation outside the authored model.
+
+Queries retain the synchronous host boundary: exact owned argument/result
+validation, owner-thread execution, and same-model public action/query/poll
+reentry refusal during the callback. Existing effectful synchronous and async
+host virtual signatures are unchanged.
+
+### Typed IEEE values and string prefixes
+
+`float` and `float32` expose `PositiveInfinity`, `NegativeInfinity` and `NaN`.
+These are typed IEEE values; the named NaNs have positive quiet-NaN bits
+`0x7ff8000000000000` and `0x7fc00000`, respectively. Arithmetic NaN payloads are
+not promised. Existing finite literal admission, explicit conversions and
+per-operation float32 rounding remain unchanged.
+
+`string.StartsWith(value, prefix)` is a pure operation requiring two strings.
+It compares their exact bytes, including embedded NUL and UTF-8, without locale,
+case folding or normalization. The empty prefix matches every string.
+
+### Source constants and the native constexpr boundary
+
+A nongeneric class can declare public or private implicit-static scalar constants:
+
+```text
+public const int Gates = 18;
+private const float32 Pi = 3.14159265358979323846f;
+public const float32 Turn = 96.0f * Pi;
+public const float32 Length = 624.0f * 2.0f + Turn * 2.0f;
+public const float32 GateSpacing = Length / float32.FromInt(Gates);
+```
+
+The admitted types are bool, int, uint32, float and float32. Initializers use
+closed scalar constants, operators, conditionals and explicit numeric conversions.
+State, arbitrary method calls, dependency cycles, mutation and implicit numeric
+mixing are rejected. Dependencies and evaluation depth are bounded. Integer and
+uint32 operations use the existing checked rules; float/float32 operations retain
+IEEE classes, signed zero and nominal-width rounding. A declaration performs no
+runtime or initialization-budget work. Each authored read still charges its
+ordinary literal/access expression tick; the closed initializer is not metered
+again at every read.
+
+`StandaloneConstants.hpp` exports public constants under
+`<binding namespace>::constants::<source module components>::<source class>`.
+An unmodular class is directly under `constants`. The leaf contains only standard
+C++20 headers and constexpr values, with no model-runtime or Qt dependency.
+Model headers remain self-contained and can coexist with the leaf. Public model
+facades also expose constexpr aliases. Private constants remain source-private
+and do not enter the export inventory or mutable snapshots.
+
+The model manifest records each source identity, stable C++ identity, scalar
+type, value encoding and exact bit/value string. Floating encodings store IEEE
+bits, avoiding JSON NaN/Infinity ambiguity. The SDK tool publishes the leaf
+atomically and hashes it in `bindings.json`; the CMake model function declares
+it and exposes its path as target property `PIPELANG_CONSTANTS_HEADER`. Native
+constexpr APIs should alias these generated values rather than duplicate source
+literals. The standard default evaluation and initialization limits are unchanged.
+
+Object-domain collection avoids marking scratch and cell scans when the domain
+has no live cells. Provisional allocations count as live until the existing
+matching-generation destruction path removes them. Owner/closed checks, candidate
+extra-root validation, root validation and transaction publication remain in their
+original order. This changes no source evaluation or ownership limits.

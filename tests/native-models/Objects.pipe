@@ -8,7 +8,7 @@ public source Interface ICounter {
 public Class Counter : ICounter {
     private int value;
     public int Tag = 2;
-    public Optional<ICounter> Next;
+    public ICounter? Next;
 
     public Counter(int initial) {
         value = initial;
@@ -39,7 +39,7 @@ public Class Counter : ICounter {
     }
 
     public void LinkSelf() {
-        Next = Optional<ICounter>.Some(this);
+        Next = this;
     }
 
     public pure bool IsSelfLinked() {
@@ -124,7 +124,7 @@ public Class App {
     public bool Cycles() {
         first.LinkSelf();
         ICounter view = alias;
-        first.Next = Optional<ICounter>.Some(view);
+        first.Next = view;
         return first.IsSelfLinked() && first.Next.Value == first;
     }
 

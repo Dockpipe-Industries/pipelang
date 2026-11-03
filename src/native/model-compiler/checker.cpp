@@ -14,6 +14,7 @@ namespace {
 
 const Type booleanType{"bool", {}};
 const Type integerType{"int", {}};
+const Type unsignedType{"uint32", {}};
 const Type floatType{"float", {}};
 const Type float32Type{"float32", {}};
 const Type stringType{"string", {}};
@@ -34,6 +35,13 @@ public:
                 isSynchronizationHandle(declaration.name))
                 fail("duplicate or reserved type '" + declaration.name + "'", declaration.offset);
             types_[declaration.name] = &declaration;
+        }
+        const bool exportsConstants = std::any_of(program_.declarations.begin(), program_.declarations.end(), [](const auto& owner) {
+            return std::any_of(owner.constants.begin(), owner.constants.end(), [](const auto& value) { return value.visible; });
+        });
+        if (exportsConstants && types_.contains("constants")) {
+            owner_ = types_.at("constants");
+            fail("constant export namespace conflicts with source type 'constants'", owner_->offset);
         }
         std::set<std::string> interfaceSignatures;
         std::function<void(Declaration&)> sourceSignatures = [&](Declaration& declaration) {
@@ -65,6 +73,10 @@ public:
             }
             checkClassOverrides();
             checkImplementations();
+        }
+        for (auto& declaration : program_.declarations) {
+            for (auto& constant : declaration.constants)
+                ensureConstant(constant, declaration);
         }
         checkRecordCycles();
         for (auto& declaration : program_.declarations) {
@@ -160,8 +172,10 @@ private:
     }
     [[noreturn]] void fail(const std::string& message, std::size_t offset) const {
         Diagnostic diagnostic(message, offset);
-        if (owner_)
+        if (owner_) {
             diagnostic.module = owner_->module;
+            diagnostic.path = owner_->originPath;
+        }
         throw diagnostic;
     }
     static bool extended(const std::string& name) {
@@ -170,7 +184,7 @@ private:
     }
     bool keyType(const Type& value) const {
         const auto* found = declaration(value.name);
-        return value.arguments.empty() && (value.name == "int" || value.name == "bool" ||
+        return value.arguments.empty() && (value.name == "int" || value.name == "uint32" || value.name == "bool" ||
             value.name == "string" || (found && found->kind == "Enum"));
     }
     Type nominal(const Declaration& value) const {
@@ -199,9 +213,45 @@ private:
             return argument.name == "void" || sourceValue(argument);
         });
     }
+    bool pureHostValue(const Type& value, std::set<std::string>& records,
+                       std::set<std::string>& completed) const {
+        if (!sourceValue(value) || referenceBearing(value))
+            return false;
+        for (std::size_t index = 0; index < value.arguments.size(); ++index) {
+            const auto& argument = value.arguments[index];
+            if (value.name == "Result" && index == 0 && argument.name == "void")
+                continue;
+            if (!pureHostValue(argument, records, completed))
+                return false;
+        }
+        const auto* record = declaration(value.name);
+        if (!record || record->kind != "Record")
+            return true;
+        if (completed.contains(record->name))
+            return true;
+        if (!records.insert(record->name).second)
+            return false;
+        for (const auto& member : record->fields) {
+            if (!pureHostValue(member.type, records, completed))
+                return false;
+        }
+        records.erase(record->name);
+        completed.insert(record->name);
+        return true;
+    }
+    bool pureHostValue(const Type& value) const {
+        std::set<std::string> records;
+        std::set<std::string> completed;
+        return pureHostValue(value, records, completed);
+    }
     bool assignable(const Type& actual, const Type& expected) const {
         if (actual == expected)
             return true;
+        if (expected.name == "Optional" && expected.arguments.size() == 1) {
+            if (actual.name == "$null")
+                return true;
+            return assignable(actual, expected.arguments[0]);
+        }
         const auto* concrete = declaration(actual.name);
         const auto* contract = declaration(expected.name);
         if (concrete && contract && objectClass(*concrete) && objectClass(*contract))
@@ -233,7 +283,7 @@ private:
         return result;
     }
     static bool primitive(const std::string& name) {
-        return name == "void" || name == "bool" || name == "int" || name == "float" || name == "float32" || name == "string" || name == "Error";
+        return name == "void" || name == "bool" || name == "int" || name == "uint32" || name == "float" || name == "float32" || name == "string" || name == "Error";
     }
     Declaration* declaration(const std::string& name) const {
         auto found = types_.find(name);
@@ -264,6 +314,9 @@ private:
             return;
         }
         if (value.name == "Atomic") {
+            if (value.arguments.size() == 1 && value.arguments[0] == unsignedType)
+                fail("Atomic<uint32> is not supported", offset);
+
             if (value.arguments.size() != 1 ||
                 (value.arguments[0] != integerType && value.arguments[0] != booleanType && value.arguments[0] != floatType && value.arguments[0] != float32Type))
                 fail("Atomic requires int, bool, float or float32", offset);
@@ -292,10 +345,10 @@ private:
         }
         if (value.name == "Optional") {
             if (value.arguments.size() != 1)
-                fail("Optional requires one owned value type", offset);
+                fail("nullable suffix requires one owned value type", offset);
             type(value.arguments[0], offset);
             if (!sourceValue(value.arguments[0]))
-                fail("Optional requires an owned value payload", offset);
+                fail("nullable suffix requires an owned value payload", offset);
             return;
         }
         if (value.name == "Result") {
@@ -316,13 +369,13 @@ private:
             return;
         }
         if (!value.arguments.empty())
-            fail("unsupported generic type '" + value.text() + "'", offset);
+            fail("unsupported generic type '" + value.displayText() + "'", offset);
         if (primitive(value.name) || value.name == "CancellationToken")
             return;
         const auto* found = declaration(value.name);
         if (!found || (found->kind == "Class" && !objectClass(*found)) ||
             (found->sourceInterface && !program_.objectEnabled))
-            fail("unknown value or service type '" + value.text() + "'", offset);
+            fail("unknown value or service type '" + value.displayText() + "'", offset);
     }
     bool service(const Type& value) const {
         const auto* found = declaration(value.name);
@@ -340,8 +393,23 @@ private:
     bool derivesFrom(const Declaration& owner, const std::string& ancestor) const {
         return owner.name == ancestor || std::find(owner.ancestors.begin(), owner.ancestors.end(), ancestor) != owner.ancestors.end();
     }
+    const Declaration& accessOwner(const Declaration& owner) const {
+        if (!program_.projectEnabled || owner.sourceObjectFacet.empty())
+            return owner;
+        const auto* facet = declaration(owner.sourceObjectFacet);
+        if (!facet || !facet->generatedObjectFacet)
+            fail("project source facet identity was lost", owner.offset);
+        return *facet;
+    }
     bool accessible(bool visible, bool protectedMember, const Declaration& declaring) const {
-        return visible || owner_->name == declaring.name || (protectedMember && derivesFrom(*owner_, declaring.name));
+        if (visible)
+            return true;
+        // Lowering creates distinct runtime receivers, not distinct source
+        // classes. Private/protected access follows the authoritative class.
+        const auto& current = accessOwner(*owner_);
+        const auto& target = accessOwner(declaring);
+        return current.name == target.name ||
+            (protectedMember && derivesFrom(current, target.name));
     }
     const Declaration& declaringMethod(const Method& method) const {
         return *methodOwner(method);
@@ -381,6 +449,8 @@ private:
             auto& owner = *current;
             owner_ = &owner;
             for (auto& method : owner.methods) {
+                if (!method.constructor && !owner.baseClass.empty() && constant(*declaration(owner.baseClass), method.name))
+                    fail("inherited constants cannot be hidden by methods", method.offset);
                 const Method* inherited = nullptr;
                 for (const auto& ancestor : owner.ancestors) {
                     for (const auto& candidate : declaration(ancestor)->methods) {
@@ -436,7 +506,22 @@ private:
         }
         if (owner.kind == "Enum" && owner.values.empty())
             fail("empty enum is not supported", owner.offset);
+        for (auto& constant : owner.constants) {
+            type(constant.type, constant.offset);
+            if (constant.type != booleanType && constant.type != integerType && constant.type != unsignedType &&
+                constant.type != floatType && constant.type != float32Type)
+                fail("const requires bool, int, uint32, float or float32", constant.offset);
+            if (!constant.initializer)
+                fail("const requires an initializer", constant.offset);
+            if (!members.insert(constant.name).second)
+                fail("duplicate member '" + constant.name + "'", constant.offset);
+            if (!owner.baseClass.empty() && field(*declaration(owner.baseClass), constant.name))
+                fail("inherited values cannot be hidden by constants", constant.offset);
+            constant.declaringClass = owner.name;
+        }
         for (const auto& field : owner.fields) {
+            if (!owner.baseClass.empty() && constant(*declaration(owner.baseClass), field.name))
+                fail("inherited constants cannot be hidden by fields", field.offset);
             type(field.type, field.offset);
             if (field.protectedMember && (!objectClass(owner)))
                 fail("protected fields require an ordinary source class", field.offset);
@@ -501,8 +586,13 @@ private:
                     fail("methods cannot return synchronization handles", method.offset);
                 if (service(method.result) || method.result.name == "Atomic" || method.result.name == "CancellationToken")
                     fail("methods cannot return service references or cancellation tokens", method.offset);
-                if (owner.kind == "Interface" && !owner.sourceInterface && !method.asynchronous)
-                    fail("host interfaces declare Task<Result<T,string>> methods", method.offset);
+                if (owner.kind == "Interface" && !owner.sourceInterface &&
+                    !method.asynchronous && method.result.name != "Result") {
+                    if (!method.pure)
+                        fail("host interfaces declare synchronous Result<T,string> or Task<Result<T,string>> methods", method.offset);
+                    if (!pureHostValue(method.result))
+                        fail("pure host returns require deeply owned values without object references or handles", method.offset);
+                }
                 if (owner.kind == "Interface" && !owner.sourceInterface && referenceBearing(method.result))
                     fail("host interfaces cannot return owner-confined object references", method.offset);
             }
@@ -515,6 +605,9 @@ private:
                     fail("host interfaces cannot transport shared handles", parameter.offset);
                 if (owner.kind == "Interface" && !owner.sourceInterface && referenceBearing(parameter.type))
                     fail("host interfaces cannot transport owner-confined object references", parameter.offset);
+                if (owner.kind == "Interface" && !owner.sourceInterface && method.pure &&
+                    !method.asynchronous && method.result.name != "Result" && !pureHostValue(parameter.type))
+                    fail("pure host arguments require deeply owned values without object references or handles", parameter.offset);
                 if (service(parameter.type) && !method.constructor)
                     fail("service references enter through constructors only", parameter.offset);
                 if (field(owner, parameter.name))
@@ -533,12 +626,78 @@ private:
             owner.methods.push_back(std::move(constructor));
         }
     }
+    Field* constant(Declaration& owner, const std::string& name) const {
+        const auto found = std::find_if(owner.constants.begin(), owner.constants.end(), [&](const Field& value) {
+            return value.name == name;
+        });
+        if (found != owner.constants.end())
+            return &*found;
+        if (!owner.baseClass.empty())
+            return constant(*declaration(owner.baseClass), name);
+        return nullptr;
+    }
+    void ensureConstant(Field& value, Declaration& owner) {
+        if (constantStates_[&value] == 2)
+            return;
+        if (constantStates_[&value] == 1 || constantDepth_ == 64) {
+            Diagnostic diagnostic(constantStates_[&value] == 1
+                ? "constant dependency cycle" : "constant dependency depth exceeds 64", value.offset);
+            diagnostic.module = owner.module;
+            diagnostic.path = owner.originPath;
+            throw diagnostic;
+        }
+        constantStates_[&value] = 1;
+        Method initializer;
+        initializer.pure = true;
+        struct Context {
+            Checker& checker;
+            Declaration* owner;
+            Method* method;
+            bool checking;
+            ~Context() {
+                checker.owner_ = owner;
+                checker.method_ = method;
+                checker.checkingConstant_ = checking;
+                --checker.constantDepth_;
+            }
+        } context{*this, owner_, method_, checkingConstant_};
+        ++constantDepth_;
+        owner_ = &owner;
+        method_ = &initializer;
+        checkingConstant_ = true;
+        try {
+            sameExpression(value.initializer, value.type);
+            value.constantValue = foldConstant(value.initializer);
+        } catch (Diagnostic& diagnostic) {
+            if (diagnostic.module.empty())
+                diagnostic.module = owner.module;
+            if (diagnostic.path.empty())
+                diagnostic.path = owner.originPath;
+            throw;
+        }
+        constantStates_[&value] = 2;
+    }
+    Type constantExpression(const Expr& expression, Field& value) {
+        auto& declaring = *declaration(value.declaringClass);
+        if (!accessible(value.visible, value.protectedMember, declaring))
+            fail("constant is private or unavailable", expression->offset);
+        ensureConstant(value, declaring);
+        expression->resolution = "constant";
+        expression->constantValue = value.constantValue;
+        expression->type = value.type;
+        return value.type;
+    }
     const Field* field(const Declaration& owner, const std::string& name) const {
         const auto found = std::find_if(owner.fields.begin(), owner.fields.end(), [&](const Field& value) {
             return value.name == name;
         });
         if (found != owner.fields.end())
             return &*found;
+        const auto constant = std::find_if(owner.constants.begin(), owner.constants.end(), [&](const Field& value) {
+            return value.name == name;
+        });
+        if (constant != owner.constants.end())
+            return &*constant;
         if (!owner.baseClass.empty())
             return field(*declaration(owner.baseClass), name);
         return nullptr;
@@ -612,7 +771,7 @@ private:
                 fail("ambiguous exact method overload", node->offset);
             selected = &candidate;
         }
-        if (!selected && program_.objectEnabled) {
+        if (!selected) {
             for (auto* candidatePointer : methods) {
                 auto& candidate = *candidatePointer;
                 if (candidate.name != name || candidate.parameters.size() != actual.size())
@@ -622,8 +781,11 @@ private:
                     matches = matches && assignable(actual[index], candidate.parameters[index].type);
                 if (!matches)
                     continue;
-                if (selected)
-                    fail("ambiguous source interface upcast overload", node->offset);
+                if (selected) {
+                    const bool nullable = std::any_of(candidate.parameters.begin(), candidate.parameters.end(),
+                        [](const Field& parameter) { return parameter.type.name == "Optional"; });
+                    fail(nullable ? "ambiguous nullable method overload" : "ambiguous source interface upcast overload", node->offset);
+                }
                 selected = &candidate;
             }
         }
@@ -637,7 +799,7 @@ private:
     }
     void same(const Type& actual, const Type& expected, std::size_t offset) {
         if (!assignable(actual, expected))
-            fail("expected " + expected.text() + ", got " + actual.text(), offset);
+            fail("expected " + expected.displayText() + ", got " + actual.displayText(), offset);
     }
     Type sameExpression(const Expr& node, const Type& expected, bool allowAwait = false) {
         const auto actual = expression(node, allowAwait);
@@ -719,13 +881,27 @@ private:
     }
     Type expression(const Expr& node, bool allowAwait = false, bool allowServiceCall = false) {
         Type result;
-        if (node->kind == "integer") {
+        if (node->kind == "null") {
+            result = {"$null", {}};
+        } else if (node->kind == "integer") {
             std::int64_t parsed = 0;
             const auto conversion = std::from_chars(node->text.data(), node->text.data() + node->text.size(), parsed);
             if (conversion.ec != std::errc{} || conversion.ptr != node->text.data() + node->text.size())
                 fail("integer literal outside signed64 range", node->offset);
             result = integerType;
+        } else if (node->kind == "uint32") {
+            std::uint32_t parsed = 0;
+            const bool hexadecimal = node->text.size() > 2 && node->text[0] == '0' &&
+                (node->text[1] == 'x' || node->text[1] == 'X');
+            const auto* begin = node->text.data() + (hexadecimal ? 2 : 0);
+            const auto* end = node->text.data() + node->text.size() - 1;
+            const auto conversion = std::from_chars(begin, end, parsed, hexadecimal ? 16 : 10);
+            if (conversion.ec != std::errc{} || conversion.ptr != end)
+                fail("uint32 literal outside range 0..4294967295", node->offset);
+            node->resolution = std::to_string(parsed);
+            result = unsignedType;
         } else if (node->kind == "float32") {
+
             float parsed = 0;
             const auto* end = node->text.data() + node->text.size() - 1;
             const auto conversion = std::from_chars(node->text.data(), end, parsed);
@@ -761,12 +937,16 @@ private:
             node->resolution = "this";
             node->owner = owner_->name;
         } else if (node->kind == "name") {
+            if (auto* value = constant(*owner_, node->text))
+                return constantExpression(node, *value);
             if (auto local = locals_.find(node->text); local != locals_.end()) {
                 result = local->second;
                 node->resolution = "local";
                 if (parallelDepth_ != 0 && parallelOuter_.contains(node->text))
                     parallelUsed_.insert(node->text);
             } else if (const auto* found = field(*owner_, node->text)) {
+                if (checkingConstant_)
+                    fail("constant initializer cannot reference model state", node->offset);
                 if (checkingBaseArguments_ || !accessible(found->visible, found->protectedMember,
                     *declaration(found->declaringClass.empty() ? owner_->name : found->declaringClass)))
                     fail("field is private or unavailable before base construction", node->offset);
@@ -788,20 +968,46 @@ private:
                 result = integerType;
             } else {
                 result = expression(node->children[0]);
-                if (node->text == "!")
+                if (node->text == "!") {
                     same(result, booleanType, node->offset);
-                else if (result != integerType && result != floatType && result != float32Type)
+                } else if (node->text == "~") {
+                    if (result != unsignedType)
+                        fail("bitwise complement requires uint32", node->offset);
+                } else if (result != integerType && result != floatType && result != float32Type) {
                     fail("negation requires int, float or float32", node->offset);
+                }
             }
         } else if (node->kind == "binary") {
-            const auto left = expression(node->children[0]);
-            const auto right = expression(node->children[1]);
+            auto left = expression(node->children[0]);
+            auto right = expression(node->children[1]);
+            const bool equality = node->text == "==" || node->text == "!=";
+            if (equality && left.name == "$null" && right.name == "$null")
+                fail("null requires a nullable target type", node->offset);
+            if (equality && left.name == "Optional" && assignable(right, left)) {
+                if (right != left)
+                    node->children[1]->convertTo = left;
+                right = left;
+            } else if (equality && right.name == "Optional" && assignable(left, right)) {
+                if (left != right)
+                    node->children[0]->convertTo = right;
+                left = right;
+            }
             const bool referenceEquality = (node->text == "==" || node->text == "!=") &&
                 objectReference(left) && objectReference(right);
-            if (!referenceEquality)
-                same(right, left, node->offset);
             const auto& operation = node->text;
-            if (operation == "&&" || operation == "||") {
+            const bool shift = operation == "<<" || operation == ">>";
+            if (!referenceEquality && !shift)
+                same(right, left, node->offset);
+            if (shift) {
+                if (left != unsignedType)
+                    fail("shift requires a uint32 value", node->offset);
+                same(right, integerType, node->offset);
+                result = unsignedType;
+            } else if (operation == "&" || operation == "|" || operation == "^") {
+                if (left != unsignedType)
+                    fail("bitwise operation requires uint32 operands", node->offset);
+                result = unsignedType;
+            } else if (operation == "&&" || operation == "||") {
                 same(left, booleanType, node->offset);
                 result = booleanType;
             } else if (operation == "==" || operation == "!=") {
@@ -812,9 +1018,13 @@ private:
                 result = booleanType;
             } else if (operation == "+" && left == stringType) {
                 result = stringType;
+            } else if (operation == "%") {
+                if (left != integerType && left != unsignedType)
+                    fail("remainder requires int or uint32 operands", node->offset);
+                result = left;
             } else {
-                if (left != integerType && left != floatType && left != float32Type)
-                    fail("numeric operation requires int, float or float32", node->offset);
+                if (left != integerType && left != unsignedType && left != floatType && left != float32Type)
+                    fail("numeric operation requires int, uint32, float or float32", node->offset);
                 result = operation == "+" || operation == "-" || operation == "*" || operation == "/"
                     ? left : booleanType;
             }
@@ -822,7 +1032,20 @@ private:
             same(expression(node->children[0]), booleanType, node->children[0]->offset);
             result = expression(node->children[1]);
             const auto alternative = expression(node->children[2]);
-            if (alternative != result && assignable(result, alternative)) {
+            if (result.name == "$null" && alternative.name != "$null") {
+                result = alternative.name == "Optional" ? alternative : Type{"Optional", {alternative}};
+                type(result, node->offset);
+                node->children[1]->convertTo = result;
+                if (alternative != result)
+                    node->children[2]->convertTo = result;
+            } else if (alternative.name == "$null" && result.name != "$null") {
+                if (result.name != "Optional")
+                    result = Type{"Optional", {result}};
+                type(result, node->offset);
+                node->children[2]->convertTo = result;
+                if (node->children[1]->type != result)
+                    node->children[1]->convertTo = result;
+            } else if (alternative != result && assignable(result, alternative)) {
                 node->children[1]->convertTo = alternative;
                 result = alternative;
             } else {
@@ -834,7 +1057,19 @@ private:
                 fail("conditional arms must have the same owned value type", node->offset);
         } else if (node->kind == "member") {
             const auto& receiver = node->children[0];
+            if (receiver->kind == "type" && (receiver->type == floatType || receiver->type == float32Type)) {
+                if (node->text != "PositiveInfinity" && node->text != "NegativeInfinity" && node->text != "NaN")
+                    fail("unknown typed IEEE constant", node->offset);
+                result = receiver->type;
+                node->resolution = "ieee_constant";
+                node->type = result;
+                return result;
+            }
             const auto* named = receiver->kind == "name" ? declaration(receiver->text) : nullptr;
+            if (named) {
+                if (auto* value = constant(*declaration(named->name), node->text))
+                    return constantExpression(node, *value);
+            }
             if (named && named->kind == "Enum") {
                 if (std::find(named->values.begin(), named->values.end(), node->text) == named->values.end())
                     fail("unknown enum value", node->offset);
@@ -847,6 +1082,8 @@ private:
                     const auto* member = object && objectClass(*object) ? field(*object, node->text) : nullptr;
                     if (!member || !accessible(member->visible, member->protectedMember, *declaration(member->declaringClass)))
                         fail("unknown or private object field", node->offset);
+                    if (constant(*declaration(object->name), node->text))
+                        fail("constant access requires its class name", node->offset);
                     if (parallelDepth_ != 0)
                         fail("owner-confined object fields cannot enter parallel workers", node->offset);
                     result = member->type;
@@ -891,7 +1128,7 @@ private:
                     else if (node->text == "Value")
                         result = receiverType.arguments[0];
                     else
-                        fail("unknown Optional property", node->offset);
+                        fail("unknown nullable property", node->offset);
                     node->resolution = "optional";
                 } else if (receiverType.name == "Result") {
                     if (node->text == "IsSuccess" || node->text == "IsFailure" || node->text == "IsCancelled")
@@ -1081,25 +1318,91 @@ private:
             node->resolution = "list_construct";
             return receiver->type;
         }
+        if (receiver->kind == "type" && receiver->type == stringType) {
+            if (target->text != "StartsWith")
+                fail("unknown string operation", target->offset);
+            arguments(node, {{stringType, "value", true, node->offset}, {stringType, "prefix", true, node->offset}});
+            node->resolution = "string_starts_with";
+            return booleanType;
+        }
+        if (receiver->kind == "type" && receiver->type == unsignedType) {
+            if (target->text == "WrappingAdd" || target->text == "WrappingSubtract" || target->text == "WrappingMultiply") {
+                arguments(node, {{unsignedType, "left", true, node->offset}, {unsignedType, "right", true, node->offset}});
+                node->resolution = "unsigned_wrapping";
+                return unsignedType;
+            }
+            Type input;
+            if (target->text == "FromInt") {
+                input = integerType;
+            } else if (target->text == "FromFloat") {
+                input = floatType;
+            } else if (target->text == "FromFloat32") {
+                input = float32Type;
+            } else {
+                fail("unknown uint32 operation", target->offset);
+            }
+            arguments(node, {{input, "value", true, node->offset}});
+            node->resolution = "unsigned_conversion";
+            return unsignedType;
+        }
+        if (receiver->kind == "type" && receiver->type == integerType) {
+            if (target->text == "FromUInt32") {
+                arguments(node, {{unsignedType, "value", true, node->offset}});
+                node->resolution = "unsigned_conversion";
+                return integerType;
+            }
+
+            Type input;
+            if (target->text == "FromFloat") {
+                input = floatType;
+            } else if (target->text == "FromFloat32") {
+                input = float32Type;
+            } else {
+                fail("unknown int operation", target->offset);
+            }
+            arguments(node, {{input, "value", true, node->offset}});
+            node->resolution = "numeric_conversion";
+            return integerType;
+        }
         if (receiver->kind == "type" && (receiver->type == floatType || receiver->type == float32Type)) {
-            if (target->text != "IsFinite" && target->text != "Abs" &&
-                target->text != "Sqrt" && target->text != "Log")
+            if (target->text == "FromUInt32") {
+                arguments(node, {{unsignedType, "value", true, node->offset}});
+                node->resolution = "unsigned_conversion";
+                return receiver->type;
+            }
+            if (target->text == "FromInt" ||
+
+                (receiver->type == floatType && target->text == "FromFloat32") ||
+                (receiver->type == float32Type && target->text == "FromFloat")) {
+                Type input = integerType;
+                if (target->text == "FromFloat32")
+                    input = float32Type;
+                if (target->text == "FromFloat")
+                    input = floatType;
+                arguments(node, {{input, "value", true, node->offset}});
+                node->resolution = "numeric_conversion";
+                return receiver->type;
+            }
+            static const std::set<std::string> unary{
+                "IsFinite", "Abs", "Sqrt", "Log", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan",
+                "Exp", "Expm1", "Cbrt", "Tanh", "Floor", "Ceiling"
+            };
+            static const std::set<std::string> binary{
+                "Atan2", "Pow", "Hypot", "Fmod", "Remainder", "CopySign"
+            };
+            if (!unary.contains(target->text) && !binary.contains(target->text))
                 fail("unknown " + receiver->type.name + " operation", target->offset);
-            arguments(node, {{receiver->type, "value", true, node->offset}});
+            std::vector<Field> parameters{{receiver->type, "value", true, node->offset}};
+            if (binary.contains(target->text))
+                parameters.push_back({receiver->type, "other", true, node->offset});
+            if (target->text == "Hypot" && node->children.size() == 4)
+                parameters.push_back({receiver->type, "third", true, node->offset});
+            arguments(node, parameters);
             node->resolution = "float_math";
             return target->text == "IsFinite" ? booleanType : receiver->type;
         }
-        if (receiver->kind == "type" && receiver->type.name == "Optional") {
-            type(receiver->type, receiver->offset);
-            std::vector<Field> parameters;
-            if (target->text == "Some")
-                parameters.push_back({receiver->type.arguments[0], "value", true, node->offset});
-            else if (target->text != "None")
-                fail("unknown Optional constructor", target->offset);
-            arguments(node, parameters);
-            node->resolution = "optional_construct";
-            return receiver->type;
-        }
+        if (receiver->kind == "type" && receiver->type.name == "Optional")
+            fail("nullable values use typed values or null, not Some/None constructors", target->offset);
         if (receiver->kind == "type" && receiver->type.name == "Result") {
             type(receiver->type, receiver->offset);
             const auto& result = receiver->type;
@@ -1143,13 +1446,24 @@ private:
             fail("unknown List method", target->offset);
         }
         const auto* host = declaration(receiverType.name);
-        if (!host || host->kind != "Interface" || !allowServiceCall || method_->pure)
-            fail("host calls must be directly awaited in an async method", node->offset);
+        if (!host || host->kind != "Interface" || host->sourceInterface)
+            fail("unknown host service receiver", node->offset);
         auto* mutableHost = declaration(receiverType.name);
         const auto* found = overload(mutableHost->methods, target->text, node);
         if (!found->visible)
             fail("host interface method is private", target->offset);
-        node->resolution = "host";
+        if (found->asynchronous && !allowServiceCall)
+            fail("host calls must be directly awaited in an async method", node->offset);
+        if (method_->pure && !found->pure)
+            fail("pure methods cannot call effectful host services", node->offset);
+        if (parallelDepth_ != 0)
+            fail("parallel workers cannot access host services", node->offset);
+        if (found->asynchronous)
+            node->resolution = "host";
+        else if (found->pure && found->result.name != "Result")
+            node->resolution = "host_sync_value";
+        else
+            node->resolution = "host_sync";
         return found->result;
     }
     static bool discardable(const Expr& node) {
@@ -1371,7 +1685,7 @@ private:
                 return;
             if (referenceBearing(node->type) || node->resolution == "this" || node->resolution == "object_field")
                 fail("parallel helper cannot access owner-confined objects", node->offset);
-            if (node->resolution == "service" || node->resolution == "host" || node->resolution == "local_async" || node->kind == "await")
+            if (node->resolution == "service" || node->resolution == "host" || node->resolution == "host_sync" || node->resolution == "local_async" || node->kind == "await")
                 fail("parallel helper cannot access host services or suspend", node->offset);
             if (node->kind == "call" && (node->resolution == "pure" || node->resolution == "effect")) {
                 if (node->targets.empty())
@@ -1501,6 +1815,8 @@ private:
     }
     void assignmentTarget(const Expr& target) {
         expression(target);
+        if (target->resolution == "constant")
+            fail("cannot assign to const member", target->offset);
         Expr root = target;
         while (root->kind == "member") {
             if (root->resolution == "object_field")
@@ -1858,6 +2174,9 @@ private:
     std::size_t callEdges_ = 0;
     std::size_t callIdentityBytes_ = 0;
     Program& program_;
+    std::map<const Field*, unsigned> constantStates_;
+    unsigned constantDepth_ = 0;
+    bool checkingConstant_ = false;
     std::map<std::string, Declaration*> types_;
     std::map<std::string, Method*> methods_;
     std::map<std::string, std::vector<std::string>> dispatch_;

@@ -52,7 +52,7 @@
     "request": {
       "protocol": "pipelang.native-model.v1",
       "namespace": "pipelang_models",
-      "source": "public Class M { private Optional<Atomic<int>> value; }"
+      "source": "public Class M { private Atomic<int>? value; }"
     }
   },
   {
@@ -524,7 +524,7 @@
     "request": {
       "protocol": "pipelang.native-model.v1",
       "namespace": "concurrent_models",
-      "source": "public Class M { private Optional<ConcurrentQueue<int>> values; }"
+      "source": "public Class M { private ConcurrentQueue<int>? values; }"
     }
   },
   {
@@ -948,7 +948,7 @@
     "request": {
       "protocol": "pipelang.native-model.v1",
       "namespace": "synchronization_models",
-      "source": "public Class Refusal { private Optional<SemaphoreSlim> invalid; }"
+      "source": "public Class Refusal { private SemaphoreSlim? invalid; }"
     }
   },
   {
@@ -1058,7 +1058,7 @@
     "request": {
       "protocol": "pipelang.native-model.v3",
       "namespace": "object_models",
-      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public Optional<Counter> exposed; }",
+      "source": "public Class Counter { private int secret = 3; public int Value; public void Set(int value) { Value = value; } public pure int Read() { return Value; } }\n\npublic Class App { public Counter? exposed; }",
       "models": [
         "App"
       ]

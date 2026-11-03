@@ -1,0 +1,70 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Interface MathQueries {
+    pure Result<float32,string> Scale(float32 value);
+    pure Result<List<int>,string> Copy(List<int> values);
+    Result<void,string> Touch();
+}
+
+public Class Numbers {
+    private const float32 Pi = 3.14159265358979323846f;
+    public const float32 Radius = 96.0f;
+    public const float32 Straight = 624.0f;
+    public const float32 Turn = Radius * Pi;
+    public const float32 Length = Straight * 2.0f + Turn * 2.0f;
+    public const int Gates = 18;
+    public const float32 GateSpacing = Length / float32.FromInt(Gates);
+    public const float32 NegativeZero = -0.0f;
+    public const float32 Low = float32.NegativeInfinity;
+    public const float Wide = float.FromFloat32(Length);
+    public const uint32 HighBit = 1u << 31;
+    public const int Minimum = -9223372036854775808;
+    public const int SafeRemainder = Minimum % -1;
+    public const bool Enabled = HighBit != 0u;
+}
+
+public Class App {
+    private MathQueries math;
+    public int calls = 0;
+    public const float32 Length = Numbers.Length;
+    public const float32 GateSpacing = Numbers.GateSpacing;
+    public const int Gates = Numbers.Gates;
+    public const int TickValue = Numbers.Gates * 2 + 6;
+
+    public App(MathQueries queries) {
+        math = queries;
+    }
+
+    public pure Result<float32,string> Query(float32 value) => math.Scale(value);
+    public pure Result<List<int>,string> Copy(List<int> values) => math.Copy(values);
+    public pure float32 ReadLength() => Length;
+    public pure float32 ReadSpacing() => GateSpacing;
+    public pure float32 Low() => float32.NegativeInfinity;
+    public pure float32 High() => float32.PositiveInfinity;
+    public pure float32 NotANumber() => float32.NaN;
+    public pure float LowWide() => float.NegativeInfinity;
+    public pure float HighWide() => float.PositiveInfinity;
+    public pure float NotANumberWide() => float.NaN;
+    public pure bool Prefix(string value, string prefix) => string.StartsWith(value, prefix);
+    public pure int SumConstant(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + TickValue;
+            index = index + 1;
+        }
+        return total;
+    }
+    public pure int SumLiteral(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + 42;
+            index = index + 1;
+        }
+        return total;
+    }
+    public Result<void,string> Touch() {
+        calls = calls + 1;
+        return math.Touch();
+    }
+}

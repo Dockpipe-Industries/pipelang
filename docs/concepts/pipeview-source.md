@@ -1,5 +1,10 @@
 # Experimental PipeLang view source
 
+Current native typed views use `.pview` through the installed
+[model SDK](../../sdk/pipeview/model/README.md); ordinary models retain `.pipe`.
+`.vpipe` is unsupported. The source-v1/v2 API and `.pipe` paths below are retained
+historical profile documentation, not the active native model-view interface.
+
 Status: bounded source profile implemented on 2026-10-28. Select it explicitly
 through `pipelang-viewc` or `pipelang.ParseViewSource`; it is not admitted by the
 ordinary class/module compiler entrypoints. This additive lane does not change

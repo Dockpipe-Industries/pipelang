@@ -259,7 +259,7 @@ semantics even where the implementation shares immutable internal storage.
 
 Dictionary keys and HashSet elements are limited to `int`, `bool`, `string` or an
 enum. Dictionary `Add` refuses an existing key; `Set` replaces or inserts.
-`TryGet`, `TryDequeue` and `TryPop` return `Optional<T>`. Required lookups, invalid
+`TryGet`, `TryDequeue` and `TryPop` return `T?`. Required lookups, invalid
 indices and removal/peek from an empty queue or stack fail through ordinary
 source Error handling. HashSet `Add` and `Remove`, and Dictionary `Remove`, return
 whether membership changed.
@@ -308,7 +308,7 @@ All three types expose `.Count` and `.Clear()`. Supported operations are:
 existing or inserted value. Its supplied value is evaluated eagerly; factory
 delegates are unsupported. `TryUpdate` compares the current owned value using
 ordinary value equality before replacing it atomically. `TryGet`, `TryRemove`,
-`TryDequeue`, `TryPop` and `TryPeek` return `Optional<T>`. `At` fails for a missing
+`TryDequeue`, `TryPop` and `TryPeek` return `T?`. `At` fails for a missing
 key. Mutating operation results may be discarded.
 
 Dictionary keys are `int`, `bool`, `string` or enums; payloads must recursively
@@ -344,3 +344,5 @@ headers include it only when needed. Existing model wire fields remain unchanged
 The optional view bridge does not admit shared-handle constructor/action
 parameters or return transport. Private shared implementation state remains
 outside exported owned snapshots.
+
+Nullable source spelling and typed null/value admission are defined in [nullable values](pipelang-nullable-values.md). The old generic spelling is not an accepted source alias.

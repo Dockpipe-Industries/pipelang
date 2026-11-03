@@ -33,7 +33,7 @@ void regularFile(const fs::path& path);
 void atomicWrite(const fs::path& path, std::string_view bytes);
 void publishDirectory(const fs::path& output, const std::map<std::string, std::string>& files);
 void publishOwnedDirectory(const fs::path& output, const std::map<std::string, std::string>& files,
-                           const std::set<std::string>& ownedNames);
+                           const std::set<std::string>& ownedNames, bool preserveUnchanged = false);
 fs::path executablePath();
 fs::path nativeExecutable(fs::path path);
 fs::path nativeTool(const std::string& name);

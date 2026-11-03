@@ -1,0 +1,30 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public source Interface IWord {
+    pure uint32 Read();
+}
+
+public Class WordCell : IWord {
+    public uint32 value = 0u;
+    public WordCell(uint32 seed) {
+        value = seed;
+    }
+    public pure uint32 Read() => value;
+}
+
+public Class App {
+    private WordCell cell;
+    private IWord view;
+    public App(uint32 seed) {
+        cell = new WordCell(seed);
+        view = cell;
+    }
+    public pure uint32 Read() => view.Read();
+    public uint32 Set(uint32 value) {
+        cell.value = value;
+        return view.Read();
+    }
+    public uint32 Rollback(uint32 value) {
+        cell.value = value;
+        return value / 0u;
+    }
+}

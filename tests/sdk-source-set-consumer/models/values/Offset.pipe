@@ -1,0 +1,5 @@
+module Values;
+
+public Record Offset {
+    public int amount = 3;
+}

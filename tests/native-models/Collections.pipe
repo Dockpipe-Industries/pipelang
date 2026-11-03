@@ -12,12 +12,14 @@ public Record CollectionBundle {
 public Enum CollectionKey { First, Second }
 
 public Class CollectionModel {
+    private pure Array<int>? PresentArray(Array<int> value) => value;
+
     public Array<int> array = Array<int>.Create(0, 0);
     public Dictionary<string,int> map = Dictionary<string,int>.Empty();
     public Queue<int> queue = Queue<int>.Empty();
     public Stack<int> stack = Stack<int>.Empty();
     public int marker = 0;
-    public Optional<Array<int>> wrapped;
+    public Array<int>? wrapped;
 
     public void Seed() {
         array = Array<int>.Create(2, 3);
@@ -71,8 +73,8 @@ public Class CollectionModel {
     public pure bool DictionaryOptions() {
         Dictionary<string,int> values = Dictionary<string,int>.Empty();
         values.Set("present", 4);
-        Optional<int> found = values.TryGet("present");
-        Optional<int> missing = values.TryGet("missing");
+        int? found = values.TryGet("present");
+        int? missing = values.TryGet("missing");
         bool present = values.ContainsKey("present");
         bool removed = values.Remove("missing");
         values.Clear();
@@ -123,8 +125,8 @@ public Class CollectionModel {
     public pure bool SequenceOperations() {
         Queue<int> fifo = Queue<int>.Empty();
         Stack<int> lifo = Stack<int>.Empty();
-        Optional<int> emptyQueue = fifo.TryDequeue();
-        Optional<int> emptyStack = lifo.TryPop();
+        int? emptyQueue = fifo.TryDequeue();
+        int? emptyStack = lifo.TryPop();
         fifo.Enqueue(1);
         fifo.Enqueue(2);
         lifo.Push(3);
@@ -133,8 +135,8 @@ public Class CollectionModel {
         int stackPeek = lifo.Peek();
         int dequeued = fifo.Dequeue();
         int popped = lifo.Pop();
-        Optional<int> lastQueue = fifo.TryDequeue();
-        Optional<int> lastStack = lifo.TryPop();
+        int? lastQueue = fifo.TryDequeue();
+        int? lastStack = lifo.TryPop();
         fifo.Clear();
         lifo.Clear();
         return !emptyQueue.HasValue && !emptyStack.HasValue && queuePeek == 1
@@ -188,7 +190,7 @@ public Class CollectionModel {
     }
 
     public pure int TemporaryOptionalRead()
-        => Optional<Array<int>>.Some(Array<int>.Create(1, 7)).Value.At(0);
+        => PresentArray(Array<int>.Create(1, 7)).Value.At(0);
 
     private pure Queue<int> BuildQueue() {
         Queue<int> values = Queue<int>.Empty();
@@ -201,12 +203,12 @@ public Class CollectionModel {
         => Result<Queue<int>,string>.Success(BuildQueue()).Value.Peek();
 
     private int ChangesWrapperAndReturnsIndex() {
-        wrapped = Optional<Array<int>>.None();
+        wrapped = null;
         return 0;
     }
 
     public int ReceiverBeforeArguments() {
-        wrapped = Optional<Array<int>>.Some(Array<int>.Create(1, 17));
+        wrapped = Array<int>.Create(1, 17);
         return wrapped.Value.At(ChangesWrapperAndReturnsIndex());
     }
 

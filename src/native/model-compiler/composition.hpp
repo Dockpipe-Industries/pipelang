@@ -7,10 +7,13 @@ namespace pipelang::models {
 
 // Link a closed, caller-supplied graph without accessing files or the network.
 Program linkModules(const std::vector<ModuleSource>& sources, const std::string& entry,
-                    bool objectSyntax = false);
+                    bool objectSyntax = false, bool projectSyntax = false);
 
 // Resolve explicit closed generic applications into ordinary owned-value ASTs.
 // The ordinary checker remains responsible for all concrete expression semantics.
 void normalizeComposition(Program& program);
+
+// Clone all mutable expression trees before independent semantic checking.
+Declaration cloneDeclaration(const Declaration& declaration);
 
 }

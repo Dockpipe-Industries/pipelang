@@ -91,3 +91,16 @@ build manifest dirty. This changes task-owned checkout metadata only. An optiona
 PIPELANG_NATIVE_STOPWATCH_DEADLINE bounds Windows bootstrap/job/unit execution
 using an inherited monotonic deadline; the controller owns its derivation from
 the user's requested stop time.
+
+For a focused fixture check, `PIPELANG_NATIVE_FIXTURE_SELECTION` accepts a
+space-separated list of exact declared C++ fixture names (for example,
+`list_read_objects initialization_budget_runtime`). Its default is `all`;
+empty, unknown or unavailable selections fail. Suite generation and compiler
+oracles still run, and every selected fixture runs both normal and ASan/UBSan
+builds and executions. Combine with the existing suite/runtime selectors when
+appropriate. Such a run is selected evidence; the unchanged default workflow
+remains the terminal full-regression gate. The `project` fixture uses the installed
+SDK project generator and the same source/native consumer authoring as the SDK
+index/incremental tests, then runs both normal and ASan/UBSan binaries through this
+existing contained fixture lane. POSIX retains `fixture-selection.txt`,
+and the Windows acceptance receipt records the selection.

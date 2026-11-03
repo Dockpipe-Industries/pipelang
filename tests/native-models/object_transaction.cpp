@@ -104,6 +104,45 @@ struct RootState {
     }
 };
 
+struct PlainRoot {
+    std::int64_t value = 0;
+    static inline bool refuse = false;
+    static inline int validations = 0;
+    friend void validate(const PlainRoot&) {
+        ++validations;
+        if (refuse)
+            throw ExecutionFailure("plain root validation refused");
+    }
+};
+
+void emptyGraphStillValidatesAndPublishes() {
+    ObjectOwner owner;
+    PlainRoot live;
+    TaskScope scope;
+    EvaluationBudget budget;
+    GraphModelTransaction<PlainRoot> transaction(live, owner.domain());
+    auto execution = transaction.execution(scope, budget);
+    transaction.state().value = 7;
+    PlainRoot::validations = 0;
+    PlainRoot::refuse = true;
+    bool rejected = false;
+    try {
+        execution.commitSegment();
+    } catch (const ExecutionFailure&) {
+        rejected = true;
+    }
+    PlainRoot::refuse = false;
+    assert(rejected && live.value == 0 && PlainRoot::validations == 1);
+    execution.commitSegment();
+    assert(live.value == 7 && PlainRoot::validations == 2);
+    transaction.state().value = 9;
+    execution.refreshSegment();
+    assert(transaction.state().value == 7);
+    transaction.state().value = 11;
+    execution.commitSegment();
+    assert(live.value == 11 && PlainRoot::validations == 3);
+}
+
 struct Fixture {
     ObjectOwner owner;
     RootState live;
@@ -286,6 +325,7 @@ void returnCommitOrdering() {
 }
 
 int main() {
+    emptyGraphStillValidatesAndPublishes();
     jointPublicationAndPreparation();
     refreshStagesBeforeMutation();
     returnCommitOrdering();

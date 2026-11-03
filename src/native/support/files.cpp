@@ -81,7 +81,7 @@ void atomicWrite(const fs::path& path, std::string_view bytes) {
 }
 namespace {
 const std::set<std::string>& bindingNames() {
-    static const std::set<std::string> names{"Model.hpp", "model.json", "ModelView.hpp", "view.json", "bindings.json", "style.json"};
+    static const std::set<std::string> names{"StandaloneConstants.hpp", "Model.hpp", "Types.hpp", "model.json", "ModelView.hpp", "view.json", "bindings.json", "style.json"};
     return names;
 }
 void ownedPreflight(const fs::path& output, const std::set<std::string>& names) {
@@ -100,7 +100,7 @@ void outputPreflight(const fs::path& output) {
     ownedPreflight(output, bindingNames());
 }
 void publishOwnedDirectory(const fs::path& output, const std::map<std::string, std::string>& files,
-                           const std::set<std::string>& ownedNames) {
+                           const std::set<std::string>& ownedNames, bool preserveUnchanged) {
     require(!files.empty() && !ownedNames.empty(), "publication requires explicit owned filenames");
     for (const auto& [name, bytes] : files)
         require(ownedNames.contains(name), "publication contains an unowned filename");
@@ -115,6 +115,9 @@ void publishOwnedDirectory(const fs::path& output, const std::map<std::string, s
             portablePath(name);
             require(fs::path(name).filename() == name, "generated output must be a plain filename");
             atomicWrite(stage / name, bytes);
+            if (preserveUnchanged && fs::exists(output / name) &&
+                readFile(output / name, 4U << 20) == bytes)
+                fs::last_write_time(stage / name, fs::last_write_time(output / name));
         }
         ownedPreflight(output, ownedNames);
         const bool existed = fs::exists(output);

@@ -4,6 +4,13 @@ PipeLangModel 0.1.0 is the C++20 SDK for ordinary typed models and compiled
 views. The default root workflows build, test and package it. Unused historical
 Go/Core/source-v1/v2 implementations have been retired.
 
+The opt-in [native project contract](../../../docs/concepts/pipelang-projects.md)
+discovers conventional source roots and resolves normal module imports without
+authored source/export JSON inventories. `public model Class` declares an existing
+transactional root; ordinary public types retain object/value semantics and receive
+stable module-qualified native names. The SDK exposes PROJECT_ROOT/SOURCE_ROOT/ENTRY
+and retains old protocols for explicit compatibility fixtures.
+
 The native compiler owns class/record/enum typing, method effects, checked integer
 arithmetic, transactions and structured host-service async/await lowering. The
 native view compiler resolves public model fields and pure getters/actions into
@@ -17,6 +24,13 @@ C++ containment and regression oracles are documented in
 [validation](../../../docs/agents/core/validation.md).
 
 No compiler discovery, latest-version lookup or Go fallback is performed.
+
+Declarative PipeView documents and style fragments use `.pview`; ordinary models
+remain `.pipe`. `pipelang_add_model_bindings` accepts `.pview` and native typed
+PipeView XML `.pxml` VIEW paths, while ordinary project discovery continues to
+index only `.pipe` files. `.vpipe` is unsupported. Unrelated XML retains `.xml`.
+The [XML contract](../../../docs/concepts/pipeview-native-xml.md) distinguishes
+native typed views from frozen historical source-v2 fixtures.
 
 Views bind ordinary model members, for example `bind model.draft.playerName` and
 `bind model.CanSave()`, and reference typed methods such as `clicked: model.Save`.
@@ -91,3 +105,5 @@ The existing `pipelang_add_model_bindings` interface continues to require a mode
 and view. Types unsupported by the view bridge, including binary32, remain
 explicit refusals there. A controlled consumer must select and verify its exact
 SDK identity; the package version alone does not authorize mutable SDK selection.
+
+Ordinary-model nullable source uses `T?`, typed values and `null`; the old Optional generic source spelling is rejected. Internal runtime Optional storage and checked access remain unchanged. See [nullable values](../../../docs/concepts/pipelang-nullable-values.md); owning compiler/runtime/SDK qualification is required.

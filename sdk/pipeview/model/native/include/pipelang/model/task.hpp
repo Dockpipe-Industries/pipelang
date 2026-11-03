@@ -2,6 +2,7 @@
 #pragma once
 
 #include "result.hpp"
+#include "limits.hpp"
 
 #include <algorithm>
 #include <array>
@@ -56,7 +57,9 @@ private:
 
 struct TaskOptions {
     std::size_t capacity = 4;
+    std::size_t initializationSteps = defaultEvaluationSteps;
     static constexpr std::size_t maximumCapacity = 32;
+    static constexpr std::size_t maximumInitializationSteps = pipelang::model::maximumInitializationSteps;
 };
 
 template<class T>
@@ -188,18 +191,84 @@ class TaskScope {
     };
 
 public:
+    // Only the external callback is guarded. Source helpers remain in their
+    // existing outer transaction; this guard neither commits nor rolls back
+    // model state or external effects. The scope must outlive the guard.
+    class SynchronousHostCallGuard {
+    public:
+        SynchronousHostCallGuard(const SynchronousHostCallGuard&) = delete;
+        SynchronousHostCallGuard& operator=(const SynchronousHostCallGuard&) = delete;
+
+        SynchronousHostCallGuard(SynchronousHostCallGuard&& other) noexcept
+            : scope_(std::exchange(other.scope_, nullptr)) {}
+
+        SynchronousHostCallGuard& operator=(SynchronousHostCallGuard&& other) noexcept {
+            if (this != &other) {
+                release();
+                scope_ = std::exchange(other.scope_, nullptr);
+            }
+            return *this;
+        }
+
+        ~SynchronousHostCallGuard() { release(); }
+
+    private:
+        friend class TaskScope;
+        explicit SynchronousHostCallGuard(TaskScope& scope) : scope_(&scope) {
+            scope.requireOwner();
+            scope.synchronousHostCallActive_ = true;
+        }
+
+        void release() noexcept {
+            if (!scope_)
+                return;
+            // Moving the guard transfers ownership, never its thread affinity.
+            if (scope_->owner_ != std::this_thread::get_id())
+                std::terminate();
+            scope_->synchronousHostCallActive_ = false;
+            scope_ = nullptr;
+        }
+
+        TaskScope* scope_;
+    };
+
+    [[nodiscard]] SynchronousHostCallGuard enterSynchronousHostCall() {
+        return SynchronousHostCallGuard(*this);
+    }
+
+    // A synchronous host boundary stays on the owner thread. It owns no
+    // worker job or commit point, and preserves cancellation as a distinct fault.
+    template<class Callback>
+    auto invokeSynchronousHost(Callback&& callback) {
+        auto guard = enterSynchronousHostCall();
+        try {
+            auto result = std::invoke(std::forward<Callback>(callback));
+            validate(result);
+            return result;
+        } catch (const OperationCancelled&) {
+            throw;
+        } catch (const ExecutionFailure&) {
+            throw;
+        } catch (const std::exception& error) {
+            throw ExecutionFailure(safeErrorMessage(error));
+        } catch (...) {
+            throw ExecutionFailure("unexpected synchronous host service failure");
+        }
+    }
+
     static constexpr std::size_t maximumPollingWaits = 32;
     explicit TaskScope(TaskOptions options = {})
         : owner_(std::this_thread::get_id()), capacity_(options.capacity) {
         if (capacity_ == 0 || capacity_ > TaskOptions::maximumCapacity)
             throw ExecutionFailure("task capacity must be between 1 and 32");
+        requireInitializationSteps(options.initializationSteps);
     }
     TaskScope(const TaskScope&) = delete;
     TaskScope& operator=(const TaskScope&) = delete;
     ~TaskScope() {
         // A model must be destroyed on its owner. Failing closed here avoids a
         // destructor racing a continuation or destroying an active frame.
-        if (owner_ != std::this_thread::get_id())
+        if (owner_ != std::this_thread::get_id() || synchronousHostCallActive_)
             std::terminate();
         for (auto& entry : entries_)
             entry.cancel();
@@ -241,6 +310,8 @@ public:
     void requireOwner() const {
         if (owner_ != std::this_thread::get_id())
             throw ExecutionFailure("model accessed from a different owner thread");
+        if (synchronousHostCallActive_)
+            throw ExecutionFailure("model reentry during a synchronous host callback");
     }
     std::size_t pending() const {
         requireOwner();
@@ -522,6 +593,7 @@ private:
     std::deque<std::function<void()>> completed_;
     bool stopping_ = false;
     bool abandoningFrames_ = false;
+    bool synchronousHostCallActive_ = false;
 };
 
 }

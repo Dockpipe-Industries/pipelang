@@ -1,0 +1,242 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Record Bucket {
+    public List<int> values;
+}
+
+public Class Reader {
+    private Bucket bucket;
+
+    public Reader() {
+        bucket.values.Add(6);
+        bucket.values.Add(9);
+    }
+
+    public pure int DecodedField(int index) => bucket.values.At(index);
+
+    public pure int LocalReads(int repetitions) {
+        List<int> local = bucket.values;
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + local.At(index % local.Count);
+            index = index + 1;
+        }
+        return total;
+    }
+
+    private pure Result<Bucket,string> GetResult()
+        => Result<Bucket,string>.Success(bucket);
+
+    public pure int TemporaryResult() => GetResult().Value.values.At(1);
+}
+
+public Interface ProjectionHost {
+    Result<void,string> Touch();
+}
+
+public Class App {
+    private ProjectionHost projectionHost;
+    private ProjectionReads projection = new ProjectionReads();
+
+    public App(ProjectionHost host) {
+        projectionHost = host;
+    }
+
+    public pure int ProjectScalars(int repetitions) => projection.Scalars(repetitions);
+    public pure int ProjectNested(int repetitions) => projection.Nested(repetitions);
+    public pure int ProjectImageValue() => projection.image.nested.value;
+    public pure int ProjectListIsolation() => projection.ListIsolation();
+
+    private ProjectionReads FreshProjection() => new ProjectionReads();
+    public int TemporaryProjection() => FreshProjection().image.nested.value;
+
+    public Result<int,string> ProjectAcrossHost() {
+        ReadRow selected = projection.image.nested;
+        Result<void,string> touched = projectionHost.Touch();
+        if (!touched.IsSuccess) {
+            if (touched.IsCancelled)
+                return Result<int,string>.Cancelled(touched.Error);
+            return Result<int,string>.Failure(touched.Error);
+        }
+        projection.Replace();
+        return Result<int,string>.Success(selected.value);
+    }
+    private Reader reader = new Reader();
+
+    public pure int Read(int index) => reader.DecodedField(index);
+    public pure int LocalReads(int repetitions) => reader.LocalReads(repetitions);
+    public pure int TemporaryResult() => reader.TemporaryResult();
+
+    private StoredReads stored = new StoredReads();
+
+    public pure int ScalarReads(int repetitions) => stored.ScalarReads(repetitions);
+    public pure int RecordReads(int repetitions) => stored.RecordReads(repetitions);
+    public pure int NestedRecordReads(int repetitions) => stored.NestedRecordReads(repetitions);
+    public pure int NestedValues() => stored.NestedValues();
+    public pure int CellValue(int index) => stored.CellValue(index);
+    public int RetainSelectedCell() => stored.RetainSelectedCell();
+    public int ReplaceIndex() => stored.ReplaceIndex();
+    public int AppendIndex() => stored.AppendIndex();
+    public int RollbackSelected() => stored.RollbackSelected();
+    public void Reset() {
+        stored.Reset();
+    }
+    public pure int Size() => stored.Size();
+    public pure int First() => stored.First();
+    public pure int Effects() => stored.Effects();
+}
+
+public Record ReadRow {
+    public int value = 0;
+}
+
+public Class ReadCell {
+    public int value = 0;
+    public ReadCell(int number) {
+        value = number;
+    }
+}
+
+public Class StoredReads {
+    private List<int> values;
+    private List<ReadRow> rows;
+    private List<ReadCell> cells;
+    private List<List<int>> nested;
+    private Bucket bucket;
+    private int effects = 0;
+
+    public StoredReads() {
+        Reset();
+        rows.Add(new ReadRow { value = 7 });
+        rows.Add(new ReadRow { value = 11 });
+        cells.Add(new ReadCell(31));
+        cells.Add(new ReadCell(47));
+        List<int> inner = List<int>.Empty();
+        inner.Add(13);
+        inner.Add(17);
+        nested.Add(inner);
+        bucket.values.Add(3);
+        bucket.values.Add(5);
+    }
+
+    public void Reset() {
+        values = List<int>.Empty();
+        values.Add(10);
+        values.Add(20);
+        effects = 0;
+    }
+
+    public pure int ScalarReads(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + values.At(index % values.Count);
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int RecordReads(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + rows.At(index % rows.Count).value;
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int NestedRecordReads(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + bucket.values.At(index % bucket.values.Count);
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int NestedValues() => nested.At(0).At(1);
+    public pure int CellValue(int index) => cells.At(index).value;
+
+    public int RetainSelectedCell() {
+        ReadCell selected = cells.At(1);
+        cells = List<ReadCell>.Empty();
+        selected.value = selected.value + 1;
+        return selected.value;
+    }
+
+    private int Replace() {
+        values = List<int>.Empty();
+        values.Add(90);
+        effects = effects + 1;
+        return 1;
+    }
+
+    private int Append() {
+        values.Add(30);
+        effects = effects + 1;
+        return 2;
+    }
+
+    public int ReplaceIndex() => values.At(Replace());
+    public int AppendIndex() => values.At(Append());
+    public int RollbackSelected() {
+        ReadCell selected = cells.At(0);
+        selected.value = 99;
+        return values.At(9);
+    }
+    public pure int Size() => values.Count;
+    public pure int First() => values.At(0);
+    public pure int Effects() => effects;
+}
+
+// Projecting a small field must not copy an unrelated large owned sequence.
+public Record ProjectionImage {
+    public int scalar = 7;
+    public ReadRow nested = new ReadRow { value = 11 };
+    public List<int> unrelated;
+}
+
+public Class ProjectionReads {
+    public ProjectionImage image;
+
+    public ProjectionReads() {
+        int index = 0;
+        while (index < 512) {
+            image.unrelated.Add(index);
+            index = index + 1;
+        }
+    }
+
+    public pure int Scalars(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + image.scalar;
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int Nested(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            ReadRow selected = image.nested;
+            total = total + selected.value;
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int ListIsolation() {
+        List<int> selected = image.unrelated;
+        selected.Add(99);
+        return selected.Count - image.unrelated.Count;
+    }
+
+    public void Replace() {
+        image = new ProjectionImage { scalar = 17, nested = new ReadRow { value = 23 } };
+    }
+}

@@ -343,6 +343,142 @@ void allocationFailures() {
     assert(failures != 0);
 }
 
+void collectEmptyWithoutAllocations(const std::shared_ptr<ObjectDomain>& domain) {
+    assert(domain->liveCount() == 0);
+    objectAllocationCountdown = 0;
+    try {
+        for (int repetition = 0; repetition < 512; ++repetition)
+            domain->collect();
+    } catch (...) {
+        objectAllocationCountdown = -1;
+        throw;
+    }
+    objectAllocationCountdown = -1;
+}
+
+void emptyDomainCollection() {
+    ObjectOwner owner;
+    collectEmptyWithoutAllocations(owner.domain());
+    GraphTransaction transaction(owner.domain());
+    auto counter = transaction.create<CounterState>(CounterTag{});
+    assert(owner.domain()->liveCount() == 1);
+    transaction.commit();
+    transaction.mutate<CounterState>(counter, [](CounterState& state) { state.value = 8; });
+    transaction.commit();
+    assert(owner.domain()->liveCount() == 1 && transaction.read<CounterState>(counter).value == 8);
+    counter = {};
+    owner.domain()->collect();
+    collectEmptyWithoutAllocations(owner.domain());
+
+    Counter provisional;
+    {
+        auto construction = transaction.savepoint();
+        provisional = transaction.create<CounterState>(CounterTag{});
+        owner.domain()->collect();
+        assert(owner.domain()->liveCount() == 1);
+    }
+    expectFailure([&] { provisional.require(); });
+    collectEmptyWithoutAllocations(owner.domain());
+
+    // Each failed create, including root-lease failure after cell publication,
+    // must leave the independently scanned cell count and empty fastpath intact.
+    int failedAllocations = 0;
+    for (int count = 0; count < 16; ++count) {
+        objectAllocationCountdown = count;
+        try {
+            auto transient = transaction.create<CounterState>(CounterTag{});
+        } catch (const std::bad_alloc&) {
+            ++failedAllocations;
+        }
+        objectAllocationCountdown = -1;
+        transaction.discard();
+        collectEmptyWithoutAllocations(owner.domain());
+    }
+    assert(failedAllocations != 0);
+
+    CounterState invalid;
+    invalid.extraEdges.push_back({0, 1});
+    expectFailure([&] { transaction.create<CounterState>(CounterTag{}, invalid); });
+    collectEmptyWithoutAllocations(owner.domain());
+    CounterState nullEdge;
+    nullEdge.extraEdges.push_back({});
+    auto nullable = transaction.create<CounterState>(CounterTag{}, nullEdge);
+    expectFailure([&] { transaction.validateInitialized(nullable); });
+    transaction.discard();
+    expectFailure([&] { nullable.require(); });
+    collectEmptyWithoutAllocations(owner.domain());
+
+    std::atomic<bool> refused{false};
+    std::jthread foreign([&] {
+        try {
+            owner.domain()->collect();
+        } catch (const ExecutionFailure& error) {
+            refused.store(error.what() == std::string("object accessed from a different owner thread"));
+        }
+    });
+    foreign.join();
+    assert(refused.load());
+    owner.domain()->close();
+    expectFailure([&] { owner.domain()->collect(); });
+}
+
+struct PaddedTag {
+    static constexpr std::uint64_t typeId = 3;
+    static bool accepts(std::uint64_t value) {
+        return value == typeId;
+    }
+};
+
+struct PaddedState final : ObjectState {
+    std::vector<unsigned char> payload;
+    ObjectId edge;
+    static inline int traces = 0;
+
+    std::unique_ptr<ObjectState> clone() const override {
+        return std::make_unique<PaddedState>(*this);
+    }
+    void trace(ObjectTrace& trace) const override {
+        ++traces;
+        if (!edge.isNull())
+            trace.edge(edge);
+    }
+    std::size_t logicalBytes() const override {
+        return sizeof(PaddedState) + payload.size();
+    }
+    void validate() const override {
+    }
+};
+
+void capacityCollectionKeepsCandidateRoots() {
+    ObjectOwner owner;
+    GraphTransaction transaction(owner.domain());
+    auto child = transaction.create<CounterState>(CounterTag{});
+    transaction.commit();
+    const auto childId = child.identity();
+    PaddedState garbage;
+    garbage.payload.resize(ObjectDomain::maximumBytes * 3 / 4);
+    auto discarded = transaction.create<PaddedState>(PaddedTag{}, std::move(garbage));
+    transaction.commit();
+    discarded = {};
+    child = {};
+
+    // Only the prospective parent's trace retains this child while capacity
+    // preparation collects the unrooted large object.
+    PaddedState parent;
+    parent.payload.resize(ObjectDomain::maximumBytes / 2);
+    parent.edge = childId;
+    PaddedState::traces = 0;
+    auto rooted = transaction.create<PaddedState>(PaddedTag{}, std::move(parent));
+    transaction.commit();
+    assert(PaddedState::traces != 0 && owner.domain()->liveCount() == 2);
+    auto retained = owner.domain()->root<CounterTag>(childId);
+    assert(transaction.read<CounterState>(retained).value == 0);
+    retained = {};
+    rooted = {};
+    owner.domain()->collect();
+    collectEmptyWithoutAllocations(owner.domain());
+}
+
 Coroutine<IntResult> retained(TaskScope& scope, std::shared_ptr<ObjectDomain> domain,
                               Counter reference, bool& ready) {
     GraphTransaction transaction(std::move(domain));
@@ -402,6 +538,8 @@ void retainedArgumentsAndOwners() {
 }
 
 int main() {
+    emptyDomainCollection();
+    capacityCollectionKeepsCandidateRoots();
     aliasingAndRollback();
     cyclesAndStorage();
     limitsAndTransientCollection();

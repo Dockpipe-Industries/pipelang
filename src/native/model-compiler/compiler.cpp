@@ -21,13 +21,35 @@ void validateNamespace(const std::string& nameSpace) {
 
 nlohmann::json compileProgram(Program program, const std::string& nameSpace,
                               const std::string& protocol,
-                              const std::vector<std::string>& models = {}) {
-    program.objectEnabled = protocol == "pipelang.native-model.v3";
+                              const std::vector<std::string>& models = {},
+                              const std::string& emission = {}) {
+    program.objectEnabled = protocol == "pipelang.native-model.v3" || program.projectEnabled;
     program.modelExports = models;
     normalizeComposition(program);
     check(program);
-    return {{"protocol", protocol}, {"ok", true}, {"header", generate(program, nameSpace)},
-            {"manifest", manifest(program, nameSpace)}};
+    nlohmann::json response;
+    if (emission.empty()) {
+        response = {{"protocol", protocol}, {"ok", true}, {"header", generate(program, nameSpace)},
+                    {"manifest", manifest(program, nameSpace)}};
+    } else {
+        const auto generated = generateCompiledProject(program, nameSpace);
+        response = {{"protocol", protocol}, {"ok", true}, {"header", generated.header},
+                    {"manifest", manifest(program, nameSpace)}};
+        auto files = nlohmann::json::array();
+        for (const auto& [name, content] : generated.files) {
+            nlohmann::json file{{"name", name}, {"kind", name == "Objects.hpp" ? "private-header" : "implementation"}};
+            if (emission == "sources")
+                file["content"] = content;
+            files.push_back(std::move(file));
+        }
+        response["implementation"] = {{"protocol", "pipelang.native-project-implementation.v1"},
+                                       {"emission", emission}, {"files", std::move(files)}};
+    }
+    if (program.projectEnabled)
+        response["types_header"] = generateProjectTypes(program, nameSpace);
+    if (!constantsManifest(program, nameSpace).empty())
+        response["constants_header"] = constantsHeader(program, nameSpace);
+    return response;
 }
 
 }
@@ -59,6 +81,33 @@ nlohmann::json compileModuleObjects(const std::vector<ModuleSource>& modules, co
                                     const std::vector<std::string>& models, const std::string& nameSpace) {
     validateNamespace(nameSpace);
     return compileProgram(linkModules(modules, entry, true), nameSpace, "pipelang.native-model.v3", models);
+}
+
+nlohmann::json compileProjectModules(const std::vector<ModuleSource>& modules, const std::string& entry,
+                                    const std::string& nameSpace) {
+    validateNamespace(nameSpace);
+    auto program = linkModules(modules, entry, true, true);
+    std::vector<std::string> models;
+    for (const auto& declaration : program.declarations) {
+        if (declaration.modelDeclared)
+            models.push_back(declaration.sourceName);
+    }
+    return compileProgram(std::move(program), nameSpace, "pipelang.native-model-project.v1", models);
+}
+
+nlohmann::json compileProjectImplementation(const std::vector<ModuleSource>& modules,
+                                           const std::string& entry, const std::string& nameSpace,
+                                           const std::string& emission) {
+    validateNamespace(nameSpace);
+    if (emission != "plan" && emission != "sources")
+        throw Diagnostic("compiled project emission must be plan or sources", 0);
+    auto program = linkModules(modules, entry, true, true);
+    std::vector<std::string> models;
+    for (const auto& declaration : program.declarations) {
+        if (declaration.modelDeclared)
+            models.push_back(declaration.sourceName);
+    }
+    return compileProgram(std::move(program), nameSpace, "pipelang.native-model-project.v2", models, emission);
 }
 
 }

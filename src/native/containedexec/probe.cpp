@@ -1,5 +1,9 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "../support/support.hpp"
+namespace pipelang::contained {
+void probeEstate(const std::filesystem::path& output);
+void churnEstate(const std::filesystem::path& root);
+}
 #include <chrono>
 #include <csignal>
 #include <iostream>
@@ -41,6 +45,17 @@ int workload(const std::string& mode, const fs::path& marker) {
     atomicWrite(marker, "verified workload started\n");
     if (mode == "normal")
         return 0;
+    if (mode == "estate-scanner") {
+        pipelang::contained::probeEstate(marker.parent_path() / "estate-scanner-tests");
+        return 0;
+    }
+    if (mode == "estate-churn") {
+        pipelang::contained::churnEstate(marker.parent_path() / "publisher-churn");
+        return 0;
+    }
+    if (mode == "estate-grow") {
+        atomicWrite(marker.parent_path() / "allocation", std::string(2U << 20, 'x'));
+    }
     if (mode == "error")
         return 17;
     if (mode == "memory") {
@@ -95,6 +110,8 @@ void inside(const fs::path& runner, const fs::path& self, const fs::path& output
         return receipt;
     };
     unit("normal", true);
+    unit("estate-scanner", true);
+    unit("estate-churn", true);
     const auto error = unit("error", false);
     require(error.at("workload").at("exit") == 17, "child failure exit was lost");
     unit("timeout", false, 1);
@@ -109,6 +126,17 @@ void inside(const fs::path& runner, const fs::path& self, const fs::path& output
 #endif
     unit("memory", false);
     unit("logs", false);
+    const auto growthEstate = output / "estate-growth";
+    fs::create_directory(growthEstate);
+    const auto growth = process({runner.string(), "unit", "--output", (growthEstate / "growth").string(),
+        "--estate", growthEstate.string(), "--estate-limit-mib", "1", "--timeout", "10", "--",
+        self.string(), "--workload", "estate-grow", (growthEstate / "started.marker").string()},
+        {}, std::chrono::seconds(30));
+    const auto growthReceipt = parseJson(readFile(growthEstate / "growth.json", 65536));
+    require(growth.exit != 0 && fs::exists(growthEstate / "started.marker")
+            && growthReceipt.at("tree_removed") == true
+            && growthReceipt.at("error").get<std::string>().find("byte limit") != std::string::npos,
+        "growing estate was not stopped and reaped at its unchanged allocation limit");
     const auto receipt = output / "normal.json";
     const auto before = fileHash(receipt);
     const auto repeat = process({runner.string(), "unit", "--output", (output / "normal").string(), "--", self.string(), "--workload", "normal", (output / "repeat.marker").string()});
@@ -195,7 +223,7 @@ int main(int argc, char** argv) {
         atomicWrite(output / "acceptance.json", canonical({{"status", "passed"}, {"runner_sha256", fileHash(runner)},
             {"failure_probes", inside.at("failure_probes").get<int>() + 1}, {"limits_checked_independently", true},
             {"aggregate_tree_removed", true}}));
-        std::cout << "native containment: independent limits, failures, timeout, detached descendant, memory, logs and receipt preservation passed\n";
+        std::cout << "native containment: independent limits, failures, timeout, detached descendant, memory, logs, receipt preservation and Linux estate churn/refusal probes passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

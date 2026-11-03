@@ -61,7 +61,9 @@ interface upcast fallback. Defaults/authored field initializers run before that
 constructor's body. Overloads retain separate checked initializer trees. A
 successful constructor must initialize every non-null object-reference field;
 runtime validation also checks references nested in supported containers.
-`Optional<C>` or `Optional<I>` represents absence. There is no source null literal.
+`C?` or `I?` represents absence; a known nullable target admits `null` or a present value.
+The internal object-domain optional codec and checked Value access are unchanged.
+See [nullable values](pipelang-nullable-values.md).
 
 Assignment and parameter passing preserve object identity. `this` denotes the
 current ordinary instance. Public/private checks apply to fields and instance
@@ -73,8 +75,12 @@ compares identity across concrete and source-interface views.
 `public Interface I`. Source implementations use `Class C : I, J` and must match
 public parameter/return types and pure/async contracts exactly. Source interfaces
 admit pure queries, synchronous effects and existing async `Task<Result<...>>`
-methods. Host interfaces retain injected typed services and host-worker awaits;
-source classes cannot implement that external boundary.
+methods. Host interfaces retain constructor-injected native services: synchronous
+`Result<T,string>` methods and [pure owned-value returns](pipelang-pure-host-values.md)
+execute on the owner thread, while asynchronous `Task<Result<T,string>>` methods
+retain host-worker awaits. Source classes cannot
+implement that external boundary. See the [synchronous host-call contract](../../src/native/model-compiler/README.md#synchronous-injected-host-calls)
+for callback reentry, transaction and lifetime rules.
 
 A Class implicitly upcasts to its base classes and implemented source interfaces.
 Overloads prefer an exact argument match, then one unique upcast match; ties

@@ -156,6 +156,8 @@ private:
 
     std::thread::id owner_;
     bool closed_ = false;
+    // Provisional cells count as live; allocation and matching-generation destruction own updates.
+    std::size_t liveCells_ = 0;
     std::array<Cell, maximumCells> cells_{};
     std::array<GraphTransaction*, maximumTransactions> transactions_{};
 };
@@ -532,6 +534,7 @@ inline void ObjectDomain::removeTransaction(GraphTransaction* transaction) noexc
 inline void ObjectDomain::destroy(ObjectId id) noexcept {
     auto& cell = cells_[id.slot];
     if (cell.state && cell.generation == id.generation) {
+        --liveCells_;
         cell.state.reset();
         cell.root.reset();
         cell.provisional = nullptr;
@@ -657,6 +660,7 @@ inline ObjectId ObjectDomain::allocate(std::uint64_t typeId, object_detail::Vers
                 cell.typeId = typeId;
                 cell.state = state;
                 cell.provisional = transaction;
+                ++liveCells_;
                 return {static_cast<std::uint32_t>(index), cell.generation};
             }
         }
@@ -671,6 +675,13 @@ inline void ObjectDomain::collect() {
 
 inline void ObjectDomain::collect(const std::vector<ObjectId>& extraRoots) {
     requireOwner();
+    if (liveCells_ == 0) {
+        for (auto id : extraRoots) {
+            if (!id.isNull())
+                checked(id);
+        }
+        return;
+    }
     std::array<bool, maximumCells> marked{};
     std::vector<ObjectId> pending;
     pending.reserve(maximumCells);
@@ -832,6 +843,18 @@ struct SequenceStorage {
             }
         }
         return result;
+    }
+
+    // Read only the selected owned element. Stored object edges must never
+    // escape; decoding restores the normal root lease for object references.
+    static T storedAt(const Stored& value, std::int64_t index, const std::shared_ptr<ObjectDomain>& domain) {
+        domain->requireOwner();
+        return Element::decode(value.at(index), domain);
+    }
+
+    static std::int64_t storedCount(const Stored& value, const std::shared_ptr<ObjectDomain>& domain) {
+        domain->requireOwner();
+        return value.count();
     }
 
     static Sequence<T> decode(const Stored& value, const std::shared_ptr<ObjectDomain>& domain) {

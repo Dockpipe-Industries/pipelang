@@ -51,7 +51,9 @@ void style(const fs::path& directory) {
             {{"name", "text"}, {"type", "color"}, {"value", "#EAF1F8FF"}}}}};
     require(descriptor == expected, "authored settings style differs");
     const auto receipt = parseJson(readFile(directory / "bindings.json", 1U << 20));
-    exactObject(receipt.at("generated"), {"Model.hpp", "model.json", "ModelView.hpp", "view.json", "style.json"}, {}, "generated files");
+    exactObject(receipt.at("generated"),
+        {"Model.hpp", "StandaloneConstants.hpp", "model.json", "ModelView.hpp", "view.json", "style.json"},
+        {}, "generated files");
     for (const auto& [name, hash] : receipt.at("generated").items())
         require(fileHash(directory / name) == hash, "generated settings file identity differs");
 }

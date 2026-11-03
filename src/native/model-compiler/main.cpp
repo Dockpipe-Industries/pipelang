@@ -53,15 +53,22 @@ int main() {
         if (!request.is_object() || !request.contains("protocol") || !request["protocol"].is_string())
             throw std::runtime_error("invalid native model request");
         const auto protocol = request["protocol"].get<std::string>();
+        const bool compiled = protocol == "pipelang.native-model-project.v2";
+        const bool project = compiled || protocol == "pipelang.native-model-project.v1";
         const bool objects = protocol == "pipelang.native-model.v3";
-        const bool modular = protocol == "pipelang.native-model.v2" || (objects && request.contains("modules"));
-        if (protocol != "pipelang.native-model.v1" && protocol != "pipelang.native-model.v2" && !objects)
+        const bool modular = project || protocol == "pipelang.native-model.v2" || (objects && request.contains("modules"));
+        if (protocol != "pipelang.native-model.v1" && protocol != "pipelang.native-model.v2" && !objects && !project)
             throw std::runtime_error("unsupported native model protocol");
         auto required = modular ? std::set<std::string>{"protocol", "modules", "entry"}
                                 : std::set<std::string>{"protocol", "source"};
         if (objects)
             required.insert("models");
+        if (compiled)
+            required.insert("emit");
         requireFields(request, required, {"namespace"});
+        if (compiled && (!request.at("emit").is_string() ||
+            (request.at("emit") != "plan" && request.at("emit") != "sources")))
+            throw std::runtime_error("compiled project emit must be plan or sources");
         std::vector<std::string> models;
         if (objects) {
             if (!request["models"].is_array() || request["models"].empty() || request["models"].size() > 128)
@@ -81,13 +88,17 @@ int main() {
         std::vector<pipelang::models::ModuleSource> modules;
         if (modular) {
             if (!request["entry"].is_string() || !request["modules"].is_array() ||
-                request["modules"].empty() || request["modules"].size() > 128)
-                throw std::runtime_error("v2 requires an entry and 1..128 closed source modules");
+                request["modules"].empty() || request["modules"].size() > (project ? 4096U : 128U))
+                throw std::runtime_error(project ? "project requires an entry and 1..4096 source fragments"
+                                                 : "v2 requires an entry and 1..128 closed source modules");
             for (const auto& module : request["modules"]) {
-                requireFields(module, {"name", "source"});
+                requireFields(module, {"name", "source"}, project ? std::set<std::string>{"path"} : std::set<std::string>{});
                 if (!module["name"].is_string() || !module["source"].is_string())
                     throw std::runtime_error("module name and source must be strings");
-                modules.push_back({module["name"].get<std::string>(), module["source"].get<std::string>()});
+                if (module.contains("path") && !module["path"].is_string())
+                    throw std::runtime_error("project fragment path must be a string");
+                modules.push_back({module["name"].get<std::string>(), module["source"].get<std::string>(),
+                                   project ? module.value("path", std::string{}) : std::string{}});
             }
         } else if (!request["source"].is_string()) {
             throw std::runtime_error("source must be a string");
@@ -95,7 +106,12 @@ int main() {
         json response;
         try {
             const auto nameSpace = request.value("namespace", "pipelang_models");
-            if (objects) {
+            if (compiled) {
+                response = pipelang::models::compileProjectImplementation(modules,
+                    request["entry"].get<std::string>(), nameSpace, request.at("emit").get<std::string>());
+            } else if (project) {
+                response = pipelang::models::compileProjectModules(modules, request["entry"].get<std::string>(), nameSpace);
+            } else if (objects) {
                 response = modular
                     ? pipelang::models::compileModuleObjects(modules, request["entry"].get<std::string>(), models, nameSpace)
                     : pipelang::models::compileObjects(request["source"].get<std::string>(), models, nameSpace);
@@ -107,6 +123,8 @@ int main() {
             json detail = {{"code", "PLM1001"}, {"message", diagnostic.what()}, {"offset", diagnostic.offset}};
             if (modular)
                 detail["module"] = diagnostic.module;
+            if (project && !diagnostic.path.empty())
+                detail["path"] = diagnostic.path;
             response = {{"protocol", protocol}, {"ok", false}, {"diagnostics", json::array({detail})}};
         }
         const auto output = response.dump();

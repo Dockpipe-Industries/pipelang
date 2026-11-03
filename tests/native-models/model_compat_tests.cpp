@@ -118,6 +118,32 @@ void protocol(Oracle& oracle, const fs::path& root) {
     require(model.at("constructor").at("parameters") == Json::array({{{"name", "service"}, {"type", "Processor"}},
         {{"name", "initial"}, {"type", "Payload"}}}), "constructor parameter manifest differs");
     oracle.generated("Models", oracle.admitted("runtime-fixture", readFile(root / "tests/native-models/Models.pipe", 65536), "pipelang_models"));
+    oracle.generated("ListReads", oracle.admitted("owned-list-read-fixture",
+        readFile(root / "tests/native-models/ListReads.pipe", 65536), "pipelang_list_reads"));
+    oracle.generated("InitializationBudget", oracle.admitted("initialization-budget-fixture",
+        readFile(root / "tests/native-models/InitializationBudget.pipe", 65536), "pipelang_initialization"));
+    const auto synchronous = oracle.admitted("sync-host-fixture",
+        readFile(root / "tests/native-models/SyncHost.pipe", 65536), "pipelang_sync_host");
+    oracle.generated("SyncHost", synchronous);
+    const auto& hostMethods = synchronous.at("manifest").at("interfaces").at(0).at("methods");
+    require(hostMethods.at(0).at("returnType") == "Result<int,string>" && !hostMethods.at(0).at("async").get<bool>()
+            && hostMethods.at(4).at("returnType") == "Task<Result<int,string>>" && hostMethods.at(4).at("async").get<bool>(),
+        "mixed synchronous/asynchronous host manifest differs");
+    const std::string host = "public Interface World { Result<int,string> Read(int value); } ";
+    const std::string fields = "public Class M { private World world; public M(World host) { world = host; } ";
+    for (const auto& refusal : std::vector<Case>{
+        {"host-sync-plain-return", "public Interface World { int Read(); }", "host interfaces declare synchronous Result"},
+        {"host-sync-pure-async-contract", "public Interface World { pure Task<Result<int,string>> Read(); }", "pure method requires a synchronous value return"},
+        {"host-sync-pure-call", host + fields + "public pure int Read() => world.Read(1).Value; }", "pure methods cannot call effectful host services"},
+        {"host-sync-parallel-call", host + fields + "public void Run(List<int> values) { parallel foreach (int value in values) { Result<int,string> result = world.Read(value); } } }", "parallel workers cannot access host services"},
+        {"host-sync-transitive-worker", host + fields + "private int Read(int value) => world.Read(value).Value; public void Run(List<int> values) { parallel foreach (int value in values) { int result = Read(value); } } }", "parallel helper cannot access host services"},
+        {"host-sync-await", host + fields + "public async Task<Result<int,string>> Run() { Result<int,string> result = await world.Read(1); return result; } }", "await requires"},
+        {"host-sync-shared-argument", "public Interface World { Result<int,string> Read(Atomic<int> value); }", "host interfaces cannot transport shared handles"},
+        {"host-sync-token-result", "public Interface World { Result<CancellationToken,string> Read(); }", "Result payloads must recursively contain owned values"},
+        {"host-sync-width-isolation", host + fields + "public Result<int,string> Read() => world.Read(1.0); }", "no exact matching method overload"}
+    })
+        oracle.refused(refusal);
+
     oracle.admitted("empty-model", "public Class Empty { public int count = 0; }");
     const std::string service = "public Interface Store { Task<Result<void,string>> Save(CancellationToken token); } ";
     const std::vector<Case> cases{
@@ -201,6 +227,24 @@ void fundamentals(Oracle& oracle, const fs::path& root) {
     }
     require(singleState && singleCollection && singleMethod, "binary32 public manifest differs");
     for (const auto& refusal : std::vector<Case>{
+        {"math-hypot-arity", "public Class M { public pure float Read() => float.Hypot(1.0, 2.0, 3.0, 4.0); }", "argument count mismatch"},
+        {"math-hypot3-mixed", "public Class M { public pure float32 Read() => float32.Hypot(1f, 2f, 3.0); }", "expected float32, got float"},
+        {"math-unary-arity", "public Class M { public pure float Read() => float.Sin(); }", "argument count mismatch"},
+        {"math-binary-arity", "public Class M { public pure float Read() => float.Pow(2.0); }", "argument count mismatch"},
+        {"math-mixed-width", "public Class M { public pure float Read() => float.Pow(2.0, 3f); }", "expected float, got float32"},
+        {"math-no-int-coercion", "public Class M { public pure float32 Read() => float32.Hypot(2f, 3); }", "expected float32, got int"},
+        {"math-unknown", "public Class M { public pure float Read() => float.Sine(2.0); }", "unknown float operation"},
+        {"conversion-int-source", "public Class M { public pure float Read() => float.FromInt(1.0); }", "expected int, got float"},
+        {"conversion-float-source", "public Class M { public pure int Read() => int.FromFloat(1f); }", "expected float, got float32"},
+        {"conversion-single-source", "public Class M { public pure int Read() => int.FromFloat32(1.0); }", "expected float32, got float"},
+        {"conversion-narrow-source", "public Class M { public pure float32 Read() => float32.FromFloat(1f); }", "expected float, got float32"},
+        {"conversion-widen-source", "public Class M { public pure float Read() => float.FromFloat32(1.0); }", "expected float32, got float"},
+        {"conversion-unknown-int", "public Class M { public pure int Read() => int.FromInt(1); }", "unknown int operation"},
+        {"remainder-float", "public Class M { public pure float Read(float x) => x % 2.0; }", "remainder requires int or uint32 operands"},
+        {"remainder-float32", "public Class M { public pure float32 Read(float32 x) => x % 2f; }", "remainder requires int or uint32 operands"},
+        {"remainder-bool", "public Class M { public pure bool Read(bool x) => x % true; }", "remainder requires int or uint32 operands"},
+        {"remainder-mixed-int", "public Class M { public pure int Read(int x) => x % 2.0; }", "expected int, got float"},
+        {"remainder-mixed-single", "public Class M { public pure float32 Read(float32 x) => x % 2; }", "expected float32, got int"},
         {"binary32-int", "public Class M { public float32 value = 1; }", ""},
         {"binary32-double", "public Class M { public float32 value = 1.0; }", ""},
         {"binary64-single", "public Class M { public float value = 1f; }", ""},
@@ -224,23 +268,23 @@ void fundamentals(Oracle& oracle, const fs::path& root) {
         {"finite-bool", "public Class M { public pure bool Read() => float.IsFinite(true); }", ""},
         {"finite-arity", "public Class M { public pure bool Read() => float.IsFinite(); }", ""},
         {"float-member", "public Class M { public pure float Read() => float.Unknown(1.0); }", ""},
-        {"optional-payload", "public Class M { public Optional<float> value = Optional<float>.Some(1); }", ""},
-        {"optional-type", "public Class M { public Optional<float> value = Optional<int>.None(); }", ""},
-        {"optional-void", "public Class M { public Optional<void> value; }", ""},
-        {"optional-token", "public Class M { public Optional<CancellationToken> value; }", ""},
-        {"optional-arity", "public Class M { public Optional<int,string> value; }", ""},
-        {"some-arity", "public Class M { public pure int Read() => Optional<int>.Some().Value; }", ""},
-        {"none-arity", "public Class M { public pure int Read() => Optional<int>.None(1).Value; }", ""},
+        {"optional-payload", "public Class M { public float? value = 1; }", ""},
+        {"optional-type", "public Class M { public pure float? Read(int? value) => value; }", ""},
+        {"optional-void", "public Class M { public void? value; }", ""},
+        {"optional-token", "public Class M { public CancellationToken? value; }", ""},
+        {"optional-arity", "public Class M { public int?<> value; }", ""},
+        {"some-arity", "public Class M { public pure int Read() => int?.Some().Value; }", ""},
+        {"none-arity", "public Class M { public pure int Read() => int?.None(1).Value; }", ""},
         {"block-scope", "public Class M { public pure int Read() { { int local = 1; } return local; } }", ""},
         {"local-shadow", "public Class M { public pure int Read() { int local = 1; { int local = 2; } return local; } }", ""},
         {"parameter-shadow", "public Class M { public pure int Read(int local) { { int local = 2; } return local; } }", ""},
         {"partial-return", "public Class M { public pure int Read(bool flag) { { if (flag) return 1; } } }", ""},
-        {"optional-recursion", "public Record Recursive { public Optional<Recursive> value; }", ""},
-        {"result-recursion", "public Record Recursive { public Result<Optional<Recursive>,string> value; }", ""},
-        {"optional-capability", service + "public Record R { public Optional<Store> value; }", ""},
-        {"optional-result-capability", service + "public Record R { public Optional<Result<Store,string>> value; }", ""},
-        {"result-optional-capability", service + "public Record R { public Result<Optional<Store>,string> value; }", ""},
-        {"nested-token", "public Record R { public Optional<Result<Optional<CancellationToken>,string>> value; }", ""},
+        {"optional-recursion", "public Record Recursive { public Recursive? value; }", ""},
+        {"result-recursion", "public Record Recursive { public Result<Recursive?,string> value; }", ""},
+        {"optional-capability", service + "public Record R { public Store? value; }", ""},
+        {"optional-result-capability", service + "public Record R { public Result<Store,string>? value; }", ""},
+        {"result-optional-capability", service + "public Record R { public Result<Store?,string> value; }", ""},
+        {"nested-token", "public Record R { public Result<CancellationToken?,string>? value; }", ""},
         {"decimal-overflow", "public Class M { public float value = " + std::string(400, '9') + ".0; }", ""}};
     require(cases.size() == 28, "fundamentals refusal inventory differs");
     for (const auto& item : cases)
@@ -255,6 +299,37 @@ void fundamentals(Oracle& oracle, const fs::path& root) {
         deep += "if (true) ";
     oracle.refused({"branch-depth", deep + "return; } }", ""});
     oracle.generated("Fundamentals", result);
+    const auto unsignedModel = oracle.admitted("uint32", readFile(root / "tests/native-models/UInt32.pipe", 65536), "uint32_models");
+    oracle.generated("UInt32", unsignedModel);
+    const auto integerOnly = oracle.admitted("uint32-integer-only", readFile(root / "tests/native-models/UInt32IntegerOnly.pipe", 65536), "uint32_only");
+    const auto integerHeader = integerOnly.at("header").get<std::string>();
+    require(integerHeader.find("numeric.hpp") == std::string::npos &&
+            integerHeader.find("binary32.hpp") == std::string::npos &&
+            integerHeader.find("requireBinary32Environment") == std::string::npos,
+            "integer-only uint32 model acquired a strict floating-point dependency");
+    oracle.generated("UInt32IntegerOnly", integerOnly);
+    for (const auto& refusal : std::vector<Case>{
+        {"uint32-literal-overflow", "public Class M { public uint32 value = 4294967296u; }", "uint32 literal outside range"},
+        {"uint32-hex-overflow", "public Class M { public uint32 value = 0x100000000u; }", "uint32 literal outside range"},
+        {"uint32-hex-suffix", "public Class M { public uint32 value = 0xff; }", "lowercase u suffix"},
+        {"uint32-fraction", "public Class M { public uint32 value = 1.0u; }", "cannot contain a fraction"},
+        {"uint32-negative", "public Class M { public uint32 value = -1u; }", "negation requires"},
+        {"uint32-int-assignment", "public Class M { public uint32 value = 1; }", "expected uint32, got int"},
+        {"uint32-mixed-add", "public Class M { public pure uint32 Read(uint32 x) => x + 1; }", "expected uint32, got int"},
+        {"uint32-mixed-float", "public Class M { public pure uint32 Read(uint32 x) => x + 1.0; }", "expected uint32, got float"},
+        {"uint32-mixed-single", "public Class M { public pure uint32 Read(uint32 x) => x ^ 1f; }", "expected uint32, got float32"},
+        {"uint32-signed-bitwise", "public Class M { public pure int Read(int x) => x & 1; }", "bitwise operation requires uint32"},
+        {"uint32-bool-bitwise", "public Class M { public pure bool Read(bool x) => x | true; }", "bitwise operation requires uint32"},
+        {"uint32-signed-complement", "public Class M { public pure int Read(int x) => ~x; }", "bitwise complement requires uint32"},
+        {"uint32-shift-left-type", "public Class M { public pure int Read(int x) => x << 1; }", "shift requires a uint32"},
+        {"uint32-shift-count-type", "public Class M { public pure uint32 Read(uint32 x) => x >> 1u; }", "expected int, got uint32"},
+        {"uint32-wrapping-types", "public Class M { public pure uint32 Read() => uint32.WrappingMultiply(1u, 2); }", "expected uint32, got int"},
+        {"uint32-conversion-int", "public Class M { public pure uint32 Read() => uint32.FromInt(1u); }", "expected int, got uint32"},
+        {"uint32-conversion-double", "public Class M { public pure uint32 Read() => uint32.FromFloat(1f); }", "expected float, got float32"},
+        {"uint32-conversion-float", "public Class M { public pure float32 Read() => float32.FromUInt32(1); }", "expected uint32, got int"},
+        {"uint32-atomic", "public Class M { private Atomic<uint32> value = Atomic<uint32>.Create(0u); }", "Atomic<uint32> is not supported"}})
+        oracle.refused(refusal);
+
 }
 void asyncComposition(Oracle& oracle, const fs::path& root) {
     const auto result = oracle.admitted("fixture", readFile(root / "tests/native-models/async-composition.pipe", 65536));

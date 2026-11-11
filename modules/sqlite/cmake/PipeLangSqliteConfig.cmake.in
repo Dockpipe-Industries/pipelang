@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+find_dependency(PipeLangModel 0.1.0 EXACT CONFIG)
+file(SHA256 "${PipeLangModel_MANIFEST}" pipelang_sqlite_model_hash)
+if(NOT pipelang_sqlite_model_hash STREQUAL "@PIPELANG_SQLITE_MODEL_MANIFEST_SHA256@")
+    message(FATAL_ERROR "PipeLangSqlite requires its exact qualified PipeLangModel runtime")
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/PipeLangSqliteTargets.cmake")

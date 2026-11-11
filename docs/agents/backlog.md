@@ -1,5 +1,40 @@
 # Current native repository status — 2026-10-31
 
+## Priority backlog: implement ForgePipe in PipeLang
+
+Status: required; incomplete. This takes precedence over the historical native
+migration and optional editor work recorded below.
+
+1. Inventory authored C++ responsibilities in ForgePipe and MesaMoto separately
+   from generated compiler output, third-party code and frozen reference tests.
+   Map each engine responsibility to its PipeLang owner and identify concrete
+   missing language capabilities. Do not infer blockers from implementation
+   language alone or label unimplemented support as impossible.
+2. Develop and independently qualify the missing general PipeLang capabilities,
+   including external API interoperability, data layout, resource lifetime and
+   execution capabilities where the inventory demonstrates a need. Do not use
+   engine-specific compiler opcodes, manual unrolling or C++ fallback services.
+3. Implement ForgePipe responsibilities in PipeLang in verified engine-owned
+   slices. Keep deterministic behavior, cancellation/error identity, publication
+   ownership, resource limits and existing assertions. Preserve reference code
+   until replacement behavior is qualified; avoid maintaining two production
+   implementations as the destination.
+4. Publish each qualified development SDK through the existing exact installed
+   package boundary, then adapt and qualify MesaMoto as its consumer. Preserve
+   game tuning, content and independently runnable delivery.
+5. Accept completion only with a checked authored-source inventory demonstrating
+   that engine and game implementation is PipeLang, plus language, engine,
+   installed-consumer and native interactive proof. Compiler-generated native
+   artifacts are allowed; handwritten C++ engine services hidden behind bindings
+   are not completion. Any remaining native implementation must be identified
+   honestly as unfinished migration rather than an implied exception.
+
+Retain useful behavioral fixtures and workload inputs. Reuse compiler/backend
+resource measurements only where their inputs and relevance remain valid;
+performance and sanitizer results for the mixed implementation do not qualify
+the replacement. Record measured token/time costs only when available rather
+than inventing a waste percentage.
+
 The owner retired unused Go/Python implementations and historical executable
 profiles. The default build/check/test/package path is C++ and DockPipe. Earlier
 Go reference and publication plans below are historical evidence, superseded by
@@ -54,11 +89,32 @@ Terminal root compatibility checks passed; the consumer audit is closed at the
 recorded focused Linux/headless/installed-SDK scope. This does not claim broad
 language, graphics, platform or full-suite acceptance.
 
+## Deferred: compiler-enforced real-time-safe execution
+
+The [real-time execution feature request](tasks/realtime-safe-execution.md) is
+recorded for investigation and implementation during the **NAM Tone Deck port**;
+it does not change the current engine-first priority. No real-time safety profile
+is implemented or qualified by this backlog entry.
+
+Start with a practical allocation-free audio-callback profile, then investigate
+non-blocking execution and explicit native contracts before porting and measuring
+NAM audio paths. Requirements include transitive call analysis (including indirect
+dispatch), compiler-generated allocations and runtime interactions, preallocated
+state and safe cross-thread transfer/reclamation, actionable call-chain diagnostics,
+and generated-code plus realistic audio validation. Unknown calls must not silently
+bypass restrictions; asserted native contracts remain distinct from compiler proof.
+The task preserves the full request, pre-implementation investigation, five proposed
+phases and acceptance criteria. Allocation freedom, lock freedom and measured
+callback latency do not establish hard-real-time guarantees.
+
 ## Native migration and current evidence
 
-The ecosystem direction is a gradual C++ rewrite over time across Dockpipe,
-PipeLang and the package ecosystem. This is incremental work, not a claim that
-the current Go implementation has been replaced.
+The earlier ecosystem-wide C++ rewrite direction is superseded for ForgePipe
+and MesaMoto by the PipeLang engine-first requirement above. The current C++
+compiler/runtime is bootstrap infrastructure; its implementation language does
+not authorize handwritten C++ engine or game services. Existing native compiler
+work and generated C++ remain usable while PipeLang is developed to own engine
+implementation.
 
 The intended end state is a native compiler and build path that does not require
 Go for ForgePipe application delivery. The lexer, bounded view parser and
@@ -363,3 +419,19 @@ planning does not change their qualification limits or select the next compiler
 port slice. Use installed DockPipe for development workflows; leave its repository
 alone. PipeLang/PipeView remain open source; optional adapters do not relicense
 ForgePipe, MesaMoto or inherited third-party material.
+
+## Owner-requested dependency injection module
+
+The [dependency-injection task](tasks/dependency-injection-20261108.md) records the
+requested reusable typed container/composition capability for PipeLang web and
+native applications. Source registrations, checked graphs and the initial typed
+synchronous factory/scope profile, fallible source factories, owned synchronous
+resource cleanup and scoped async methods are locally qualified, including real
+Cloud access and headless WASM consumers. General async factories/disposal and
+other native platforms remain outside this qualification. Cloud-specific containers and
+unchecked service locators do not satisfy this objective.
+
+The separately approved [read-only collector task](tasks/object-graph-gc-readonly-20261109.md)
+addresses the shared runtime allocation found by the matched DI/manual benchmark.
+Its candidate requires rebuilt source-object consumers and exact SDK qualification;
+do not infer a publication or default change from local proof.

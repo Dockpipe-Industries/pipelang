@@ -1,5 +1,32 @@
 # PipeLang
 
+## Required direction: PipeLang engine first
+
+The user reaffirmed on 2026-11-05 that ForgePipe itself must be authored in
+PipeLang, alongside the game. Engine first means developing PipeLang until it
+can implement the engine, then qualifying those engine capabilities before
+adapting MesaMoto. A C++ engine exposed through PipeLang bindings does not meet
+this requirement. Native execution and Qt independence do not establish
+PipeLang implementation.
+
+When an engine capability is missing from PipeLang, implement and qualify a
+coherent general language/compiler/runtime capability in PipeLang's repository,
+then implement the engine responsibility in PipeLang in ForgePipe. This applies
+to rendering, platform integration, input, UI, audio, physics, geometry, resource
+lifetime and scheduling. Do not declare these responsibilities permanently C++
+or assume a handwritten native adapter is necessary. External API access must
+be supported through language-owned interoperability rather than a replacement
+C++ engine implementation. Generated C++ is a compiler artifact, distinct from
+handwritten production engine code.
+
+MesaMoto is the proving-ground consumer, not the architectural lead. Preserve
+existing source, behavior witnesses, resource limits and assertions as migration
+evidence. Current mixed C++/PipeLang qualification is a baseline, not completion
+of this objective. Do not resume game feature expansion or repeated qualification
+of the mixed architecture as a substitute for language and engine migration.
+This correction records direction; it does not authorize deleting existing work,
+changing SDK pins, launching processes, committing or releasing.
+
 This repository owns the PipeLang compiler, SDKs, command line tools and language
 conformance fixtures. It imports no DockPipe implementation source. Consumers use the installed,
 versioned native compiler and SDK.

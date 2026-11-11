@@ -254,6 +254,20 @@ Task frames are destroyed before model state/services and the domain closes.
 This is bounded owner-local lifetime management, not process-wide garbage
 collection.
 
+An unchanged read-only transaction can skip a redundant trace after pending
+reachability changes have been collected. Reference release, graph publication,
+overlay replacement/discard, savepoint removal, rollback and temporary pressure
+roots conservatively schedule the next required sweep. Validation and native root
+publication still run. Explicit collection and allocation-pressure checks retain
+their tracing behavior. The first pending read can allocate collection scratch;
+warmed reads with no intervening reachability change avoid that allocation.
+Supported owner-thread reclamation boundaries are preserved; this does not add
+cross-thread reference access or destructor reentry support.
+
+This runtime change affects native ObjectDomain layout. Use one exact SDK and
+rebuild generated/source-object consumers together; unchanged generated source
+text does not make old compiled runtime bodies ABI-compatible.
+
 ## Bounds and transport
 
 The existing source/token/expression, declaration, specialization, container and

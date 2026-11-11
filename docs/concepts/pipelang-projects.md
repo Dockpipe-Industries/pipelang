@@ -7,6 +7,10 @@ a project root and entry, not a list of files, module names or exported types.
 An entry can contain only imports, selecting several independently owned models.
 No project descriptor file or package resolution language is introduced.
 
+An explicit source composition root can select constructor bindings and service
+lifetimes. See [source dependency composition](dependency-injection.md) for the
+`Startup.pipe` syntax and opt-in `COMPOSITION_FACTORY` generation contract.
+
 ```cmake
 find_package(PipeLangModel 0.1.0 EXACT CONFIG REQUIRED)
 pipelang_add_model(world
@@ -124,15 +128,15 @@ metacharacters (`[]*?`) and generator-expression openers (`$<`), alongside the
 existing list/line separator and symbolic/reparse protections. This refusal is
 project-local; legacy source transports and generic SDK path rules are unchanged.
 
-The index has distinct bounds: 4,096 source files, 16 MiB total source bytes,
-32,768 directory entries, directory depth 32, and a 4 MiB index receipt. Module
-identities retain the compiler's 192-byte bound. Each source retains its 64 KiB
-bound. Compilation still admits at most 128 distinct modules and 64 KiB aggregate source,
-including repeated module/import declarations in separate files. Project mode can
-select up to the existing 4,096 indexed source files; module grouping does not
-introduce a smaller physical-file bound. Legacy closed-module transports retain
-their 128-entry bound. All existing token, declaration, expression, specialization
-and execution limits remain unchanged. A larger project therefore does not become a single giant header.
+An explicit [resource profile](compiler-resource-budgets.md) owns indexed storage,
+discovery, transport, module/declaration counts, tokens, expressions and generated
+units. It replaces the independent 64 KiB source-file/closure ceiling without
+concatenating files. Default structural budgets remain checked and can be selected
+deliberately for a larger application. Repeated module/import declarations in
+separate physical files count toward those budgets. Source-path identity and
+module-name admission retain separate bounds; execution limits are unchanged.
+Compiled mode keeps complete definitions in separate implementation units rather
+than requiring a larger application to become one giant header.
 
 CMake watches directory membership with `CONFIGURE_DEPENDS` and consumes the
 SDK-generated dependency inventory. Any indexed source edit, addition, removal,

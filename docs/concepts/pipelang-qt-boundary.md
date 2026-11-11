@@ -1,5 +1,10 @@
 # PipeLang Qt integration boundary
 
+Historical reference: this September scalar/resolver pilot predates the current
+checked ordinary-model Qt generator. Use [Checked Qt model bindings](pipelang-qt-model-bindings.md)
+for the active optional SDK/QObject and project-model profile. The historical
+contract and evidence below remain intact; they are not current frontend acceptance.
+
 Status: approved bounded integration continuation, 2026-09-13. The
 [C++/Qt pilot](../research/pipelang-cpp-qt-pilot.md) remains completed experimental
 proof. This contract applies its findings to a resolver-side reference adapter;

@@ -1,12 +1,12 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "containment.hpp"
+#include "estate.hpp"
 #include <algorithm>
 #include <array>
 #include <csignal>
 #include <libproc.h>
 #include <sys/proc_info.h>
 #include <sys/proc.h>
-#include <sys/stat.h>
 #include <unistd.h>
 #include <thread>
 #include <iostream>
@@ -103,22 +103,7 @@ private:
     std::uint64_t threads_ = 0;
     std::uint64_t peak_ = 0;
 };
-std::uint64_t allocated(const fs::path& estate, std::uint64_t limit) {
-    std::uint64_t total = 0;
-    std::size_t entries = 0;
-    for (const auto& entry : fs::recursive_directory_iterator(estate)) {
-        require(++entries <= 1000000, "proof estate entry limit exceeded");
-        struct stat value{};
-        if (::lstat(entry.path().c_str(), &value) != 0) {
-            require(errno == ENOENT, "cannot inspect proof estate");
-            continue;
-        }
-        if (S_ISREG(value.st_mode))
-            total += static_cast<std::uint64_t>(value.st_blocks) * 512;
-        require(total < limit, "proof estate reached its byte limit");
-    }
-    return total;
-}
+
 }
 fs::path currentGroup() {
     throw std::runtime_error("macOS sampled policy does not provide a kernel process group receipt");
@@ -190,7 +175,7 @@ int execute(const Request& request, const fs::path& executable) {
     const auto oldTerminate = std::signal(SIGTERM, interrupt);
     interrupted = 0;
     try {
-        bytes = allocated(request.estate, request.estateLimit);
+        bytes = allocatedEstate(request.estate, request.estateLimit);
         const auto monitor = [&] {
             require(!interrupted, "native workload cancelled");
             tree.sample();
@@ -198,7 +183,7 @@ int execute(const Request& request, const fs::path& executable) {
             require(tree.threads() <= (request.job ? 384ULL : 128ULL), "native thread stop");
             const auto now = std::chrono::steady_clock::now();
             if (now - lastEstate >= std::chrono::milliseconds(200)) {
-                bytes = allocated(request.estate, request.estateLimit);
+                bytes = allocatedEstate(request.estate, request.estateLimit);
                 lastEstate = now;
             }
         };
@@ -216,7 +201,7 @@ int execute(const Request& request, const fs::path& executable) {
     }
     try {
         report["sampled_descendants_removed"] = tree.cleanup();
-        bytes = allocated(request.estate, request.estateLimit);
+        bytes = allocatedEstate(request.estate, request.estateLimit);
     } catch (const std::exception& error) {
         report["outcome"] = "failed";
         report["cleanup_error"] = error.what();

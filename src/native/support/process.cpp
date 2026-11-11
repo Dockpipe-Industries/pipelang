@@ -10,11 +10,77 @@
 #include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <crt_externs.h>
+#include <spawn.h>
+#endif
 #endif
 
 namespace pipelang::tools {
 #ifndef _WIN32
 namespace {
+#ifdef __APPLE__
+class SpawnConfiguration {
+public:
+    ~SpawnConfiguration() {
+        if (actionsInitialized_)
+            ::posix_spawn_file_actions_destroy(&actions);
+        if (attributesInitialized_)
+            ::posix_spawnattr_destroy(&attributes);
+    }
+    int configure(int input, int output, int diagnostic, const char*& stage) {
+        stage = "spawn attributes init";
+        int failure = ::posix_spawnattr_init(&attributes);
+        if (failure != 0)
+            return failure;
+        attributesInitialized_ = true;
+        stage = "spawn file actions init";
+        failure = ::posix_spawn_file_actions_init(&actions);
+        if (failure != 0)
+            return failure;
+        actionsInitialized_ = true;
+        stage = "spawn private group";
+        failure = ::posix_spawnattr_setpgroup(&attributes, 0);
+        if (failure != 0)
+            return failure;
+        failure = ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+        if (failure != 0)
+            return failure;
+        stage = "spawn dup2 stdin";
+        failure = ::posix_spawn_file_actions_adddup2(&actions, input, STDIN_FILENO);
+        if (failure != 0)
+            return failure;
+        stage = "spawn dup2 stdout";
+        failure = ::posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO);
+        if (failure != 0)
+            return failure;
+        stage = "spawn dup2 stderr";
+        return ::posix_spawn_file_actions_adddup2(&actions, diagnostic, STDERR_FILENO);
+    }
+    posix_spawnattr_t attributes{};
+    posix_spawn_file_actions_t actions{};
+private:
+    bool attributesInitialized_ = false;
+    bool actionsInitialized_ = false;
+};
+
+bool executableSpawnFailure(int failure) {
+    switch (failure) {
+    case ENOENT:
+    case ENOTDIR:
+    case EACCES:
+    case ENOEXEC:
+    case ELOOP:
+    case ENAMETOOLONG:
+    case ETXTBSY:
+    case E2BIG:
+        return true;
+    default:
+        return false;
+    }
+}
+#endif
+
 class Pipe {
 public:
     Pipe() {
@@ -51,17 +117,49 @@ ProcessResult process(const std::vector<std::string>& arguments, std::string_vie
     for (const auto& argument : arguments)
         argv.push_back(const_cast<char*>(argument.c_str()));
     argv.push_back(nullptr);
+#ifdef __APPLE__
+    const auto failedSpawn = [&](const char* stage, int failure, int exit) {
+        ProcessResult result;
+        result.exit = exit;
+        result.diagnostic = "native process " + std::string(stage) + " failed (errno " + std::to_string(failure) + ")\n";
+        require(result.diagnostic.size() <= maximumDiagnostic, "native process output exceeds its capacity");
+        if (!log.empty()) {
+            std::ofstream stream(log, std::ios::binary | std::ios::trunc);
+            require(stream.good(), "cannot open native process log");
+            stream << result.diagnostic;
+            stream.flush();
+            require(stream.good(), "cannot write native process log");
+        }
+        return result;
+    };
+    pid_t child = -1;
+    {
+        SpawnConfiguration configuration;
+        const char* stage = nullptr;
+        const int setupFailure = configuration.configure(source.descriptors[0], output.descriptors[1],
+                                                          diagnostic.descriptors[1], stage);
+        if (setupFailure != 0)
+            return failedSpawn(stage, setupFailure, 126);
+        // Apple applies the private-group attribute and pipe actions before the
+        // new image executes. Group zero means PGID == the new child's PID.
+        // No child PID is valid on failure; never poll, signal or wait for it.
+        const int failure = ::posix_spawn(&child, argv[0], &configuration.actions,
+                                          &configuration.attributes, argv.data(), *_NSGetEnviron());
+        if (failure != 0) {
+            if (executableSpawnFailure(failure))
+                return failedSpawn("exec", failure, 127);
+            return failedSpawn("spawn", failure, 126);
+        }
+    }
+#else
     const auto child = ::fork();
     require(child >= 0, "cannot create native process");
     if (child == 0) {
-        if (::setpgid(0, 0) != 0 || ::dup2(source.descriptors[0], STDIN_FILENO) < 0 ||
-            ::dup2(output.descriptors[1], STDOUT_FILENO) < 0 || ::dup2(diagnostic.descriptors[1], STDERR_FILENO) < 0)
-            ::_exit(126);
-        ::execv(argv[0], argv.data());
-        const int failure = errno;
-        const auto emit = [](const char* bytes, std::size_t remaining) {
+        // After fork, report failures using only stack storage and write. Setup
+        // failures use the pipe directly because stderr may not be connected yet.
+        const auto emit = [](int descriptor, const char* bytes, std::size_t remaining) {
             while (remaining > 0) {
-                const auto written = ::write(STDERR_FILENO, bytes, remaining);
+                const auto written = ::write(descriptor, bytes, remaining);
                 if (written < 0 && errno == EINTR)
                     continue;
                 if (written <= 0)
@@ -70,24 +168,56 @@ ProcessResult process(const std::vector<std::string>& arguments, std::string_vie
                 remaining -= static_cast<std::size_t>(written);
             }
         };
-        constexpr char prefix[] = "native process exec failed (errno ";
-        emit(prefix, sizeof(prefix) - 1);
-        std::array<char, 16> digits{};
-        std::size_t count = 0;
-        unsigned number = static_cast<unsigned>(failure);
-        do {
-            digits[count++] = static_cast<char>('0' + number % 10);
-            number /= 10;
-        } while (number != 0 && count < digits.size());
-        while (count > 0) {
-            --count;
-            emit(&digits[count], 1);
+        const auto reportFailure = [&](int descriptor, const char* stage, std::size_t stageLength, int failure) {
+            constexpr char prefix[] = "native process ";
+            emit(descriptor, prefix, sizeof(prefix) - 1);
+            emit(descriptor, stage, stageLength);
+            constexpr char reason[] = " failed (errno ";
+            emit(descriptor, reason, sizeof(reason) - 1);
+            std::array<char, 16> digits{};
+            std::size_t count = 0;
+            unsigned number = static_cast<unsigned>(failure);
+            do {
+                digits[count++] = static_cast<char>('0' + number % 10);
+                number /= 10;
+            } while (number != 0 && count < digits.size());
+            while (count > 0) {
+                --count;
+                emit(descriptor, &digits[count], 1);
+            }
+            constexpr char suffix[] = ")\n";
+            emit(descriptor, suffix, sizeof(suffix) - 1);
+        };
+        const auto failSetup = [&](const auto& stage) {
+            const int failure = errno;
+            reportFailure(diagnostic.descriptors[1], stage, sizeof(stage) - 1, failure);
+            ::_exit(126);
+        };
+        // Parent and child both establish this group to cover either fork
+        // scheduling order. An already established child-led group satisfies
+        // ownership; a failed syscall alone never permits execution to proceed.
+        const pid_t privateGroup = ::getpid();
+        if (::getpgrp() != privateGroup && ::setpgid(0, 0) != 0) {
+            const int failure = errno;
+            if (::getpgrp() != privateGroup) {
+                errno = failure;
+                failSetup("setpgid");
+            }
         }
-        constexpr char suffix[] = ")\n";
-        emit(suffix, sizeof(suffix) - 1);
+        if (::dup2(source.descriptors[0], STDIN_FILENO) < 0)
+            failSetup("dup2 stdin");
+        if (::dup2(output.descriptors[1], STDOUT_FILENO) < 0)
+            failSetup("dup2 stdout");
+        if (::dup2(diagnostic.descriptors[1], STDERR_FILENO) < 0)
+            failSetup("dup2 stderr");
+        ::execv(argv[0], argv.data());
+        const int failure = errno;
+        constexpr char stage[] = "exec";
+        reportFailure(STDERR_FILENO, stage, sizeof(stage) - 1, failure);
         ::_exit(127);
     }
     ::setpgid(child, child);
+#endif
     source.close(0);
     output.close(1);
     diagnostic.close(1);

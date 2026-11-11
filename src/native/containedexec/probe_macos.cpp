@@ -6,13 +6,26 @@
 #include <unistd.h>
 #include <libproc.h>
 
+namespace pipelang::contained {
+void probeEstate(const std::filesystem::path& output);
+void churnEstate(const std::filesystem::path& root);
+}
+
 namespace {
 using namespace pipelang::tools;
+Json expectedCases() {
+    return Json::array({"estate-scanner", "normal", "estate-churn", "nonzero", "timeout",
+        "memory", "threads", "logs", "descendant", "cancellation", "immutable-receipt", "estate-preflight"});
+}
 void workload(const std::string& mode, const fs::path& marker) {
     require(std::getenv("PIPELANG_MACOS_COORDINATOR"), "probe has no native coordinator");
     atomicWrite(marker, "started\n");
     if (mode == "normal")
         return;
+    if (mode == "estate-churn") {
+        pipelang::contained::churnEstate(marker.parent_path() / "publisher-churn");
+        return;
+    }
     if (mode == "nonzero")
         std::exit(17);
     if (mode == "memory") {
@@ -59,7 +72,13 @@ void workload(const std::string& mode, const fs::path& marker) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
 }
 void inside(const fs::path& runner, const fs::path& self, const fs::path& output) {
-    Json cases = Json::array();
+    const auto scanner = parseJson(readFile(output / "estate-scanner-tests/acceptance.json", 65536));
+    require(scanner.at("status") == "passed" && scanner.at("complete_churn_samples").get<std::size_t>() > 0 &&
+        scanner.at("missing_root_retry_exhaustion") == true && scanner.at("permission_errors_refused") == true &&
+        scanner.at("symlink_targets_not_followed") == true && scanner.at("redirected_root_refused") == true &&
+        scanner.at("byte_limit_preserved") == true,
+        "native estate scanner qualification is incomplete");
+    Json cases = Json::array({"estate-scanner"});
     const auto unit = [&](const std::string& mode, bool success, int timeout = 10) {
         const auto prefix = output / mode;
         const auto marker = output / (mode + ".marker");
@@ -83,6 +102,7 @@ void inside(const fs::path& runner, const fs::path& self, const fs::path& output
         cases.push_back(mode);
     };
     unit("normal", true);
+    unit("estate-churn", true);
     unit("nonzero", false);
     unit("timeout", false, 1);
     unit("memory", false, 30);
@@ -100,6 +120,7 @@ void inside(const fs::path& runner, const fs::path& self, const fs::path& output
         "--estate-limit-mib", "1", "--", self.string(), "--workload", "normal", (output / "estate.marker").string()});
     require(storage.exit != 0 && !fs::exists(output / "estate.marker"), "native estate preflight launched a workload");
     cases.push_back("estate-preflight");
+    require(cases == expectedCases(), "native policy probe cases are incomplete");
     atomicWrite(output / "acceptance.json", canonical({{"status", "passed"}, {"policy", "macos.sampled-tree.v1"},
         {"runner_sha256", fileHash(runner)}, {"cases", cases}, {"scope", "sampled native policy; no kernel hard memory, zero-swap or escape-prevention claim"}}));
 }
@@ -121,7 +142,8 @@ int main(int argc, char** argv) {
             require(fileHash(argv[3]) == argv[4], "native policy receipt hash differs");
             const auto receipt = parseJson(readFile(argv[3], 65536));
             require(receipt.at("status") == "passed" && receipt.at("policy") == "macos.sampled-tree.v1" &&
-                receipt.at("runner_sha256") == fileHash(argv[2]) && receipt.at("cases").size() == 10, "native policy receipt is incomplete");
+                receipt.at("runner_sha256") == fileHash(argv[2]) && receipt.at("cases").size() == 12 &&
+                receipt.at("cases") == expectedCases(), "native policy receipt is incomplete");
             return 0;
         }
         require(mode == "--suite" && argc == 4, "usage: native probe --suite RUNNER OUTPUT");
@@ -129,13 +151,17 @@ int main(int argc, char** argv) {
         const fs::path output = argv[3];
         require(output.is_absolute() && !fs::exists(output), "native probe output must be fresh and absolute");
         fs::create_directories(output);
+        // The bounded scanner fixture deliberately makes a directory unreadable.
+        // Complete it before starting any coordinator which scans this estate;
+        // permission failures remain fatal in every live guard sample.
+        pipelang::contained::probeEstate(output / "estate-scanner-tests");
         const auto refusal = process({runner.string(), "unit", "--output", (output / "uncontained").string(),
             "--estate", output.string(), "--", executablePath().string(), "--workload", "normal", (output / "uncontained.marker").string()});
         require(refusal.exit != 0 && !fs::exists(output / "uncontained.marker"), "native runner admitted an uncontained unit");
         const auto result = process({runner.string(), "job", "--output", (output / "job").string(), "--estate", output.string(),
             "--timeout", "120", "--", executablePath().string(), "--inside", runner.string(), output.string()}, {}, std::chrono::seconds(140), 1U << 20);
         require(result.exit == 0 && fs::exists(output / "acceptance.json"), "native policy probes failed: " + result.output + result.diagnostic);
-        std::cout << "macOS native policy: ten workload probes and uncontained-entry refusal passed\n";
+        std::cout << "macOS native policy: twelve probes including estate scanner/churn and uncontained-entry refusal passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "macOS native policy probe: " << error.what() << '\n';

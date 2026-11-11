@@ -2,7 +2,9 @@
 #pragma once
 
 #include "result.hpp"
+#include "floating_exponent.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <climits>
 #include <cmath>
@@ -22,6 +24,16 @@ static_assert(std::numeric_limits<double>::is_iec559 && std::numeric_limits<doub
 
 namespace pipelang::model {
 
+// Validate before std::clamp: reversed bounds violate its native precondition.
+// Returning by value prevents a reference to an argument escaping this call.
+template<class Float>
+Float clampFinite(Float value, Float minimum, Float maximum) {
+    static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
+    if (!std::isfinite(value) || !std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum)
+        throw ExecutionFailure("floating clamp requires finite values and ordered bounds");
+    return std::clamp(value, minimum, maximum);
+}
+
 template<class Float>
 std::int64_t truncateToInt(Float value) {
     static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
@@ -31,6 +43,17 @@ std::int64_t truncateToInt(Float value) {
     if (!std::isfinite(value) || value < -0x1p63 || value >= 0x1p63)
         throw ExecutionFailure("floating-to-int conversion requires a finite value in signed64 range");
     return static_cast<std::int64_t>(value);
+}
+
+// Halfway values round away from zero, independently of the rounding mode.
+// The endpoint check precedes llround; no invalid native conversion is executed.
+template<class Float>
+std::int64_t roundToInt(Float value) {
+    static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
+    static_assert(std::numeric_limits<long long>::digits >= 63);
+    if (!std::isfinite(value) || value < -0x1p63 || value >= 0x1p63)
+        throw ExecutionFailure("floating-to-int rounding requires a finite value in signed64 range");
+    return static_cast<std::int64_t>(std::llround(value));
 }
 
 template<class Float>

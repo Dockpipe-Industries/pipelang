@@ -49,7 +49,7 @@ void compiledImplementationUnitContracts() {
             "byte grouping split, changed or combined an oversized complete definition");
 
     CompiledImplementationUnits bounded("split_fixture");
-    for (std::size_t index = 0; index < CompiledImplementationUnits::maximumUnits; ++index)
+    for (std::size_t index = 0; index < pipelang::models::resourceBudget().implementationUnits; ++index)
         bounded.addOwner("Owner" + std::to_string(index));
     bounded.append("Owner0", exact);
     const auto before = bounded.files();

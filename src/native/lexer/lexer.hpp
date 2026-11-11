@@ -30,5 +30,6 @@ enum class NumericSyntax { Legacy, Binary64 };
 
 LexResult lex(const std::string& source);
 LexResult lex(const std::string& source, NumericSyntax numericSyntax);
+LexResult lex(const std::string& source, NumericSyntax numericSyntax, std::size_t maximumTokens);
 
 }

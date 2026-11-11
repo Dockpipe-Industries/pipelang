@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <pipelang/model/collection.hpp>
+#include <pipelang/model/floating_environment.hpp>
 
 namespace pipelang::models {
 namespace {
@@ -18,6 +20,7 @@ const Type unsignedType{"uint32", {}};
 const Type floatType{"float", {}};
 const Type float32Type{"float32", {}};
 const Type stringType{"string", {}};
+const Type byteBufferType{"ByteBuffer", {}};
 const Type voidType{"void", {}};
 const Type errorType{"Error", {}};
 const Type cancellationType{"CancellationToken", {}};
@@ -31,6 +34,7 @@ public:
             if (types_.contains(declaration.name) || primitive(declaration.name) ||
                 declaration.name == "Result" || declaration.name == "Task" ||
                 declaration.name == "Optional" || declaration.name == "List" || declaration.name == "CancellationToken" ||
+                declaration.name == "FixedArray" ||
                 declaration.name == "Atomic" || extended(declaration.name) || isConcurrentCollection(declaration.name) ||
                 isSynchronizationHandle(declaration.name))
                 fail("duplicate or reserved type '" + declaration.name + "'", declaration.offset);
@@ -153,6 +157,14 @@ public:
                 checkWorkerCalls(declaration);
                 checkSynchronizationCalls(declaration);
             }
+            for (auto& declaration : program_.declarations) {
+                for (auto& method : declaration.methods) {
+                    method.dispatchTargets.clear();
+                    const auto found = dispatch_.find(method.identity);
+                    if (found != dispatch_.end())
+                        method.dispatchTargets = found->second;
+                }
+            }
         }
     }
 private:
@@ -179,7 +191,7 @@ private:
         throw diagnostic;
     }
     static bool extended(const std::string& name) {
-        return name == "Array" || name == "Dictionary" || name == "HashSet" ||
+        return name == "Array" || name == "FixedArray" || name == "Dictionary" || name == "HashSet" ||
             name == "Queue" || name == "Stack" || name == "KeyValuePair";
     }
     bool keyType(const Type& value) const {
@@ -265,7 +277,7 @@ private:
             fail("pure methods cannot observe concurrent collection state", offset);
         if (sequence.name == "Dictionary" || sequence.name == "ConcurrentDictionary")
             return {"KeyValuePair", sequence.arguments};
-        if (sequence.name == "List" || sequence.name == "Array" || sequence.name == "HashSet" ||
+        if (sequence.name == "List" || sequence.name == "Array" || sequence.name == "FixedArray" || sequence.name == "HashSet" ||
             sequence.name == "Queue" || sequence.name == "Stack" ||
             sequence.name == "ConcurrentQueue" || sequence.name == "ConcurrentStack")
             return sequence.arguments.at(0);
@@ -283,13 +295,15 @@ private:
         return result;
     }
     static bool primitive(const std::string& name) {
-        return name == "void" || name == "bool" || name == "int" || name == "uint32" || name == "float" || name == "float32" || name == "string" || name == "Error";
+        return name == "void" || name == "bool" || name == "int" || name == "uint32" || name == "float" || name == "float32" || name == "string" || name == "ByteBuffer" || name == "Error";
     }
     Declaration* declaration(const std::string& name) const {
         auto found = types_.find(name);
         return found == types_.end() ? nullptr : found->second;
     }
     void type(const Type& value, std::size_t offset, bool allowVoid = false, bool allowTask = false) {
+        if (value.fixedExtent && value.name != "FixedArray")
+            fail("only FixedArray accepts a literal extent", offset);
         if (value.name == "void") {
             if (!allowVoid || !value.arguments.empty())
                 fail("void is not a value type", offset);
@@ -320,6 +334,16 @@ private:
             if (value.arguments.size() != 1 ||
                 (value.arguments[0] != integerType && value.arguments[0] != booleanType && value.arguments[0] != floatType && value.arguments[0] != float32Type))
                 fail("Atomic requires int, bool, float or float32", offset);
+            return;
+        }
+        if (value.name == "FixedArray") {
+            if (value.arguments.size() != 1 || !value.fixedExtent ||
+                *value.fixedExtent > pipelang::model::maximumListElements)
+                fail("FixedArray requires an owned value type and a literal extent between 0 and 4096", offset);
+            type(value.arguments.front(), offset);
+            if (!plainValue(value.arguments.front()))
+                fail("FixedArray requires deeply owned value elements", offset);
+            checkFixedArrayFootprint(value, offset);
             return;
         }
         if (extended(value.name)) {
@@ -358,14 +382,19 @@ private:
             type(value.arguments[1], offset);
             if (value.arguments[0].name != "void" && !sourceValue(value.arguments[0]))
                 fail("Result payloads must recursively contain owned values", offset);
-            if (value.arguments[1] != stringType)
-                fail("this native capability requires string Result errors", offset);
+            const auto* error = declaration(value.arguments[1].name);
+            const bool declaredErrorValue = value.arguments[1].arguments.empty() && error &&
+                (error->kind == "Enum" || error->kind == "Record") && sourceValue(value.arguments[1]);
+            if (value.arguments[1] != stringType && !declaredErrorValue)
+                fail("Result errors require string, a declared enum or an owned record", offset);
             return;
         }
         if (value.name == "Task") {
             if (!allowTask || value.arguments.size() != 1 || value.arguments[0].name != "Result")
                 fail("Task is supported only as Task<Result<T,string>> method return", offset);
             type(value.arguments[0], offset);
+            if (value.arguments[0].arguments[1] != stringType)
+                fail("Task requires string Result errors", offset);
             return;
         }
         if (!value.arguments.empty())
@@ -376,6 +405,63 @@ private:
         if (!found || (found->kind == "Class" && !objectClass(*found)) ||
             (found->sourceInterface && !program_.objectEnabled))
             fail("unknown value or service type '" + value.displayText() + "'", offset);
+    }
+    void checkFixedArrayFootprint(const Type& value, std::size_t offset) {
+        constexpr auto maximum = pipelang::model::maximumListElements;
+        struct Footprint {
+            std::size_t storage = 1;
+            std::size_t elements = 0;
+        };
+        std::size_t remaining = pipelang::model::defaultEvaluationSteps;
+        std::set<std::string> activeRecords;
+        const auto add = [](std::size_t total, std::size_t added) {
+            return total > maximum || added > maximum - total ? maximum + 1 : total + added;
+        };
+        std::function<Footprint(const Type&)> visit;
+        visit = [&](const Type& current) -> Footprint {
+            if (remaining == 0)
+                fail("fixed value layout evaluation limit exceeded", offset);
+            --remaining;
+            if (current.name == "FixedArray") {
+                if (current.arguments.size() != 1 || !current.fixedExtent || *current.fixedExtent > maximum)
+                    fail("invalid FixedArray shape", offset);
+                // Visit the element even for an empty array: zero storage does
+                // not make recursive or otherwise invalid element types sound.
+                const auto child = visit(current.arguments.front());
+                const auto extent = *current.fixedExtent;
+                if (extent == 0)
+                    return Footprint{};
+                const auto perElement = add(1, child.elements);
+                if (child.storage > maximum / extent || perElement > maximum / extent)
+                    fail("aggregate fixed value layout limit exceeded", offset);
+                return {extent * child.storage, extent * perElement};
+            }
+            const auto* record = declaration(current.name);
+            if (record && record->kind == "Record") {
+                if (!activeRecords.insert(record->name).second)
+                    fail("recursive record value graph is not supported", offset);
+                std::size_t total = 0;
+                std::size_t elements = 0;
+                for (const auto& field : record->fields) {
+                    const auto child = visit(field.type);
+                    total = add(total, child.storage);
+                    elements = add(elements, child.elements);
+                }
+                activeRecords.erase(record->name);
+                return {std::max(std::size_t{1}, total), elements};
+            }
+            std::size_t total = 1;
+            std::size_t elements = 0;
+            for (const auto& argument : current.arguments) {
+                if (argument.name != "void") {
+                    const auto child = visit(argument);
+                    total = add(total, child.storage);
+                    elements = add(elements, child.elements);
+                }
+            }
+            return {total, elements};
+        };
+        (void)visit(value);
     }
     bool service(const Type& value) const {
         const auto* found = declaration(value.name);
@@ -580,6 +666,9 @@ private:
                     fail("async method requires Task<Result<T,string>>", method.offset);
                 if (method.pure && (method.asynchronous || method.result == voidType))
                     fail("pure method requires a synchronous value return", method.offset);
+                if (method.result.name == "Result" && method.result.arguments[1] != stringType &&
+                    ((!method.pure && !objectClass(owner)) || (owner.kind == "Interface" && !owner.sourceInterface)))
+                    fail("model actions and host methods require string Result errors", method.offset);
                 if (isConcurrentCollection(method.result.name))
                     fail("methods cannot return concurrent collection handles", method.offset);
                 if (isSynchronizationHandle(method.result.name))
@@ -850,12 +939,16 @@ private:
     }
     Type objectCall(const Expr& node, const Type& receiverType, bool allowServiceCall,
                     const Method* preselected = nullptr) {
-        if (parallelDepth_ != 0)
+        if (parallelDepth_ != 0 && !node->implicitObjectCall)
             fail("owner-confined object calls cannot enter parallel workers", node->offset);
         auto* receiver = declaration(receiverType.name);
         const auto& target = node->children[0];
         const auto* selected = preselected ? preselected : overload(*receiver, target->text, node);
         const auto& declaring = declaringMethod(*selected);
+        if (parallelDepth_ != 0) {
+            checkStatelessWorkerSelection(*selected, node->offset);
+            node->statelessWorkerCall = true;
+        }
         if (selected->constructor || !accessible(selected->visible, selected->protectedMember, declaring))
             fail("unknown or private object method", target->offset);
         if (method_->pure && !selected->pure)
@@ -1057,6 +1150,15 @@ private:
                 fail("conditional arms must have the same owned value type", node->offset);
         } else if (node->kind == "member") {
             const auto& receiver = node->children[0];
+            if (receiver->kind == "type" && receiver->type == cancellationType) {
+                if (node->text != "None")
+                    fail("unknown CancellationToken constant", node->offset);
+                node->resolution = "cancellation_none";
+                node->type = cancellationType;
+                return cancellationType;
+            }
+            if (floatingEnvironmentReceiver(receiver))
+                return floatingEnvironmentConstant(node);
             if (receiver->kind == "type" && (receiver->type == floatType || receiver->type == float32Type)) {
                 if (node->text != "PositiveInfinity" && node->text != "NegativeInfinity" && node->text != "NaN")
                     fail("unknown typed IEEE constant", node->offset);
@@ -1112,13 +1214,19 @@ private:
                         : receiverType.arguments[node->text == "Keys" ? 0 : 1]}};
                     node->resolution = node->text == "Keys" ? "dictionary_keys" :
                         (node->text == "Values" ? "dictionary_values" : "dictionary_entries");
+                } else if (receiverType == byteBufferType) {
+                    if (node->text != "Length")
+                        fail("unknown ByteBuffer property", node->offset);
+                    result = integerType;
+                    node->resolution = "bytebuffer_length";
                 } else if (receiverType == errorType) {
                     if (node->text != "Message")
                         fail("unknown Error property", node->offset);
                     result = stringType;
                     node->resolution = "error";
                 } else if (receiverType.name == "List" || extended(receiverType.name) || isConcurrentCollection(receiverType.name)) {
-                    if (node->text != "Count" && !(receiverType.name == "Array" && node->text == "Length"))
+                    if (node->text != "Count" &&
+                        !((receiverType.name == "Array" || receiverType.name == "FixedArray") && node->text == "Length"))
                         fail("unknown List property", node->offset);
                     result = integerType;
                     node->resolution = "list";
@@ -1209,6 +1317,43 @@ private:
         for (std::size_t index = 0; index < parameters.size(); ++index)
             sameExpression(node->children[index + 1], parameters[index].type);
     }
+    bool floatingEnvironmentReceiver(const Expr& receiver) {
+        return receiver->kind == "name" && receiver->text == "FloatingEnvironment" &&
+            !locals_.contains(receiver->text) && !field(*owner_, receiver->text) && !declaration(receiver->text);
+    }
+
+    Type floatingEnvironmentConstant(const Expr& node) {
+        namespace facts = pipelang::model::floating_environment;
+        static const std::map<std::string, std::uint32_t> constants{
+            {"PortableRoundingKnown", facts::portableRoundingKnown},
+            {"PortableNearest", facts::portableNearest},
+            {"PortableDown", facts::portableDown},
+            {"PortableUp", facts::portableUp},
+            {"PortableTowardZero", facts::portableTowardZero},
+            {"Binary32RoundingKnown", facts::binary32RoundingKnown},
+            {"Binary32Nearest", facts::binary32Nearest},
+            {"Binary32Down", facts::binary32Down},
+            {"Binary32Up", facts::binary32Up},
+            {"Binary32TowardZero", facts::binary32TowardZero},
+            {"Binary32InputsKnown", facts::binary32InputsKnown},
+            {"Binary32GradualInputs", facts::binary32GradualInputs},
+            {"Binary32ResultsKnown", facts::binary32ResultsKnown},
+            {"Binary32GradualResults", facts::binary32GradualResults}
+        };
+        const auto found = constants.find(node->text);
+        if (found == constants.end())
+            fail("unknown FloatingEnvironment fact", node->offset);
+        auto value = std::make_shared<Expression>();
+        value->kind = "uint32";
+        value->type = unsignedType;
+        value->resolution = std::to_string(found->second);
+        value->text = value->resolution + "u";
+        node->resolution = "constant";
+        node->constantValue = std::move(value);
+        node->type = unsignedType;
+        return unsignedType;
+    }
+
     Type call(const Expr& node, bool allowServiceCall) {
         const auto& target = node->children[0];
         if (target->kind == "name") {
@@ -1233,6 +1378,7 @@ private:
             if (method_->pure && !found->pure)
                 fail("pure methods cannot call mutating helpers", target->offset);
             if (objectClass(*owner_)) {
+                node->implicitObjectCall = true;
                 if (++objectNodes_ > 65536)
                     fail("object receiver normalization node limit exceeded", target->offset);
                 auto member = std::make_shared<Expression>();
@@ -1253,6 +1399,48 @@ private:
         if (target->kind != "member")
             fail("unsupported call target", node->offset);
         const auto& receiver = target->children[0];
+        if (floatingEnvironmentReceiver(receiver)) {
+            if (!program_.projectEnabled || !program_.objectEnabled)
+                fail("FloatingEnvironment observation requires the project capability", node->offset);
+            if (target->text != "Observe")
+                fail("unknown FloatingEnvironment observation", target->offset);
+            if (method_->pure || method_->asynchronous || parallelDepth_ != 0)
+                fail("FloatingEnvironment.Observe requires a synchronous nonparallel effect", node->offset);
+            arguments(node, {});
+            node->resolution = "floating_environment_observe";
+            return unsignedType;
+        }
+        auto* qualifiedOwner = receiver->kind == "name" &&
+            !locals_.contains(receiver->text) && !field(*owner_, receiver->text)
+            ? declaration(receiver->text) : nullptr;
+        if (qualifiedOwner && qualifiedOwner->kind == "Class") {
+            if (parallelDepth_ != 0)
+                fail("qualified pure calls are not admitted in parallel workers", node->offset);
+            // A fieldless exported model has a receiver-free pure facet. This
+            // does not construct an actor or skip authored initialization policy.
+            if (!program_.projectEnabled || !program_.objectEnabled ||
+                !qualifiedOwner->modelExported || qualifiedOwner->generatedObjectFacet ||
+                !qualifiedOwner->fields.empty() || !qualifiedOwner->baseClass.empty() ||
+                !qualifiedOwner->interfaces.empty() || !qualifiedOwner->typeParameters.empty() ||
+                !qualifiedOwner->genericSourceName.empty())
+                fail("qualified pure calls require a fieldless nongeneric exported model", node->offset);
+            for (const auto& candidate : qualifiedOwner->methods) {
+                if (candidate.constructor && (!candidate.body.empty() || !candidate.parameters.empty() ||
+                    candidate.baseConstructor || !candidate.fieldInitializers.empty()))
+                    fail("qualified pure calls cannot bypass authored constructor policy", node->offset);
+            }
+            const auto* selected = overload(*qualifiedOwner, target->text, node);
+            if (!selected || !selected->visible || !selected->pure || selected->asynchronous ||
+                selected->constructor || selected->virtualMethod || selected->overrideMethod ||
+                !selected->typeParameters.empty() || selected->sourceName.find('<') != std::string::npos)
+                fail("qualified calls require a public synchronous nongeneric pure method", node->offset);
+            node->resolution = "qualified_pure";
+            node->owner = qualifiedOwner->name;
+            node->callable = selected->identity;
+            singleTarget(node, selected->identity);
+            trackCalls(node->targets);
+            return selected->result;
+        }
         if (receiver->kind == "type" && isSynchronizationHandle(receiver->type.name)) {
             type(receiver->type, receiver->offset);
             if (method_->pure)
@@ -1298,10 +1486,13 @@ private:
             if (receiver->type.name == "Array" && target->text == "Create") {
                 parameters = {{integerType, "size", true, node->offset},
                               {receiver->type.arguments[0], "initial", true, node->offset}};
+            } else if (receiver->type.name == "FixedArray" && target->text == "Create") {
+                parameters = {{receiver->type.arguments[0], "initial", true, node->offset}};
             } else if (receiver->type.name == "KeyValuePair" && target->text == "Create") {
                 parameters = {{receiver->type.arguments[0], "key", true, node->offset},
                               {receiver->type.arguments[1], "value", true, node->offset}};
-            } else if (receiver->type.name != "Array" && receiver->type.name != "KeyValuePair" && target->text == "Empty") {
+            } else if (receiver->type.name != "Array" && receiver->type.name != "FixedArray" &&
+                       receiver->type.name != "KeyValuePair" && target->text == "Empty") {
                 parameters = {};
             } else {
                 fail("unknown collection constructor", target->offset);
@@ -1318,12 +1509,57 @@ private:
             node->resolution = "list_construct";
             return receiver->type;
         }
+        if (receiver->kind == "type" && receiver->type == byteBufferType) {
+            if (target->text == "Empty") {
+                arguments(node, {});
+            } else if (target->text == "FromUtf8") {
+                arguments(node, {{stringType, "text", true, node->offset}});
+            } else {
+                fail("unknown ByteBuffer constructor", target->offset);
+            }
+            node->resolution = "collection_construct";
+            return byteBufferType;
+        }
         if (receiver->kind == "type" && receiver->type == stringType) {
-            if (target->text != "StartsWith")
+            if (target->text == "ByteLengthIs") {
+                arguments(node, {{stringType, "value", true, node->offset}, {integerType, "expected", true, node->offset}});
+                node->resolution = "string_byte_length_is";
+                return booleanType;
+            }
+            if (target->text == "ByteAtOr") {
+                arguments(node, {{stringType, "value", true, node->offset}, {integerType, "index", true, node->offset},
+                    {integerType, "fallback", true, node->offset}});
+                node->resolution = "string_byte_at_or";
+                return integerType;
+            }
+            if (target->text == "StartsWith") {
+                arguments(node, {{stringType, "value", true, node->offset}, {stringType, "prefix", true, node->offset}});
+                node->resolution = "string_starts_with";
+                return booleanType;
+            }
+            if (target->text == "FromInt") {
+                arguments(node, {{integerType, "value", true, node->offset}});
+                node->resolution = "string_from_int";
+                return stringType;
+            }
+            if (target->text == "Utf8Length") {
+                arguments(node, {{stringType, "value", true, node->offset}});
+                node->resolution = "string_utf8_length";
+            } else if (target->text == "Utf8Slice") {
+                arguments(node, {{stringType, "value", true, node->offset},
+                                 {integerType, "start", true, node->offset},
+                                 {integerType, "count", true, node->offset}});
+                node->resolution = "string_utf8_slice";
+                return stringType;
+            } else if (target->text == "Utf8IndexOf") {
+                arguments(node, {{stringType, "value", true, node->offset},
+                                 {stringType, "pattern", true, node->offset},
+                                 {integerType, "start", true, node->offset}});
+                node->resolution = "string_utf8_index_of";
+            } else {
                 fail("unknown string operation", target->offset);
-            arguments(node, {{stringType, "value", true, node->offset}, {stringType, "prefix", true, node->offset}});
-            node->resolution = "string_starts_with";
-            return booleanType;
+            }
+            return integerType;
         }
         if (receiver->kind == "type" && receiver->type == unsignedType) {
             if (target->text == "WrappingAdd" || target->text == "WrappingSubtract" || target->text == "WrappingMultiply") {
@@ -1346,6 +1582,11 @@ private:
             return unsignedType;
         }
         if (receiver->kind == "type" && receiver->type == integerType) {
+            if (target->text == "RoundFromFloat" || target->text == "RoundFromFloat32") {
+                arguments(node, {{target->text == "RoundFromFloat" ? floatType : float32Type, "value", true, node->offset}});
+                node->resolution = "numeric_round";
+                return integerType;
+            }
             if (target->text == "FromUInt32") {
                 arguments(node, {{unsignedType, "value", true, node->offset}});
                 node->resolution = "unsigned_conversion";
@@ -1365,6 +1606,12 @@ private:
             return integerType;
         }
         if (receiver->kind == "type" && (receiver->type == floatType || receiver->type == float32Type)) {
+            if (receiver->type == float32Type && (target->text == "ToBits" || target->text == "FromBits")) {
+                const bool toBits = target->text == "ToBits";
+                arguments(node, {{toBits ? float32Type : unsignedType, "value", true, node->offset}});
+                node->resolution = "float_bits";
+                return toBits ? unsignedType : float32Type;
+            }
             if (target->text == "FromUInt32") {
                 arguments(node, {{unsignedType, "value", true, node->offset}});
                 node->resolution = "unsigned_conversion";
@@ -1382,6 +1629,21 @@ private:
                 arguments(node, {{input, "value", true, node->offset}});
                 node->resolution = "numeric_conversion";
                 return receiver->type;
+            }
+            if (target->text == "Clamp") {
+                arguments(node, {{receiver->type, "value", true, node->offset},
+                    {receiver->type, "minimum", true, node->offset},
+                    {receiver->type, "maximum", true, node->offset}});
+                node->resolution = "float_math";
+                return receiver->type;
+            }
+            if (target->text == "ILogB" || target->text == "ScaleB") {
+                std::vector<Field> parameters{{receiver->type, "value", true, node->offset}};
+                if (target->text == "ScaleB")
+                    parameters.push_back({integerType, "exponent", true, node->offset});
+                arguments(node, parameters);
+                node->resolution = "float_math";
+                return target->text == "ILogB" ? integerType : receiver->type;
             }
             static const std::set<std::string> unary{
                 "IsFinite", "Abs", "Sqrt", "Log", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan",
@@ -1429,6 +1691,39 @@ private:
             return concurrentCall(node, receiverType, target->text);
         if (receiverType.name == "Atomic")
             return atomicCall(node, receiverType, target->text);
+        if (receiverType == byteBufferType) {
+            std::vector<Field> parameters;
+            Type result = byteBufferType;
+            std::string operation;
+            bool mutating = false;
+            if (target->text == "At") {
+                parameters = {{integerType, "index", true, node->offset}};
+                result = unsignedType;
+                operation = "at";
+            } else if (target->text == "Slice") {
+                parameters = {{integerType, "start", true, node->offset}, {integerType, "count", true, node->offset}};
+                operation = "slice";
+            } else if (target->text == "IndexOf") {
+                parameters = {{byteBufferType, "pattern", true, node->offset}, {integerType, "start", true, node->offset}};
+                result = integerType;
+                operation = "indexOf";
+            } else if (target->text == "DecodeUtf8") {
+                result = stringType;
+                operation = "decodeUtf8";
+            } else if (target->text == "Append" || target->text == "Add") {
+                parameters = {{target->text == "Add" ? unsignedType : byteBufferType, "value", true, node->offset}};
+                result = voidType;
+                operation = target->text == "Add" ? "add" : "append";
+                mutating = true;
+            } else {
+                fail("unknown ByteBuffer operation", target->offset);
+            }
+            if (mutating)
+                assignmentTarget(receiver);
+            arguments(node, parameters);
+            node->resolution = std::string(mutating ? "collection_mutate_" : "collection_read_") + operation;
+            return result;
+        }
         if (extended(receiverType.name))
             return collectionCall(node, receiverType, target->text, receiver);
         if (receiverType.name == "List") {
@@ -1621,11 +1916,11 @@ private:
         Type result = voidType;
         std::string operation;
         bool mutating = false;
-        if ((receiver.name == "Array" || dictionary) && name == "At") {
+        if ((receiver.name == "Array" || receiver.name == "FixedArray" || dictionary) && name == "At") {
             parameters = {dictionary ? element : integerType};
             result = value;
             operation = "at";
-        } else if ((receiver.name == "Array" || dictionary) && name == "Set") {
+        } else if ((receiver.name == "Array" || receiver.name == "FixedArray" || dictionary) && name == "Set") {
             parameters = {dictionary ? element : integerType, value};
             operation = "set";
             mutating = true;
@@ -1660,7 +1955,7 @@ private:
         } else if ((receiver.name == "Queue" || receiver.name == "Stack") && name == "Peek") {
             result = element;
             operation = "peek";
-        } else if (receiver.name != "Array" && receiver.name != "KeyValuePair" && name == "Clear") {
+        } else if (receiver.name != "Array" && receiver.name != "FixedArray" && receiver.name != "KeyValuePair" && name == "Clear") {
             operation = "clear";
             mutating = true;
         } else {
@@ -1675,14 +1970,107 @@ private:
         node->resolution = std::string(mutating ? "collection_mutate_" : "collection_read_") + operation;
         return result;
     }
+    void checkStatelessWorkerSelection(const Method& target, std::size_t offset) {
+        const auto& declaring = declaringMethod(target);
+        if (!target.pure || target.asynchronous || target.constructor || target.virtualMethod ||
+            target.overrideMethod || declaring.name != owner_->name || !declaring.baseClass.empty() ||
+            !target.typeParameters.empty() || target.sourceName.find('<') != std::string::npos)
+            fail("parallel object helper requires an implicit same-class nonvirtual nongeneric pure method", offset);
+    }
+
+    bool statelessWorkerValue(const Type& value) {
+        if (referenceBearing(value) || service(value) || isSharedHandle(value) ||
+            value.name == "Task" || value.name == "CancellationToken")
+            return false;
+        for (const auto& argument : value.arguments) {
+            if (!statelessWorkerValue(argument))
+                return false;
+        }
+        const auto* record = declaration(value.name);
+        if (record && record->kind == "Record") {
+            for (const auto& field : record->fields) {
+                if (!statelessWorkerValue(field.type))
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    void checkStatelessObjectWorker(Method& target, std::set<std::string>& checked) {
+        if (!checked.insert(target.identity).second)
+            return;
+        OwnerContext scope(owner_, methodOwner(target));
+        checkStatelessWorkerSelection(target, target.offset);
+        if (!statelessWorkerValue(target.result))
+            fail("parallel object helper requires deeply owned value results", target.offset);
+        for (const auto& parameter : target.parameters) {
+            if (!statelessWorkerValue(parameter.type))
+                fail("parallel object helper requires deeply owned value arguments", parameter.offset);
+        }
+
+        std::function<void(const Expr&)> inspectExpression;
+        std::function<void(const std::vector<Statement>&)> inspectStatements;
+        inspectExpression = [&](const Expr& node) {
+            if (!node)
+                return;
+            if (node->resolution == "object_call" && node->implicitObjectCall) {
+                auto& callee = *method(node->callable);
+                checkStatelessWorkerSelection(callee, node->offset);
+                checkStatelessObjectWorker(callee, checked);
+                node->statelessWorkerCall = true;
+                // The synthetic `this` is not a value capture. The admitted
+                // worker function has no receiver; all authored arguments still
+                // pass the same transitive value/effect checks in source order.
+                for (std::size_t index = 1; index < node->children.size(); ++index)
+                    inspectExpression(node->children[index]);
+                return;
+            }
+            if (node->resolution == "floating_environment_observe")
+                fail("parallel helpers cannot observe the floating environment", node->offset);
+            if (node->resolution == "qualified_pure")
+                fail("parallel helpers cannot use qualified pure calls", node->offset);
+            if (!statelessWorkerValue(node->type) || node->resolution == "field" ||
+                node->resolution == "object_field" || node->resolution == "this" ||
+                node->resolution == "base" || node->resolution == "service" ||
+                node->resolution == "host" || node->resolution == "host_sync" ||
+                node->resolution == "host_sync_value" || node->resolution == "local_async" ||
+                node->kind == "await")
+                fail("parallel object helper cannot access state, references, host services or suspension", node->offset);
+            for (const auto& child : node->children)
+                inspectExpression(child);
+        };
+        inspectStatements = [&](const std::vector<Statement>& body) {
+            for (const auto& statement : body) {
+                if (statement.kind == "parallel_foreach" || statement.kind == "lock")
+                    fail("parallel object helper cannot start nested parallel or synchronized work", statement.offset);
+                if (!statelessWorkerValue(statement.type))
+                    fail("parallel object helper locals require deeply owned values", statement.offset);
+                inspectExpression(statement.expression);
+                inspectExpression(statement.target);
+                inspectStatements(statement.initialization);
+                inspectStatements(statement.iteration);
+                inspectStatements(statement.body);
+                inspectStatements(statement.alternative);
+                inspectStatements(statement.cleanup);
+            }
+        };
+        inspectStatements(target.body);
+        target.statelessWorkerCallable = true;
+    }
+
     void checkWorkerCalls(Declaration& owner) {
         std::set<std::string> checked;
+        std::set<std::string> statelessChecked;
         std::function<void(Method&)> worker;
         std::function<void(const Expr&)> inspectExpression;
         std::function<void(const std::vector<Statement>&)> inspectStatements;
         inspectExpression = [&](const Expr& node) {
             if (!node)
                 return;
+            if (node->resolution == "floating_environment_observe")
+                fail("parallel helpers cannot observe the floating environment", node->offset);
+            if (node->resolution == "qualified_pure")
+                fail("parallel helpers cannot use qualified pure calls", node->offset);
             if (referenceBearing(node->type) || node->resolution == "this" || node->resolution == "object_field")
                 fail("parallel helper cannot access owner-confined objects", node->offset);
             if (node->resolution == "service" || node->resolution == "host" || node->resolution == "host_sync" || node->resolution == "local_async" || node->kind == "await")
@@ -1718,12 +2106,18 @@ private:
                 }
                 inspectExpression(statement.expression);
                 inspectExpression(statement.target);
+                inspectStatements(statement.initialization);
+                inspectStatements(statement.iteration);
                 inspectStatements(statement.body);
                 inspectStatements(statement.alternative);
                 inspectStatements(statement.cleanup);
             }
         };
         worker = [&](Method& target) {
+            if (objectClass(*methodOwner(target))) {
+                checkStatelessObjectWorker(target, statelessChecked);
+                return;
+            }
             if (!checked.insert(target.identity).second)
                 return;
             OwnerContext scope(owner_, methodOwner(target));
@@ -1745,6 +2139,8 @@ private:
                 for (const auto& statement : body) {
                     if (statement.kind == "parallel_foreach")
                         fail("finally cannot start parallel work through a helper", statement.offset);
+                    inspect(statement.initialization);
+                    inspect(statement.iteration);
                     inspect(statement.body);
                     inspect(statement.alternative);
                     inspect(statement.cleanup);
@@ -1769,6 +2165,8 @@ private:
             inspectExpression = [&](const Expr& node) {
                 if (!node)
                     return;
+                if (context == Context::Async && node->resolution == "floating_environment_observe")
+                    fail("async call closures cannot observe the floating environment", node->offset);
                 if (node->resolution == "sync_wait" || node->resolution == "sync_wait_timed")
                     fail("blocking SemaphoreSlim.Wait is forbidden in async, lock and finally call closures", node->offset);
                 if (context == Context::Lock &&
@@ -1784,6 +2182,8 @@ private:
                         fail("lock call closures cannot start parallel work", statement.offset);
                     inspectExpression(statement.expression);
                     inspectExpression(statement.target);
+                    inspectStatements(statement.initialization);
+                    inspectStatements(statement.iteration);
                     inspectStatements(statement.body);
                     inspectStatements(statement.alternative);
                     inspectStatements(statement.cleanup);
@@ -1938,6 +2338,34 @@ private:
                 parallelOuter_.clear();
                 locals_ = std::move(outer);
                 next = Fallthrough | Thrown;
+            } else if (statement.kind == "for") {
+                if (statement.initialization.size() > 1 || statement.iteration.size() > 1 || !statement.expression)
+                    fail("for requires a single initializer, condition and iteration clause", statement.offset);
+                for (const auto& initializer : statement.initialization) {
+                    if (initializer.kind != "local" && initializer.kind != "assign" && initializer.kind != "expression")
+                        fail("for initialization requires a local declaration, assignment or method call", initializer.offset);
+                }
+                for (const auto& iteration : statement.iteration) {
+                    if (iteration.kind != "assign" && iteration.kind != "expression")
+                        fail("for iteration requires an assignment or method call", iteration.offset);
+                    if (iteration.expression && iteration.expression->kind == "await")
+                        fail("for iteration cannot suspend", iteration.offset);
+                }
+                auto outer = locals_;
+                const auto initializationFlow = statements(statement.initialization);
+                same(expression(statement.expression), booleanType, statement.offset);
+                const auto headerScope = locals_;
+                ++loopDepth_;
+                const auto loopFlow = statements(statement.body);
+                // Body declarations end before the iteration clause. The
+                // initializer's locals remain available until the loop exits.
+                locals_ = headerScope;
+                const auto iterationFlow = statements(statement.iteration);
+                --loopDepth_;
+                locals_ = std::move(outer);
+                // As with while, even a constant condition does not establish
+                // a return. Loop-local break/continue are consumed here.
+                next = Fallthrough | ((initializationFlow | loopFlow | iterationFlow) & (Returned | Thrown));
             } else if (statement.kind == "while" || statement.kind == "foreach") {
                 auto outer = locals_;
                 if (statement.kind == "while") {
@@ -2056,6 +2484,20 @@ private:
             if (found && found->kind == "Record")
                 return visitRecord(*found);
             Layout layout;
+            if (type.name == "FixedArray") {
+                const auto child = visitType(type.arguments.front(), offset);
+                layout.depth = child.depth + 1;
+                const auto extent = *type.fixedExtent;
+                if (extent != 0) {
+                    // Saturate before multiplication. A containing record's
+                    // established 256-node bound owns the eventual rejection.
+                    if (child.leaves > maximumLeaves || extent > (maximumLeaves - 1) / child.leaves)
+                        layout.leaves = maximumLeaves + 1;
+                    else
+                        layout.leaves += extent * child.leaves;
+                }
+                return layout;
+            }
             for (const auto& argument : type.arguments) {
                 if (argument.name != "void")
                     merge(layout, visitType(argument, offset), offset);
@@ -2111,7 +2553,8 @@ private:
             std::size_t work = 1;
             for (const auto& child : node->children)
                 work = addCost(work, expressionCost(child), node->offset);
-            const bool localCall = node->resolution == "pure" || node->resolution == "effect" || node->resolution == "local_async";
+            const bool localCall = node->resolution == "pure" || node->resolution == "qualified_pure" ||
+                node->resolution == "effect" || node->resolution == "local_async";
             const bool objectCall = node->resolution == "object_construct" || node->resolution == "object_call" ||
                 node->resolution == "object_async" || node->resolution == "source_interface_call" ||
                 node->resolution == "source_interface_async" || node->resolution == "class_virtual_call" ||
@@ -2134,6 +2577,8 @@ private:
                 work = addCost(work, 1, statement.offset);
                 work = addCost(work, expressionCost(statement.expression), statement.offset);
                 work = addCost(work, expressionCost(statement.target), statement.offset);
+                work = addCost(work, statementCost(statement.initialization), statement.offset);
+                work = addCost(work, statementCost(statement.iteration), statement.offset);
                 work = addCost(work, statementCost(statement.body), statement.offset);
                 work = addCost(work, statementCost(statement.alternative), statement.offset);
                 work = addCost(work, statementCost(statement.cleanup), statement.offset);

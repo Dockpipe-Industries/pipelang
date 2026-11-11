@@ -1,9 +1,14 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "bindings.hpp"
+#include "../model-compiler/ResourceBudget.hpp"
+#include <pipelang/model/limits.hpp>
+#include <pipelang/model/collection.hpp>
 #include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <limits>
 
 namespace pipelang::tools {
@@ -70,6 +75,297 @@ void constructors(const Json& owner, bool identifiers) {
         require(signatures.insert(types.dump()).second, "duplicate constructor overload");
     }
 }
+void nativeValueExports(const Json& manifest, bool observation) {
+    const std::string exportKey = observation ? "nativeObservationExports" : "nativeNumericExports";
+    const std::string exportKind = observation ? "native observation export" : "native numeric export";
+    if (!manifest.contains(exportKey))
+        return;
+    const auto& exports = manifest.at(exportKey);
+    array(exports, exportKind + "s", 32768);
+    require(!exports.empty(), exportKind + "s must not be empty");
+    const std::set<std::string> builtinNames{
+        "void", "bool", "int", "uint32", "float", "float32", "string", "Error", "ByteBuffer",
+        "Optional", "Result", "Task", "List", "Array", "FixedArray", "Dictionary", "HashSet", "Queue", "Stack",
+        "Atomic", "CancellationToken", "Lock", "SemaphoreSlim", "KeyValuePair",
+        "ConcurrentDictionary", "ConcurrentQueue", "ConcurrentStack"
+    };
+    const auto nominalIdentity = [&](const std::string& name) {
+        if (name.empty() || builtinNames.contains(name))
+            return false;
+        bool atStart = true;
+        for (const unsigned char character : name) {
+            if (character == '.') {
+                if (atStart)
+                    return false;
+                atStart = true;
+                continue;
+            }
+            const bool letter = (character >= 'A' && character <= 'Z') ||
+                (character >= 'a' && character <= 'z') || character == '_';
+            if (!letter && (atStart || character < '0' || character > '9'))
+                return false;
+            atStart = false;
+        }
+        return !atStart;
+    };
+    struct NominalValue {
+        const Json* declaration = nullptr;
+        bool enumeration = false;
+    };
+    std::map<std::string, NominalValue> nominalValues;
+    std::set<std::string> ambiguousNames;
+    const auto addIdentity = [&](const std::string& name, const Json& declaration, bool enumeration) {
+        // Generic authored identities remain available to ordinary model
+        // metadata; closed numeric nominal aliases cannot disguise type syntax.
+        if (!nominalIdentity(name))
+            return;
+        const auto [found, inserted] = nominalValues.emplace(name, NominalValue{&declaration, enumeration});
+        if (!inserted && found->second.declaration != &declaration)
+            ambiguousNames.insert(name);
+    };
+    for (const auto& category : {"enums", "records"}) {
+        for (const auto& declaration : manifest.at(category))
+            addIdentity(declaration.at("name").get<std::string>(), declaration, std::string(category) == "enums");
+    }
+    for (const auto& category : {"enums", "records"}) {
+        for (const auto& declaration : manifest.at(category)) {
+            if (declaration.contains("sourceName"))
+                addIdentity(declaration.at("sourceName").get<std::string>(), declaration, std::string(category) == "enums");
+        }
+    }
+    const auto lookup = [&](const std::string& name) -> const NominalValue* {
+        if (ambiguousNames.contains(name))
+            return nullptr;
+        const auto found = nominalValues.find(name);
+        return found == nominalValues.end() ? nullptr : &found->second;
+    };
+    const auto enumeration = [&](const Json& type) {
+        if (!type.is_string())
+            return false;
+        const auto* found = lookup(type.get<std::string>());
+        return found && found->enumeration;
+    };
+    const auto scalar = [&](const Json& type) {
+        if (observation && (type == "float" || type == "float32"))
+            return false;
+        return type == "int" || type == "bool" || type == "uint32" ||
+            (!observation && (type == "float" || type == "float32")) || enumeration(type);
+    };
+    const auto recordDeclaration = [&](const std::string& name) -> const Json* {
+        const auto* found = lookup(name);
+        return found && !found->enumeration ? found->declaration : nullptr;
+    };
+    const auto genericArguments = [](const std::string& value, const std::string& owner)
+        -> std::optional<std::vector<std::string>> {
+        const auto prefix = owner + "<";
+        if (!value.starts_with(prefix) || !value.ends_with('>'))
+            return std::nullopt;
+        std::vector<std::string> arguments;
+        std::size_t start = prefix.size();
+        unsigned depth = 0;
+        for (std::size_t index = start; index + 1 < value.size(); ++index) {
+            const char character = value[index];
+            if (character == '<') {
+                if (++depth > 12)
+                    return std::nullopt;
+            } else if (character == '>') {
+                if (depth == 0)
+                    return std::nullopt;
+                --depth;
+            } else if (character == ',' && depth == 0) {
+                if (index == start)
+                    return std::nullopt;
+                arguments.push_back(value.substr(start, index - start));
+                start = index + 1;
+            }
+        }
+        if (depth != 0 || start + 1 >= value.size())
+            return std::nullopt;
+        arguments.push_back(value.substr(start, value.size() - start - 1));
+        return arguments;
+    };
+    struct ValueLayout {
+        std::size_t nodes = 1;
+        unsigned depth = 1;
+        std::size_t footprint = 1;
+        std::size_t elements = 0;
+        std::size_t storageBytes = 8;
+        std::size_t ownedBytes = 8;
+    };
+    constexpr auto maximumElements = pipelang::model::maximumListElements;
+    constexpr auto maximumBytes = pipelang::model::maximumListBytes;
+    const auto addBounded = [](std::size_t first, std::size_t second, std::size_t maximum)
+        -> std::optional<std::size_t> {
+        if (first > maximum || second > maximum - first)
+            return std::nullopt;
+        return first + second;
+    };
+    const auto multiplyBounded = [](std::size_t first, std::size_t second, std::size_t maximum)
+        -> std::optional<std::size_t> {
+        if (first != 0 && second > maximum / first)
+            return std::nullopt;
+        return first * second;
+    };
+    const auto closedValue = [&](const std::string& name) -> std::optional<ValueLayout> {
+        std::set<std::string> activeRecords;
+        std::size_t remaining = pipelang::model::defaultEvaluationSteps;
+        std::function<std::optional<ValueLayout>(const std::string&)> visit;
+        visit = [&](const std::string& current) -> std::optional<ValueLayout> {
+            if (remaining == 0 || current.size() > 4096)
+                return std::nullopt;
+            --remaining;
+            if (observation && (current == "float" || current == "float32"))
+                return std::nullopt;
+            if (scalar(current))
+                return ValueLayout{};
+            if (const auto arguments = genericArguments(current, "FixedArray")) {
+                if (arguments->size() != 2)
+                    return std::nullopt;
+                const auto& countText = arguments->back();
+                if (countText.empty() || (countText.size() > 1 && countText.front() == '0') ||
+                    !std::all_of(countText.begin(), countText.end(), [](char c) { return c >= '0' && c <= '9'; }))
+                    return std::nullopt;
+                std::size_t count = 0;
+                const auto parsed = std::from_chars(countText.data(), countText.data() + countText.size(), count);
+                if (parsed.ec != std::errc{} || parsed.ptr != countText.data() + countText.size() || count > maximumElements)
+                    return std::nullopt;
+                const auto nested = visit(arguments->front());
+                if (!nested)
+                    return std::nullopt;
+                const auto footprint = multiplyBounded(nested->footprint, count, maximumElements);
+                const auto perElement = addBounded(1, nested->elements, maximumElements);
+                const auto elements = perElement ? multiplyBounded(*perElement, count, maximumElements) : std::nullopt;
+                const auto storage = multiplyBounded(nested->storageBytes, count, maximumBytes);
+                const auto payloadBytes = multiplyBounded(nested->ownedBytes, count, maximumBytes);
+                if (!footprint || !elements || !storage || !payloadBytes)
+                    return std::nullopt;
+                const auto owned = addBounded(std::max<std::size_t>(8, *storage), *payloadBytes, maximumBytes);
+                if (!owned)
+                    return std::nullopt;
+                const auto weightedNodes = count == 0 ? std::size_t{1}
+                    : (nested->nodes > 256 / count ? std::size_t{257} : 1 + nested->nodes * count);
+                return ValueLayout{weightedNodes, nested->depth + 1,
+                    std::max<std::size_t>(1, *footprint), *elements, std::max<std::size_t>(8, *storage), *owned};
+            }
+            if (const auto arguments = genericArguments(current, "Optional")) {
+                if (arguments->size() != 1)
+                    return std::nullopt;
+                const auto nested = visit(arguments->front());
+                if (!nested)
+                    return std::nullopt;
+                const auto footprint = addBounded(nested->footprint, 1, maximumElements);
+                const auto storage = addBounded(nested->storageBytes, 8, maximumBytes);
+                const auto owned = storage ? addBounded(*storage, nested->ownedBytes, maximumBytes) : std::nullopt;
+                if (!footprint || !storage || !owned)
+                    return std::nullopt;
+                return ValueLayout{nested->nodes + 1, nested->depth + 1, *footprint, nested->elements, *storage, *owned};
+            }
+            const auto* record = recordDeclaration(current);
+            if (!record)
+                return std::nullopt;
+            const auto identity = record->at("name").get<std::string>();
+            if (!activeRecords.insert(identity).second)
+                return std::nullopt;
+            ValueLayout layout;
+            std::size_t footprint = 0;
+            std::size_t elements = 0;
+            std::size_t storage = 0;
+            std::size_t payloadBytes = 0;
+            for (const auto& field : record->at("fields")) {
+                const auto child = visit(field.at("type").get<std::string>());
+                if (!child || child->nodes > 256 || layout.nodes > 256 - child->nodes || child->depth >= 32)
+                    return std::nullopt;
+                const auto nextFootprint = addBounded(footprint, child->footprint, maximumElements);
+                const auto nextElements = addBounded(elements, child->elements, maximumElements);
+                const auto nextStorage = addBounded(storage, child->storageBytes, maximumBytes);
+                const auto nextBytes = addBounded(payloadBytes, child->ownedBytes, maximumBytes);
+                if (!nextFootprint || !nextElements || !nextStorage || !nextBytes)
+                    return std::nullopt;
+                footprint = *nextFootprint;
+                elements = *nextElements;
+                storage = *nextStorage;
+                payloadBytes = *nextBytes;
+                layout.nodes += child->nodes;
+                layout.depth = std::max(layout.depth, child->depth + 1);
+            }
+            activeRecords.erase(identity);
+            layout.footprint = std::max<std::size_t>(1, footprint);
+            layout.elements = elements;
+            layout.storageBytes = std::max<std::size_t>(8, storage);
+            const auto owned = addBounded(layout.storageBytes, payloadBytes, maximumBytes);
+            if (!owned)
+                return std::nullopt;
+            layout.ownedBytes = *owned;
+            return layout;
+        };
+        return visit(name);
+    };
+    const auto numericValue = [&](const Json& type) {
+        if (!type.is_string())
+            return false;
+        const auto name = type.get<std::string>();
+        if (closedValue(name))
+            return true;
+        const auto arguments = genericArguments(name, "Result");
+        if (!arguments || arguments->size() != 2)
+            return false;
+        const auto& payload = arguments->front();
+        const auto& error = arguments->back();
+        if (!enumeration(error) && !recordDeclaration(error))
+            return false;
+        const auto payloadLayout = payload == "void" ? std::optional(ValueLayout{0, 0, 0, 0, 0, 0}) : closedValue(payload);
+        const auto errorLayout = closedValue(error);
+        if (!payloadLayout || !errorLayout)
+            return false;
+        const auto footprint = addBounded(payloadLayout->footprint, errorLayout->footprint, maximumElements);
+        const auto elements = addBounded(payloadLayout->elements, errorLayout->elements, maximumElements);
+        const auto storage = addBounded(payloadLayout->storageBytes, errorLayout->storageBytes, maximumBytes);
+        const auto taggedStorage = storage ? addBounded(*storage, 24, maximumBytes) : std::nullopt;
+        const auto payloadBytes = addBounded(payloadLayout->ownedBytes, errorLayout->ownedBytes, maximumBytes);
+        return footprint && *footprint < maximumElements && elements && taggedStorage && payloadBytes &&
+            addBounded(*taggedStorage, *payloadBytes, maximumBytes).has_value();
+    };
+    std::set<std::string> signatures;
+    for (const auto& item : exports) {
+        std::set<std::string> required{"owner", "method", "returnType", "parameters", "allocationFree", "noexcept", "binary32Environment"};
+        if (observation)
+            required.insert("effects");
+        exactObject(item, required, {}, exportKind);
+        const auto owner = text(item.at("owner"), "numeric export owner", 4096);
+        const auto name = text(item.at("method"), "numeric export method", 1024);
+        identifier(item.at("method"));
+        fields(item.at("parameters"), true);
+        require(numericValue(item.at("returnType")) && item.at("parameters").size() <= 32,
+                "native numeric export signature exceeds numeric value bounds");
+        for (const auto& parameter : item.at("parameters"))
+            require(numericValue(parameter.at("type")) || (!observation && parameter.at("type") == "string"),
+                "native numeric export parameter must be a closed numeric value or borrowed byte text");
+        const auto& environment = item.at("binary32Environment");
+        const bool admittedEnvironment = environment == "not-required" ||
+            (!observation && ((environment == "caller-admitted" && !manifest.contains("nativeNumericEnvironment")) ||
+                (environment == "active-host" && manifest.value("nativeNumericEnvironment", "") == "active-host")));
+        require(item.at("allocationFree") == true && item.at("noexcept") == true &&
+                admittedEnvironment, exportKind + " guarantee mismatch");
+        if (observation)
+            require(item.at("effects") == "current-thread-observation", "native observation export effect mismatch");
+        const auto& classes = manifest.at("classes");
+        const auto declaration = std::find_if(classes.begin(), classes.end(), [&](const Json& candidate) {
+            return candidate.value("sourceName", "") == owner;
+        });
+        require(declaration != classes.end() && declaration->at("fields").empty() &&
+                declaration->at("constructor").at("parameters").empty() &&
+                !declaration->contains("constructorOverloads"), "native numeric export has unknown or stateful owner");
+        const auto& methods = declaration->at("methods");
+        const auto method = std::find_if(methods.begin(), methods.end(), [&](const Json& candidate) {
+            return candidate.value("sourceName", candidate.at("name").get<std::string>()) == name &&
+                candidate.at("parameters") == item.at("parameters") && candidate.at("returnType") == item.at("returnType");
+        });
+        require(method != methods.end() && method->at("pure") == !observation && method->at("async") == false,
+                exportKind + " does not match its public synchronous method effect");
+        require(signatures.insert(owner + '.' + name + item.at("parameters").dump()).second,
+                "duplicate native numeric export");
+    }
+}
 }
 
 void admitModel(const Json& manifest, const std::string& nameSpace) {
@@ -79,7 +375,9 @@ void admitModel(const Json& manifest, const std::string& nameSpace) {
         required.insert("objects");
         required.insert("sourceInterfaces");
     }
-    exactObject(manifest, required, {"constants"}, "model manifest");
+    if (manifest.contains("nativeNumericEnvironment"))
+        require(manifest.at("nativeNumericEnvironment") == "active-host", "unknown native numeric environment");
+    exactObject(manifest, required, {"constants", "nativeNumericExports", "nativeObservationExports", "nativeNumericEnvironment"}, "model manifest");
     require(manifest.at("protocol") == (objects ? "pipelang.native-model-manifest.v2" : "pipelang.native-model-manifest.v1") &&
             manifest.at("namespace") == nameSpace, "model manifest protocol or namespace mismatch");
     if (objects)
@@ -87,7 +385,7 @@ void admitModel(const Json& manifest, const std::string& nameSpace) {
     std::set<std::string> declarations;
     std::set<std::string> sourceInterfaces;
     if (objects) {
-        array(manifest.at("sourceInterfaces"), "source interfaces");
+        array(manifest.at("sourceInterfaces"), "source interfaces", models::resourceBudget().declarations);
         for (const auto& contract : manifest.at("sourceInterfaces"))
             sourceInterfaces.insert(text(contract.at("name"), "source interface name", 1024));
     }
@@ -95,7 +393,7 @@ void admitModel(const Json& manifest, const std::string& nameSpace) {
         if (!manifest.contains(category))
             continue;
         const auto& values = manifest.at(category);
-        array(values, category);
+        array(values, category, models::resourceBudget().declarations);
         std::set<std::string> names;
         for (const auto& declaration : values) {
             const std::string kind = category;
@@ -148,6 +446,8 @@ void admitModel(const Json& manifest, const std::string& nameSpace) {
             }
         }
     }
+    nativeValueExports(manifest, false);
+    nativeValueExports(manifest, true);
     if (manifest.contains("constants")) {
         const auto& constants = manifest.at("constants");
         array(constants, "constant exports", 32768);

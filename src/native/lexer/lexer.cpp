@@ -1,6 +1,8 @@
 #include "lexer.hpp"
 
 #include <string_view>
+#include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace pipelang::native {
@@ -128,8 +130,14 @@ LexResult lex(const std::string& source) {
 }
 
 LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
+    return lex(source, numericSyntax, std::numeric_limits<std::size_t>::max());
+}
+
+LexResult lex(const std::string& source, NumericSyntax numericSyntax, std::size_t maximumTokens) {
+    if (maximumTokens == 0)
+        return failure("PL1009", "token resource budget exceeded; configure tokens", 0, 0);
     LexResult result;
-    result.tokens.reserve(128);
+    result.tokens.reserve(std::min<std::size_t>(128, maximumTokens));
     std::size_t offset = 0;
     const auto append = [&](std::string kind, std::size_t start, std::size_t end) {
         result.tokens.push_back({std::move(kind), source.substr(start, end - start), start, end});
@@ -147,6 +155,8 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
                 ++offset;
             continue;
         }
+        if (result.tokens.size() >= maximumTokens - 1)
+            return failure("PL1009", "token resource budget exceeded; configure tokens", offset, offset);
         if (isIdentifierStart(character)) {
             const auto start = offset++;
             while (offset < source.size() &&

@@ -66,7 +66,7 @@ configure_package_config_file(cmake/PipeLangModelConfig.cmake.in
     "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfig.cmake"
     INSTALL_DESTINATION "${model_cmake_directory}")
 write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfigVersion.cmake"
-    VERSION "${PROJECT_VERSION}" COMPATIBILITY ExactVersion)
+    VERSION "${PROJECT_VERSION}" COMPATIBILITY ExactVersion ARCH_INDEPENDENT)
 install(EXPORT PipeLangModelTargets NAMESPACE PipeLang:: DESTINATION "${model_cmake_directory}")
 configure_file(cmake/PipeLangModelBindings.cmake
     "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelBindings.cmake" @ONLY)
@@ -77,6 +77,9 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PipeLangModelConfig.cmake"
 configure_file(cmake/NativeToolchain.json.in "${CMAKE_CURRENT_BINARY_DIR}/native-toolchain.json" @ONLY)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/native-toolchain.json"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/pipelang-model")
+
+add_subdirectory("${PIPELANG_MODEL_SOURCE_ROOT}/sdk/native-dependencies"
+    "${CMAKE_CURRENT_BINARY_DIR}/native-dependencies")
 
 # Run last so the receipt covers the actual installed binaries and configuration.
 configure_file(cmake/InstallModelManifest.cmake.in

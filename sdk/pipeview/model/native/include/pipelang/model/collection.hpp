@@ -15,7 +15,7 @@ inline constexpr std::size_t maximumListElements = 4096;
 inline constexpr std::size_t maximumListBytes = 1024 * 1024;
 
 // Return cap + 1 as a stable saturation sentinel. Never add before checking.
-inline std::size_t boundedOwnedSum(std::size_t left, std::size_t right,
+inline constexpr std::size_t boundedOwnedSum(std::size_t left, std::size_t right,
                                    std::size_t cap) noexcept {
     if (left > cap || right > cap || right > cap - left)
         return cap + 1;
@@ -23,24 +23,28 @@ inline std::size_t boundedOwnedSum(std::size_t left, std::size_t right,
 }
 
 template<class T> class List;
+template<class T, std::size_t N> class FixedArray;
 // These declarations must precede every wrapper's dependent recursive calls in
 // result.hpp too. Definitions there must recurse using unqualified calls so ADL
 // finds generated record owners. A declaration here alone cannot fix lookup in
 // an earlier wrapper definition.
-template<class T> std::size_t ownedBytes(const T& value);
+template<class T> constexpr std::size_t ownedBytes(const T& value);
 inline std::size_t ownedBytes(const std::string& value);
 inline std::size_t ownedBytes(const Error& value);
-template<class T> std::size_t ownedBytes(const Optional<T>& value);
-template<class T, class E> std::size_t ownedBytes(const Result<T, E>& value);
+template<class T> constexpr std::size_t ownedBytes(const Optional<T>& value);
+template<class T, class E> constexpr std::size_t ownedBytes(const Result<T, E>& value);
 template<class T> std::size_t ownedBytes(const List<T>& value);
-template<class T> std::size_t ownedElements(const T& value);
-template<class T> std::size_t ownedElements(const Optional<T>& value);
-template<class T, class E> std::size_t ownedElements(const Result<T, E>& value);
+template<class T, std::size_t N> constexpr std::size_t ownedBytes(const FixedArray<T, N>& value);
+template<class T> constexpr std::size_t ownedElements(const T& value);
+template<class T> constexpr std::size_t ownedElements(const Optional<T>& value);
+template<class T, class E> constexpr std::size_t ownedElements(const Result<T, E>& value);
 template<class T> std::size_t ownedElements(const List<T>& value);
+template<class T, std::size_t N> constexpr std::size_t ownedElements(const FixedArray<T, N>& value);
 template<class T> void validate(const List<T>& value);
+template<class T, std::size_t N> constexpr void validate(const FixedArray<T, N>& value);
 
 template<class T>
-std::size_t ownedBytes(const T&) { return sizeof(T); }
+constexpr std::size_t ownedBytes(const T&) { return sizeof(T); }
 inline std::size_t ownedBytes(const std::string& value) {
     return boundedOwnedSum(sizeof(std::string), value.size(), maximumListBytes);
 }
@@ -48,7 +52,7 @@ inline std::size_t ownedBytes(const Error& value) {
     return boundedOwnedSum(sizeof(value), ownedBytes(value.message), maximumListBytes);
 }
 template<class T>
-std::size_t ownedElements(const T&) { return 0; }
+constexpr std::size_t ownedElements(const T&) { return 0; }
 
 // Footprint is a deterministic conservative logical ownership cost: the list
 // object plus each element's recursively owned cost. Capacity/allocator overhead
@@ -56,11 +60,11 @@ std::size_t ownedElements(const T&) { return 0; }
 // overloads count sizeof(record) plus recursively owned field costs. Wrapper
 // overloads count their object size plus the active payload/error costs.
 template<class T>
-std::size_t ownedBytes(const Optional<T>& value) {
+constexpr std::size_t ownedBytes(const Optional<T>& value) {
     return value.has_value() ? boundedOwnedSum(sizeof(value), ownedBytes(value.value()), maximumListBytes) : sizeof(value);
 }
 template<class T, class E>
-std::size_t ownedBytes(const Result<T, E>& value) {
+constexpr std::size_t ownedBytes(const Result<T, E>& value) {
     auto bytes = boundedOwnedSum(sizeof(value), ownedBytes(value.error()), maximumListBytes);
     if constexpr (!std::is_void_v<T>) {
         if (value.is_success())
@@ -69,11 +73,11 @@ std::size_t ownedBytes(const Result<T, E>& value) {
     return bytes;
 }
 template<class T>
-std::size_t ownedElements(const Optional<T>& value) {
+constexpr std::size_t ownedElements(const Optional<T>& value) {
     return value.has_value() ? ownedElements(value.value()) : 0;
 }
 template<class T, class E>
-std::size_t ownedElements(const Result<T, E>& value) {
+constexpr std::size_t ownedElements(const Result<T, E>& value) {
     auto elements = ownedElements(value.error());
     if constexpr (!std::is_void_v<T>) {
         if (value.is_success())
@@ -82,7 +86,7 @@ std::size_t ownedElements(const Result<T, E>& value) {
     return elements;
 }
 
-inline std::size_t addOwnedBytes(std::size_t left, std::size_t right) {
+inline constexpr std::size_t addOwnedBytes(std::size_t left, std::size_t right) {
     return boundedOwnedSum(left, right, maximumListBytes);
 }
 
@@ -104,6 +108,13 @@ public:
     private:
         EvaluationBudget& budget_;
     };
+#if defined(__SANITIZE_ADDRESS__)
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+#endif
     void step() {
         if (cleanupDepth_ == 0 && !cancellationCheck_ && !shared_ && remaining_ != 0) {
             --remaining_;

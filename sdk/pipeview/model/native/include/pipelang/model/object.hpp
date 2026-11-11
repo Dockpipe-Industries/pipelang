@@ -5,6 +5,7 @@
 #include "task.hpp"
 
 #include <array>
+#include <atomic>
 #include <compare>
 #include <cstdint>
 #include <functional>
@@ -72,6 +73,7 @@ struct ObjectEdge {
 namespace object_detail {
 
 struct RootLease {
+    ~RootLease() noexcept;
     std::shared_ptr<ObjectDomain> domain;
     ObjectId id;
 };
@@ -121,6 +123,8 @@ public:
 
 private:
     friend class GraphTransaction;
+    friend struct object_detail::RootLease;
+    template<class Tag> friend class ObjectRef;
 
     struct Cell {
         std::uint64_t generation = 1;
@@ -144,6 +148,14 @@ private:
         return const_cast<ObjectDomain*>(this)->checked(id);
     }
 
+    template<class Tag>
+    Cell& checkedTag(ObjectId id) {
+        auto& cell = checked(id);
+        if (!Tag::accepts(cell.typeId))
+            throw ExecutionFailure("object does not implement the requested type");
+        return cell;
+    }
+
     object_detail::VersionPtr version(std::unique_ptr<ObjectState> state, GraphTransaction* transaction);
     ObjectId allocate(std::uint64_t typeId, object_detail::VersionPtr state,
                       GraphTransaction* transaction);
@@ -155,12 +167,18 @@ private:
     std::pair<std::size_t, std::size_t> resourceCost() const;
 
     std::thread::id owner_;
+    std::atomic<bool> rootSetDirty_{true};
     bool closed_ = false;
     // Provisional cells count as live; allocation and matching-generation destruction own updates.
     std::size_t liveCells_ = 0;
     std::array<Cell, maximumCells> cells_{};
     std::array<GraphTransaction*, maximumTransactions> transactions_{};
 };
+
+inline object_detail::RootLease::~RootLease() noexcept {
+    if (domain)
+        domain->rootSetDirty_.store(true, std::memory_order_release);
+}
 
 template<class Tag>
 class ObjectRef {
@@ -205,9 +223,17 @@ public:
         if (!root_)
             throw ExecutionFailure("object reference is uninitialized");
         root_->domain->requireOwner();
-        // root() performs the identity and runtime tag checks without allocating
-        // another lease: this handle itself keeps the cached lease alive.
-        root_->domain->template root<Tag>(root_->id);
+        // Compiler-emitted self-owned metadata certifies a pure type predicate.
+        // An inherited marker must not opt a custom derived predicate into this
+        // path. Unmarked predicates retain root()'s exact acquisition behavior.
+        if constexpr (requires {
+            typename Tag::PureObjectTagOwner;
+            requires std::is_same_v<Tag, typename Tag::PureObjectTagOwner>;
+        }) {
+            root_->domain->template checkedTag<Tag>(root_->id);
+        } else {
+            root_->domain->template root<Tag>(root_->id);
+        }
     }
 
     template<class Other>
@@ -229,15 +255,14 @@ private:
 
 template<class Tag>
 ObjectRef<Tag> ObjectDomain::root(ObjectId id) {
-    auto& cell = checked(id);
-    if (!Tag::accepts(cell.typeId))
-        throw ExecutionFailure("object does not implement the requested type");
+    auto& cell = checkedTag<Tag>(id);
     auto lease = cell.root.lock();
     if (!lease) {
         lease = std::make_shared<object_detail::RootLease>();
         lease->domain = shared_from_this();
         lease->id = id;
         cell.root = lease;
+        rootSetDirty_.store(true, std::memory_order_release);
     }
     return ObjectRef<Tag>(std::move(lease));
 }
@@ -297,6 +322,8 @@ public:
         Savepoint& operator=(const Savepoint&) = delete;
 
         ~Savepoint() {
+            if (!saved_.empty() || (!committed_ && !transaction_.changes_.empty()))
+                transaction_.markReachabilityChanged();
             if (!committed_) {
                 transaction_.changes_.swap(saved_);
                 transaction_.rollbackAllocations(allocated_);
@@ -325,6 +352,25 @@ public:
         return Savepoint(*this);
     }
 
+    // A checked observation of this transaction's provisional allocations.
+    // It grants no access to cells or native pointers and changes no GC state.
+    std::uint64_t allocationMark() const {
+        domain_->requireOwner();
+        return nextSerial_;
+    }
+
+    template<class Tag>
+    bool allocatedSince(const ObjectRef<Tag>& reference, std::uint64_t mark) const {
+        const auto id = checkedReference(reference);
+        if (mark > nextSerial_)
+            throw ExecutionFailure("object allocation mark is invalid");
+        for (const auto& allocation : allocated_) {
+            if (allocation.id == id && allocation.serial > mark)
+                return true;
+        }
+        return false;
+    }
+
     template<class State, class Tag>
     const State& read(const ObjectRef<Tag>& reference) const {
         const auto id = checkedReference(reference);
@@ -340,6 +386,7 @@ public:
         auto replacement = domain_->version(std::move(candidate), this);
         domain_->ensureCapacity(replacement);
         changes_.insert_or_assign(id, std::move(replacement));
+        markReachabilityChanged();
         prepared_ = false;
     }
 
@@ -359,6 +406,7 @@ public:
             prepared_ = false;
             return result;
         } catch (...) {
+            markReachabilityChanged();
             domain_->destroy(id);
             allocated_.pop_back();
             throw;
@@ -387,7 +435,9 @@ public:
             throw ExecutionFailure("cannot commit during object construction");
         // Collection may allocate its bounded marking scratch, so it belongs
         // to preparation, never after root/graph publication has begun.
-        domain_->collect();
+        if (!allocated_.empty() || !changes_.empty() ||
+            domain_->rootSetDirty_.load(std::memory_order_acquire))
+            domain_->collect();
         validateInitialized();
         prepared_ = true;
     }
@@ -409,6 +459,10 @@ public:
                 cell.provisional = nullptr;
         }
         commitRoot();
+        // The precommit trace retained old and new edges; publication can drop
+        // old reachability without destroying a RootLease. Sweep once more.
+        if (!changes_.empty() || !allocated_.empty())
+            domain_->rootSetDirty_.store(true, std::memory_order_release);
         changes_.clear();
         allocated_.clear();
         prepared_ = false;
@@ -420,6 +474,8 @@ public:
     }
 
     void discard() noexcept {
+        if (!changes_.empty())
+            markReachabilityChanged();
         changes_.clear();
         rollbackAllocations(0);
         prepared_ = false;
@@ -493,7 +549,13 @@ private:
         return false;
     }
 
+    void markReachabilityChanged() noexcept {
+        domain_->rootSetDirty_.store(true, std::memory_order_release);
+    }
+
     void rollbackAllocations(std::uint64_t serial) noexcept {
+        if (!allocated_.empty() && allocated_.back().serial > serial)
+            markReachabilityChanged();
         while (!allocated_.empty() && allocated_.back().serial > serial) {
             domain_->destroy(allocated_.back().id);
             allocated_.pop_back();
@@ -675,78 +737,87 @@ inline void ObjectDomain::collect() {
 
 inline void ObjectDomain::collect(const std::vector<ObjectId>& extraRoots) {
     requireOwner();
-    if (liveCells_ == 0) {
-        for (auto id : extraRoots) {
-            if (!id.isNull())
-                checked(id);
-        }
-        return;
-    }
-    std::array<bool, maximumCells> marked{};
-    std::vector<ObjectId> pending;
-    pending.reserve(maximumCells);
-    const auto mark = [&](ObjectId id) {
-        if (id.isNull())
-            return;
-        checked(id);
-        if (!marked[id.slot]) {
-            marked[id.slot] = true;
-            pending.push_back(id);
-        }
-    };
-    for (std::size_t index = 0; index < maximumCells; ++index) {
-        const auto& cell = cells_[index];
-        if (cell.state && !cell.root.expired())
-            mark({static_cast<std::uint32_t>(index), cell.generation});
-    }
-    for (auto id : extraRoots)
-        mark(id);
-    while (!pending.empty()) {
-        const auto id = pending.back();
-        pending.pop_back();
-        for (auto edge : cells_[id.slot].state->edges)
-            mark(edge);
-        for (auto* transaction : transactions_) {
-            if (!transaction)
-                continue;
-            const auto visit = [&](const object_detail::Changes& changes) {
-                const auto position = changes.find(id);
-                if (position != changes.end()) {
-                    for (auto edge : position->second->edges)
-                        mark(edge);
-                }
-            };
-            visit(transaction->changes_);
-            for (auto* savepoint : transaction->savepoints_) {
-                if (savepoint)
-                    visit(savepoint->saved_);
+    // Clear before tracing so lease drops during sweep remain pending.
+    rootSetDirty_.store(false, std::memory_order_release);
+    if (!extraRoots.empty())
+        rootSetDirty_.store(true, std::memory_order_release);
+    try {
+        if (liveCells_ == 0) {
+            for (auto id : extraRoots) {
+                if (!id.isNull())
+                    checked(id);
             }
+            return;
         }
-    }
-    for (std::size_t index = 0; index < maximumCells; ++index) {
-        auto& cell = cells_[index];
-        if (!cell.state || marked[index])
-            continue;
-        const ObjectId id{static_cast<std::uint32_t>(index), cell.generation};
-        for (auto* transaction : transactions_) {
-            if (transaction) {
-                transaction->changes_.erase(id);
+        std::array<bool, maximumCells> marked{};
+        std::vector<ObjectId> pending;
+        pending.reserve(maximumCells);
+        const auto mark = [&](ObjectId id) {
+            if (id.isNull())
+                return;
+            checked(id);
+            if (!marked[id.slot]) {
+                marked[id.slot] = true;
+                pending.push_back(id);
+            }
+        };
+        for (std::size_t index = 0; index < maximumCells; ++index) {
+            const auto& cell = cells_[index];
+            if (cell.state && !cell.root.expired())
+                mark({static_cast<std::uint32_t>(index), cell.generation});
+        }
+        for (auto id : extraRoots)
+            mark(id);
+        while (!pending.empty()) {
+            const auto id = pending.back();
+            pending.pop_back();
+            for (auto edge : cells_[id.slot].state->edges)
+                mark(edge);
+            for (auto* transaction : transactions_) {
+                if (!transaction)
+                    continue;
+                const auto visit = [&](const object_detail::Changes& changes) {
+                    const auto position = changes.find(id);
+                    if (position != changes.end()) {
+                        for (auto edge : position->second->edges)
+                            mark(edge);
+                    }
+                };
+                visit(transaction->changes_);
                 for (auto* savepoint : transaction->savepoints_) {
                     if (savepoint)
-                        savepoint->saved_.erase(id);
+                        visit(savepoint->saved_);
                 }
             }
         }
-        destroy(id);
-    }
-    for (auto* transaction : transactions_) {
-        if (transaction) {
-            auto& allocations = transaction->allocated_;
-            allocations.erase(std::remove_if(allocations.begin(), allocations.end(),
-                [&](const GraphTransaction::Allocation& allocation) {
-                    return !transaction->isLive(allocation.id);
-                }), allocations.end());
+        for (std::size_t index = 0; index < maximumCells; ++index) {
+            auto& cell = cells_[index];
+            if (!cell.state || marked[index])
+                continue;
+            const ObjectId id{static_cast<std::uint32_t>(index), cell.generation};
+            for (auto* transaction : transactions_) {
+                if (transaction) {
+                    transaction->changes_.erase(id);
+                    for (auto* savepoint : transaction->savepoints_) {
+                        if (savepoint)
+                            savepoint->saved_.erase(id);
+                    }
+                }
+            }
+            destroy(id);
         }
+        for (auto* transaction : transactions_) {
+            if (transaction) {
+                auto& allocations = transaction->allocated_;
+                allocations.erase(std::remove_if(allocations.begin(), allocations.end(),
+                    [&](const GraphTransaction::Allocation& allocation) {
+                        return !transaction->isLive(allocation.id);
+                    }), allocations.end());
+            }
+        }
+    } catch (...) {
+        rootSetDirty_.store(true, std::memory_order_release);
+        throw;
     }
 }
 

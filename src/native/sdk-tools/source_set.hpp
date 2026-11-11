@@ -2,6 +2,7 @@
 #pragma once
 
 #include "manifest.hpp"
+#include "../model-compiler/ResourceBudget.hpp"
 
 namespace pipelang::tools {
 // One closed filesystem input inventory. Language imports and exported model
@@ -19,6 +20,7 @@ public:
 private:
     fs::path descriptor_;
     std::string descriptorBytes_;
+    models::ResourceBudget budget_;
     std::string compilerProtocol_;
     std::string entry_;
     Json models_;

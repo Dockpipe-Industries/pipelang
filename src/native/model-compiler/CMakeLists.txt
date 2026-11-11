@@ -7,7 +7,11 @@ if(NOT PIPELANG_JSON_SHA256 STREQUAL "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8
     message(FATAL_ERROR "Pinned nlohmann/json.hpp checksum mismatch")
 endif()
 
-add_library(pipelang_model_compiler STATIC compiler.cpp composition.cpp ProjectModelFacets.cpp parser.cpp checker.cpp generator.cpp constants.cpp ../lexer/lexer.cpp)
+add_library(pipelang_model_compiler STATIC
+    compiler.cpp composition.cpp CompositionGraph.cpp CompositionPlanner.cpp
+    CompositionEmitter.cpp CompositionFactoryProfile.cpp ProjectModelFacets.cpp
+    parser.cpp checker.cpp generator.cpp NativeNumericExports.cpp constants.cpp
+    ResourceBudget.cpp ScopedResourceBudget.cpp ../lexer/lexer.cpp)
 target_compile_features(pipelang_model_compiler PUBLIC cxx_std_20)
 target_include_directories(pipelang_model_compiler PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/pipeview/model/native/include")
 add_executable(pipelang-modelc main.cpp)

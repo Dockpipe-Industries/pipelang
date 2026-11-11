@@ -2,6 +2,7 @@
 #pragma once
 
 #include "manifest.hpp"
+#include "../model-compiler/ResourceBudget.hpp"
 
 namespace pipelang::tools {
 
@@ -25,6 +26,7 @@ private:
     Json modules_;
     Json index_;
     std::vector<fs::path> dependencies_;
+    models::ResourceBudget budget_;
 };
 
 Json projectInformation(const fs::path& prefix, const fs::path& manifest,

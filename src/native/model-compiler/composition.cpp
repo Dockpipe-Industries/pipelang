@@ -27,8 +27,8 @@ using Substitutions = std::map<std::string, Type>;
 
 bool builtin(const std::string& name) {
     static const std::set<std::string> names = {
-        "void", "bool", "int", "uint32", "float", "float32", "string", "Error", "CancellationToken",
-        "Result", "Task", "Optional", "List", "Atomic", "Array", "Dictionary",
+        "void", "bool", "int", "uint32", "float", "float32", "string", "ByteBuffer", "Error", "CancellationToken",
+        "Result", "Task", "Optional", "List", "Atomic", "Array", "FixedArray", "Dictionary",
         "HashSet", "Queue", "Stack", "KeyValuePair",
         "ConcurrentDictionary", "ConcurrentQueue", "ConcurrentStack", "Lock", "SemaphoreSlim"
     };
@@ -94,7 +94,11 @@ public:
         expression(value.target, offset, module);
         for (const auto& capture : value.parallelCaptures)
             field(capture, offset, module);
+        for (const auto& child : value.initialization)
+            statement(child, offset, module);
         for (const auto& child : value.body)
+            statement(child, offset, module);
+        for (const auto& child : value.iteration)
             statement(child, offset, module);
         for (const auto& child : value.alternative)
             statement(child, offset, module);
@@ -186,7 +190,11 @@ private:
         projectExpression(value.target, module);
         for (const auto& capture : value.parallelCaptures)
             projectField(capture, module);
+        for (const auto& child : value.initialization)
+            projectStatement(child, module);
         for (const auto& child : value.body)
+            projectStatement(child, module);
+        for (const auto& child : value.iteration)
             projectStatement(child, module);
         for (const auto& child : value.alternative)
             projectStatement(child, module);
@@ -219,6 +227,8 @@ Statement cloneStatement(const Statement& original) {
     Statement result = original;
     result.expression = cloneExpression(original.expression);
     result.target = cloneExpression(original.target);
+    result.initialization.clear();
+    result.iteration.clear();
     result.body.clear();
     result.alternative.clear();
     result.cleanup.clear();
@@ -226,6 +236,10 @@ Statement cloneStatement(const Statement& original) {
         capture.initializer = cloneExpression(capture.initializer);
         capture.constantValue = cloneExpression(capture.constantValue);
     }
+    for (const auto& statement : original.initialization)
+        result.initialization.push_back(cloneStatement(statement));
+    for (const auto& statement : original.iteration)
+        result.iteration.push_back(cloneStatement(statement));
     for (const auto& statement : original.body)
         result.body.push_back(cloneStatement(statement));
     for (const auto& statement : original.alternative)
@@ -292,10 +306,10 @@ class ModuleLinker {
 public:
     Program run(const std::vector<ModuleSource>& sources, const std::string& entry, bool objectSyntax, bool projectSyntax) {
         DiagnosticOriginScope compilationOrigin(std::string{});
-        const std::size_t sourceCountLimit = projectSyntax ? 4096 : 128;
+        const auto& budget = resourceBudget();
+        const std::size_t sourceCountLimit = projectSyntax ? budget.sourceFragments : budget.modules;
         if (sources.empty() || sources.size() > sourceCountLimit || !moduleName(entry))
-            fail(projectSyntax ? "project graph requires 1..4096 fragments and a valid entry"
-                               : "closed module graph requires 1..128 modules and a valid entry", 0);
+            fail("source fragment resource budget exceeded or invalid entry; configure source_fragments/modules", 0);
         std::vector<const ModuleSource*> fragments;
         for (const auto& source : sources)
             fragments.push_back(&source);
@@ -314,11 +328,14 @@ public:
         for (const auto* fragment : fragments) {
             const auto& source = *fragment;
             if (projectSyntax) {
-                if (source.path.size() > messageLimit - originBytes)
+                if (budgetExceeded(originBytes, source.path.size(), budget.outputBytes))
                     fail("project fragment origin receipt byte limit exceeded", 0, source.name);
                 originBytes += source.path.size();
             }
             DiagnosticOriginScope origin(source.path);
+            if (budgetExceeded(sourceBytes, source.source.size(), budget.inputBytes))
+                fail("aggregate input_bytes resource budget exceeded; configure input_bytes", 0, source.name);
+            sourceBytes += source.source.size();
             if (!moduleName(source.name) || (!projectSyntax && programs_.contains(source.name)))
                 fail("invalid or duplicate supplied module '" + source.name + "'", 0, source.name);
             if (projectSyntax)
@@ -327,9 +344,6 @@ public:
                 if (!projectSourcePath(source.path) || !sourcePaths.insert(source.path).second)
                     fail("invalid or duplicate project fragment path '" + source.path + "'", 0, source.name);
             }
-            if (source.source.size() > sourceLimit - sourceBytes)
-                fail("aggregate module source byte limit exceeded", 0, source.name);
-            sourceBytes += source.source.size();
             Program program;
             try {
                 program = parse(source.source, objectSyntax, 32, projectSyntax);
@@ -343,23 +357,26 @@ public:
                 program.module = source.name;
             if (program.module != source.name)
                 fail("source module declaration must match its supplied module identity", 0, source.name);
-            if (program.tokenCount > 32768 - tokenCount)
-                fail("aggregate module token limit exceeded", 0, source.name);
+            if (budgetExceeded(tokenCount, program.tokenCount, budget.tokens))
+                fail("aggregate module token resource budget exceeded; configure tokens", 0, source.name);
             tokenCount += program.tokenCount;
-            if (program.expressionCount > 16384 - expressionCount)
-                fail("aggregate module expression node limit exceeded", 0, source.name);
+            if (budgetExceeded(expressionCount, program.expressionCount, budget.expressions))
+                fail("aggregate module expression resource budget exceeded; configure expressions", 0, source.name);
             expressionCount += program.expressionCount;
+            if (budgetExceeded(declarationCount, program.declarations.size(), budget.declarations))
+                fail("aggregate module declaration resource budget exceeded; configure declarations", 0, source.name);
             declarationCount += program.declarations.size();
-            if (declarationCount > 128)
-                fail("aggregate module declaration limit exceeded", 0, source.name);
+            if (budgetExceeded(declarationCount, program.compositions.size(), budget.declarations))
+                fail("aggregate module declaration resource budget exceeded; configure declarations", 0, source.name);
+            declarationCount += program.compositions.size();
             if (programs_.contains(source.name)) {
                 if (!explicitModule || !explicitModules.at(source.name) || source.path.empty() ||
                     modulePaths_.at(source.name).empty())
                     fail("duplicate project module requires distinct explicit source parts: " +
                          modulePaths_.at(source.name) + " and " + source.path, 0, source.name);
             } else {
-                if (programs_.size() == 128)
-                    fail("project import closure exceeds 128 modules", 0, source.name);
+                if (programs_.size() == budget.modules)
+                    fail("project module resource budget exceeded; configure modules", 0, source.name);
                 explicitModules.emplace(source.name, explicitModule);
                 modulePaths_.emplace(source.name, source.path);
             }
@@ -379,10 +396,16 @@ public:
                 if (projectSyntax)
                     declaration.module = source.name;
             }
+            for (auto& composition : program.compositions) {
+                composition.originPath = source.path;
+                composition.module = source.name;
+            }
             if (const auto existing = programs_.find(source.name); existing != programs_.end()) {
                 auto& combined = existing->second;
                 combined.declarations.insert(combined.declarations.end(),
                     std::make_move_iterator(program.declarations.begin()), std::make_move_iterator(program.declarations.end()));
+                combined.compositions.insert(combined.compositions.end(),
+                    std::make_move_iterator(program.compositions.begin()), std::make_move_iterator(program.compositions.end()));
                 std::set<std::string> dependencies(combined.imports.begin(), combined.imports.end());
                 dependencies.insert(program.imports.begin(), program.imports.end());
                 combined.imports.assign(dependencies.begin(), dependencies.end());
@@ -409,34 +432,51 @@ public:
         }
         std::set<std::string> visiting;
         std::set<std::string> visited;
-        std::function<void(const std::string&)> visit = [&](const std::string& name) {
-            if (visiting.contains(name))
-                fail("module import cycle", 0, name);
-            if (visited.contains(name))
-                return;
-            visiting.insert(name);
-            for (const auto& dependency : programs_.at(name).imports) {
-                if (projectSyntax && visiting.contains(dependency)) {
-                    const auto& [path, offset] = importOrigins_.at({name, dependency});
-                    DiagnosticOriginScope origin(path);
-                    fail("module import cycle", offset, name);
-                }
-                visit(dependency);
-            }
-            visiting.erase(name);
-            visited.insert(name);
+        struct ImportFrame {
+            std::string name;
+            std::size_t next = 0;
         };
         // Validate every supplied module, including modules outside the entry closure.
-        for (const auto& [name, program] : programs_)
-            visit(name);
+        for (const auto& [name, program] : programs_) {
+            (void)program;
+            if (visited.contains(name))
+                continue;
+            std::vector<ImportFrame> pending{{name, 0}};
+            visiting.insert(name);
+            while (!pending.empty()) {
+                auto& frame = pending.back();
+                const auto& imports = programs_.at(frame.name).imports;
+                if (frame.next == imports.size()) {
+                    visiting.erase(frame.name);
+                    visited.insert(frame.name);
+                    pending.pop_back();
+                    continue;
+                }
+                const auto dependency = imports[frame.next++];
+                if (visiting.contains(dependency)) {
+                    if (projectSyntax) {
+                        const auto& [path, offset] = importOrigins_.at({frame.name, dependency});
+                        DiagnosticOriginScope origin(path);
+                        fail("module import cycle", offset, frame.name);
+                    }
+                    fail("module import cycle", 0, dependency);
+                }
+                if (!visited.contains(dependency)) {
+                    visiting.insert(dependency);
+                    pending.push_back({dependency, 0});
+                }
+            }
+        }
         std::set<std::string> reachable;
-        std::function<void(const std::string&)> reach = [&](const std::string& name) {
+        std::vector<std::string> pending{entry};
+        while (!pending.empty()) {
+            auto name = std::move(pending.back());
+            pending.pop_back();
             if (!reachable.insert(name).second)
-                return;
-            for (const auto& dependency : programs_.at(name).imports)
-                reach(dependency);
-        };
-        reach(entry);
+                continue;
+            const auto& imports = programs_.at(name).imports;
+            pending.insert(pending.end(), imports.begin(), imports.end());
+        }
         if (reachable.size() != programs_.size())
             fail("supplied module is outside the entry import closure", 0, entry);
 
@@ -461,6 +501,15 @@ public:
                 // Preserve the entry class names used by native host consumers.
                 names_[canonical] = name == entry && !projectSyntax ? declaration.name
                     : "pl_module_type_" + std::to_string(identity++);
+            }
+            for (auto& composition : program.compositions) {
+                DiagnosticOriginScope origin(composition.originPath);
+                const auto canonical = name + '.' + composition.name;
+                if (localNames.contains(composition.name) || builtin(composition.name) ||
+                    compositionNames_.contains(canonical))
+                    fail("duplicate or reserved composition declaration '" + canonical + "'",
+                         composition.offset, name);
+                compositionNames_.emplace(canonical, canonical);
             }
         }
         const auto inheritedNames = objectSyntax ? inheritedClassNames() : std::map<std::string, std::set<std::string>>{};
@@ -506,6 +555,25 @@ public:
                     rewriteStatements(method.body, methodParameters, methodValues);
                 }
                 linked.declarations.push_back(std::move(declaration));
+            }
+            for (auto& composition : program.compositions) {
+                DiagnosticOriginScope origin(composition.originPath);
+                currentImports_ = &lexicalImports_.at({name, composition.originPath});
+                composition.sourceName = name + '.' + composition.name;
+                composition.name = composition.sourceName;
+                for (auto& registration : composition.registrations) {
+                    rewriteType(registration.service, {}, registration.offset);
+                    rewriteType(registration.implementation, {}, registration.offset);
+                    if (registration.factory)
+                        rewriteType(registration.factory->owner, {}, registration.factory->offset);
+                }
+                for (auto& cleanup : composition.cleanupContracts)
+                    rewriteType(cleanup.owner, {}, cleanup.offset);
+                for (std::size_t index = 0; index < composition.exports.size(); ++index)
+                    rewriteType(composition.exports[index], {}, composition.exportOffsets.at(index));
+                for (auto& include : composition.includes)
+                    include.name = resolve(include.name, include.offset, true, true);
+                linked.compositions.push_back(std::move(composition));
             }
         }
         return linked;
@@ -575,30 +643,33 @@ private:
         return result;
     }
 
-    std::string resolve(const std::string& name, std::size_t offset, bool required) const {
+    std::string resolve(const std::string& name, std::size_t offset, bool required,
+                        bool composition = false) const {
+        const auto& identities = composition ? compositionNames_ : names_;
+        const std::string kind = composition ? "composition" : "type";
         const auto local = current_->module + '.' + name;
-        if (names_.contains(local))
+        if (identities.contains(local))
             return local;
         std::vector<std::string> candidates;
         for (const auto& dependency : *currentImports_) {
             const auto candidate = dependency + '.' + name;
-            if (names_.contains(candidate))
+            if (identities.contains(candidate))
                 candidates.push_back(candidate);
         }
         if (candidates.size() > 1)
-            fail("ambiguous imported type '" + name + "'", offset, current_->module);
+            fail("ambiguous imported " + kind + " '" + name + "'", offset, current_->module);
         if (candidates.size() == 1)
             return candidates.front();
-        if (names_.contains(name)) {
+        if (identities.contains(name)) {
             const auto separator = name.rfind('.');
             const auto owner = name.substr(0, separator);
             if (owner == current_->module ||
                 std::find(currentImports_->begin(), currentImports_->end(), owner) != currentImports_->end())
                 return name;
-            fail("qualified type requires an explicit direct import", offset, current_->module);
+            fail("qualified " + kind + " requires an explicit direct import", offset, current_->module);
         }
         if (required)
-            fail("unknown or unimported type '" + name + "'", offset, current_->module);
+            fail("unknown or unimported " + kind + " '" + name + "'", offset, current_->module);
         return {};
     }
 
@@ -662,6 +733,18 @@ private:
                            std::set<std::string> values) {
         for (auto& statement : statements) {
             rewriteType(statement.type, parameters, statement.offset);
+            if (statement.kind == "for") {
+                rewriteStatements(statement.initialization, parameters, values);
+                auto loopValues = values;
+                for (const auto& initializer : statement.initialization) {
+                    if (initializer.kind == "local")
+                        loopValues.insert(initializer.name);
+                }
+                rewriteExpression(statement.expression, parameters, loopValues);
+                rewriteStatements(statement.body, parameters, loopValues);
+                rewriteStatements(statement.iteration, parameters, loopValues);
+                continue;
+            }
             rewriteExpression(statement.expression, parameters, values);
             rewriteExpression(statement.target, parameters, values);
             auto bodyValues = values;
@@ -694,7 +777,7 @@ private:
         }
     }
     static bool projectSourcePath(const std::string& path) {
-        if (path.empty() || path.size() > sourceLimit || path.front() == '/' || !path.ends_with(".pipe") ||
+        if (path.empty() || path.size() > sourcePathLimit || path.front() == '/' || !path.ends_with(".pipe") ||
             path.find_first_of("\\:\r\n;") != std::string::npos || path.find('\0') != std::string::npos)
             return false;
         std::size_t begin = 0;
@@ -715,6 +798,7 @@ private:
     std::map<std::pair<std::string, std::string>, std::pair<std::string, std::size_t>> importOrigins_;
     const std::vector<std::string>* currentImports_ = nullptr;
     std::map<std::string, std::string> names_;
+    std::map<std::string, std::string> compositionNames_;
     Program* current_ = nullptr;
 };
 
@@ -1070,7 +1154,8 @@ private:
         }
         if (!program_.objectEnabled)
             return;
-        if ((!program_.projectEnabled && program_.modelExports.empty()) || program_.modelExports.size() > 128)
+        if ((!program_.projectEnabled && program_.modelExports.empty()) ||
+            program_.modelExports.size() > resourceBudget().declarations)
             fail("object compilation requires 1..128 explicit model roots", 0, program_.module);
         std::vector<std::string> resolved;
         std::set<std::string> selected;
@@ -1145,7 +1230,8 @@ private:
         const auto bindings = bind(record.typeParameters, arguments, offset);
         if (activeRecords_.contains(record.name))
             fail("expanding recursive generic record instantiation", offset, currentModule_);
-        if (recordInstances_.size() >= 128 || program_.declarations.size() >= 128)
+        if (recordInstances_.size() >= resourceBudget().genericInstances ||
+            program_.declarations.size() >= resourceBudget().declarations)
             fail("closed generic type limit exceeded", offset, currentModule_);
         const auto nativeName = "pl_generic_record_" + std::to_string(recordInstances_.size());
         recordInstances_[canonical] = nativeName;
@@ -1283,7 +1369,9 @@ private:
             normalizeType(statement.type, substitutions, statement.offset);
             normalizeExpression(statement.expression, owner, substitutions);
             normalizeExpression(statement.target, owner, substitutions);
+            normalizeStatements(statement.initialization, owner, substitutions);
             normalizeStatements(statement.body, owner, substitutions);
+            normalizeStatements(statement.iteration, owner, substitutions);
             normalizeStatements(statement.alternative, owner, substitutions);
             normalizeStatements(statement.cleanup, owner, substitutions);
         }

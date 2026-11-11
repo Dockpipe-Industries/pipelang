@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "CompiledProjectTests.hpp"
+#include "BuildTimestamp.h"
 #include "CompiledImplementationUnitTests.hpp"
 #include "ProjectTests.hpp"
 #include "../../src/native/sdk-tools/CompiledProjectFiles.hpp"
@@ -136,6 +137,7 @@ void compiledProjectContracts(const std::filesystem::path& prefix, const std::fi
     const auto body = edited.find("=> value;");
     require(body != std::string::npos, "compiled mutation fixture lost its method");
     edited.replace(body, std::string("=> value;").size(), "=> value + 0;");
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(source, edited);
     invoke({nativeTool("cmake").string(), "--build", build.string(), "--target", "project_model_generate", "--parallel", "1"});
     require(fs::last_write_time(build / "generated/Model.hpp") == modelTime,
@@ -161,10 +163,12 @@ void compiledProjectContracts(const std::filesystem::path& prefix, const std::fi
     const auto extra = output / "src/Extra.pipe";
     const auto entry = output / "src/Entry.pipe";
     const auto originalEntry = readFile(entry, 65536);
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(extra, "module Extra; public model Class Extra {}\n");
     atomicWrite(entry, originalEntry + "import Extra;\n");
     invoke({nativeTool("cmake").string(), "--build", build.string(), "--target", "project_model_generate", "--parallel", "1"});
     const auto added = parseJson(readFile(build / "generated/bindings.json", 4U << 20));
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(entry, originalEntry);
     fs::remove(extra);
     invoke({nativeTool("cmake").string(), "--build", build.string(), "--target", "project_model_generate", "--parallel", "1"});

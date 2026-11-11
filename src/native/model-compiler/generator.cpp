@@ -1,6 +1,9 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "syntax.hpp"
 #include "CompiledImplementationUnits.hpp"
+#include "NativeNumericExports.hpp"
+#include "CompositionEmitter.hpp"
+#include "CompositionPlanner.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -40,6 +43,98 @@ public:
     explicit Generator(const Program& program, bool compiled = false)
         : program_(program), compiled_(compiled) {}
 
+    std::string compositionFactory(const std::string& nameSpace) {
+        nameSpace_ = nameSpace;
+        prepareObjectNames();
+        const CompositionFactoryBindings bindings{
+            nameSpace, compiled_,
+            [this](const Type& type) { return cpp(type); },
+            [this](const std::string& identity) { return objectFunction(identity); },
+            [this](const Type& type) { return objectTag(type.name); }
+        };
+        return emitCompositionFactory(program_, planCompositions(program_), bindings);
+    }
+
+    std::string runNumericHeader(const std::string& nameSpace) {
+        standaloneHeader_ = true;
+        numericEmission_ = true;
+        nameSpace_ = nameSpace + "::numeric_header";
+        line("// Generated caller-host numeric projection; ordinary model types remain separate.");
+        line("#pragma once");
+        line("#include <array>");
+        if (usesType("FixedArray"))
+            line("#include <pipelang/model/fixed_array.hpp>");
+        line("#include <bit>");
+        line("#include <pipelang/model/result.hpp>");
+        if (usesType("uint32"))
+            line("#include <pipelang/model/uint32.hpp>");
+        if (usesType("float") || usesType("float32"))
+            line("#include <pipelang/model/numeric.hpp>");
+
+        if (usesType("string"))
+            line("#include <pipelang/model/byte_text.hpp>");
+        line("namespace " + nameSpace_ + " {");
+        std::set<std::string> valueDeclarations;
+        for (const auto& owner : program_.declarations) {
+            for (const auto& method : owner.methods) {
+                NativeNumericExports::Projection projection;
+                if (admitNumeric(owner, method, false, &projection))
+                    valueDeclarations.insert(projection.valueDeclarations.begin(), projection.valueDeclarations.end());
+            }
+        }
+        for (const auto& declaration : program_.declarations) {
+            if (!valueDeclarations.contains(declaration.name) || declaration.kind != "Enum")
+                continue;
+            std::string values;
+            for (const auto& value : declaration.values) {
+                if (!values.empty())
+                    values += ", ";
+                values += value;
+            }
+            line("enum class " + declaration.name + " { " + values + " };");
+            emitEnumValidation(declaration);
+        }
+        std::set<std::string> emittedValueRecords;
+        std::function<void(const Type&)> emitValueType;
+        std::function<void(const Declaration&)> emitValueRecord;
+        emitValueType = [&](const Type& type) {
+            for (const auto& argument : type.arguments)
+                emitValueType(argument);
+            const auto* declaration = findType(program_, type.name);
+            if (declaration && declaration->kind == "Record" && valueDeclarations.contains(declaration->name))
+                emitValueRecord(*declaration);
+        };
+        emitValueRecord = [&](const Declaration& declaration) {
+            if (emittedValueRecords.contains(declaration.name))
+                return;
+            for (const auto& field : declaration.fields)
+                emitValueType(field.type);
+            line("struct " + declaration.name + " {");
+            for (const auto& field : declaration.fields) {
+                const auto initializer = field.initializer ? " = " + defaultExpression(field.initializer) : "{}";
+                line(cpp(field.type) + " " + field.name + initializer + ";", 1);
+            }
+            line("bool operator==(const " + declaration.name + "&) const = default;", 1);
+            line("};");
+            if (usesType("FixedArray"))
+                emitRecordValueOperations(declaration, true);
+            emittedValueRecords.insert(declaration.name);
+        };
+        for (const auto& declaration : program_.declarations) {
+            if (valueDeclarations.contains(declaration.name) && declaration.kind == "Record")
+                emitValueRecord(declaration);
+        }
+        for (const auto& declaration : program_.declarations) {
+            if (!valueDeclarations.contains(declaration.name))
+                continue;
+            const auto [aliasNamespace, typeName] = sourceAliasLocation(declaration.sourceName);
+            line("namespace " + aliasNamespace + " { using " + typeName + " = " + declaration.name + "; }");
+        }
+        emitNativeNumericExports();
+        line("}");
+        return output_.str();
+    }
+
     std::map<std::string, std::string> implementationFiles() const {
         auto files = implementationUnits_->files();
         files.emplace("Objects.hpp", objects_.str());
@@ -50,6 +145,14 @@ public:
         line(program_.objectEnabled ? "// Generated by pipelang-modelc; native-model object capability v3."
                                     : "// Generated by pipelang-modelc; native-model capability v1.");
         line("#pragma once");
+        line("#include <array>");
+        if (usesType("FixedArray"))
+            line("#include <pipelang/model/fixed_array.hpp>");
+        if (usesType("string"))
+            line("#include <pipelang/model/byte_text.hpp>");
+        line("#include <pipelang/model/floating_environment.hpp>");
+        if (program_.activeHostNumericEnvironment && !typesOnly)
+            line("#include <pipelang/model/active_numeric.hpp>");
         if (program_.projectEnabled && !typesOnly) {
             prepareObjectNames();
             line("#include \"Types.hpp\"");
@@ -102,13 +205,7 @@ public:
                         values += value;
                     }
                     line("enum class " + declaration.name + " { " + values + " };");
-                    line("inline void validate(" + declaration.name + " value) {");
-                    line("    switch (value) {");
-                    for (const auto& value : declaration.values)
-                        line("    case " + declaration.name + "::" + value + ": return;");
-                    line("    }");
-                    line("    throw pipelang::model::ExecutionFailure(\"invalid enum value\");");
-                    line("}");
+                    emitEnumValidation(declaration);
                 }
             }
             emitObjectTags();
@@ -134,31 +231,7 @@ public:
                 }
                 line("    bool operator==(const " + record.name + "&) const = default;");
                 line("};");
-                line("inline void validate(const " + record.name + "& value) {");
-                line("    using pipelang::model::validate;");
-                if (record.fields.empty())
-                    line("    (void)value;");
-                for (const auto& field : record.fields)
-                    line("    validate(value." + field.name + ");");
-                line("}");
-                if (program_.objectEnabled || usesType("List") || usesExtendedCollections()) {
-                    line("inline std::size_t ownedBytes(const " + record.name + "& value) {");
-                    line("    using pipelang::model::ownedBytes;");
-                    line("    std::size_t bytes = sizeof(value);");
-                    for (const auto& field : record.fields)
-                        line("    bytes = pipelang::model::addOwnedBytes(bytes, ownedBytes(value." + field.name + ")); ");
-                    line("    return bytes;");
-                    line("}");
-                    line("inline std::size_t ownedElements(const " + record.name + "& value) {");
-                    line("    using pipelang::model::ownedElements;");
-                    line("    std::size_t elements = 0;");
-                    if (record.fields.empty())
-                        line("    (void)value;");
-                    for (const auto& field : record.fields)
-                        line("    elements = pipelang::model::boundedOwnedSum(elements, ownedElements(value." + field.name + "), pipelang::model::maximumListElements);");
-                    line("    return elements;");
-                    line("}");
-                }
+                emitRecordValueOperations(record, program_.objectEnabled || usesType("List") || usesExtendedCollections());
                 emitted.insert(record.name);
             };
             for (const auto& declaration : program_.declarations) {
@@ -175,6 +248,9 @@ public:
             line("}");
             return output_.str();
         }
+        prepareQualifiedFunctions();
+        prepareObservationMethods();
+        emitQualifiedDeclarations();
         if (compiled_) {
             objects_ << "// Generated private project declarations.\n#pragma once\n"
                      << "#include \"Model.hpp\"\nnamespace " << nameSpace << " {\n";
@@ -191,14 +267,82 @@ public:
             if (declaration.kind == "Class" && (!program_.objectEnabled || declaration.modelExported))
                 model(declaration);
         }
-        if (program_.projectEnabled)
+        emitQualifiedDefinitions();
+        if (program_.projectEnabled) {
             emitSourceAliases(true);
+            emitNativeNumericExports();
+            emitNativeObservationExports();
+        }
         if (compiled_)
             objects_ << "}\n";
         line("}");
         return output_.str();
     }
 private:
+    bool supportsConstantValidation(const Type& type, std::set<std::string>& records) const {
+        if (type.arguments.empty() && (type.name == "bool" || type.name == "int" ||
+            type.name == "uint32" || type.name == "float" || type.name == "float32"))
+            return true;
+        if (type.name == "Optional" || type.name == "FixedArray" || type.name == "Result") {
+            return std::all_of(type.arguments.begin(), type.arguments.end(), [&](const Type& argument) {
+                return argument.name == "void" || supportsConstantValidation(argument, records);
+            });
+        }
+        const auto* declaration = findType(program_, type.name);
+        if (!declaration || !type.arguments.empty())
+            return false;
+        if (declaration->kind == "Enum")
+            return true;
+        if (declaration->kind != "Record" || !records.insert(type.name).second)
+            return false;
+        const bool supported = std::all_of(declaration->fields.begin(), declaration->fields.end(), [&](const Field& field) {
+            return supportsConstantValidation(field.type, records);
+        });
+        records.erase(type.name);
+        return supported;
+    }
+
+    void emitEnumValidation(const Declaration& declaration) {
+        line("inline constexpr void validate(" + declaration.name + " value) {");
+        line("    switch (value) {");
+        for (const auto& value : declaration.values)
+            line("    case " + declaration.name + "::" + value + ": return;");
+        line("    }");
+        line("    throw pipelang::model::ExecutionFailure(\"invalid enum value\");");
+        line("}");
+    }
+
+    void emitRecordValueOperations(const Declaration& record, bool ownership) {
+        std::set<std::string> records;
+        const std::string qualifier = supportsConstantValidation(Type{record.name, {}}, records)
+            ? "inline constexpr " : "inline ";
+        line(qualifier + "void validate(const " + record.name + "& value) {");
+        line("    using pipelang::model::validate;");
+        if (record.fields.empty())
+            line("    (void)value;");
+        for (const auto& field : record.fields)
+            line("    validate(value." + field.name + ");");
+        line("}");
+        if (!ownership)
+            return;
+        line(qualifier + "std::size_t ownedBytes(const " + record.name + "& value) {");
+        line("    using pipelang::model::ownedBytes;");
+        line("    std::size_t bytes = sizeof(value);");
+        for (const auto& field : record.fields)
+            line("    bytes = pipelang::model::addOwnedBytes(bytes, ownedBytes(value." + field.name + ")); ");
+        line("    return bytes;");
+        line("}");
+        line(qualifier + "std::size_t ownedElements(const " + record.name + "& value) {");
+        line("    using pipelang::model::ownedElements;");
+        line("    std::size_t elements = 0;");
+        if (record.fields.empty())
+            line("    (void)value;");
+        for (const auto& field : record.fields)
+            line("    elements = pipelang::model::boundedOwnedSum(elements, ownedElements(value." + field.name + "), pipelang::model::maximumListElements);");
+        line("    return elements;");
+        line("}");
+    }
+
     std::pair<std::string, std::string> sourceAliasLocation(const std::string& identity) const {
         const auto separator = identity.rfind('.');
         if (separator == std::string::npos)
@@ -287,6 +431,297 @@ private:
         }
     }
 
+    struct QualifiedFunction {
+        const Declaration* owner;
+        const Method* method;
+        std::string name;
+    };
+
+    const Declaration& methodOwner(const std::string& identity) const {
+        for (const auto& declaration : program_.declarations) {
+            for (const auto& method : declaration.methods) {
+                if (method.identity == identity)
+                    return declaration;
+            }
+        }
+        throw Diagnostic("qualified pure call has no resolved owner", 0);
+    }
+
+    const Method& resolvedMethod(const Declaration& owner, const std::string& identity) const {
+        const auto found = std::find_if(owner.methods.begin(), owner.methods.end(), [&](const Method& method) {
+            return method.identity == identity;
+        });
+        if (found == owner.methods.end())
+            throw Diagnostic("qualified pure call has no resolved method", 0);
+        return *found;
+    }
+
+    void prepareQualifiedFunctions() {
+        std::function<void(const Expr&, bool)> inspectExpression;
+        std::function<void(const std::vector<Statement>&, bool)> inspectStatements;
+        inspectExpression = [&](const Expr& node, bool helperBody) {
+            if (!node)
+                return;
+            if (node->resolution == "qualified_pure" || (helperBody && node->resolution == "pure")) {
+                if (!qualifiedFunctions_.contains(node->callable)) {
+                    const auto& owner = methodOwner(node->callable);
+                    const auto& method = resolvedMethod(owner, node->callable);
+                    const auto name = "pl_qualified_" + std::to_string(qualifiedFunctions_.size());
+                    qualifiedFunctions_.emplace(node->callable, QualifiedFunction{&owner, &method, name});
+                    inspectStatements(method.body, true);
+                }
+            }
+            for (const auto& child : node->children)
+                inspectExpression(child, helperBody);
+        };
+        inspectStatements = [&](const std::vector<Statement>& body, bool helperBody) {
+            for (const auto& statement : body) {
+                inspectExpression(statement.expression, helperBody);
+                inspectExpression(statement.target, helperBody);
+                inspectStatements(statement.initialization, helperBody);
+                inspectStatements(statement.body, helperBody);
+                inspectStatements(statement.iteration, helperBody);
+                inspectStatements(statement.alternative, helperBody);
+                inspectStatements(statement.cleanup, helperBody);
+            }
+        };
+        for (const auto& owner : program_.declarations) {
+            for (const auto& method : owner.methods)
+                inspectStatements(method.body, false);
+        }
+    }
+
+    std::string qualifiedParameters(const Method& method) const {
+        std::string result = "pipelang::model::EvaluationBudget& pl_budget";
+        if (program_.objectEnabled)
+            result += ", pipelang::model::ObjectExecution& pl_execution";
+        const auto authored = parameters(method);
+        if (!authored.empty())
+            result += ", " + authored;
+        return result;
+    }
+
+    void prepareObservationMethods() {
+        for (const auto& owner : program_.declarations) {
+            for (const auto& method : owner.methods) {
+                if (NativeNumericExports::admitsObservation(program_, owner, method))
+                    observationMethods_.insert(method.identity);
+            }
+        }
+    }
+
+    void emitQualifiedDeclarations() {
+        for (const auto& [identity, function] : qualifiedFunctions_) {
+            (void)identity;
+            line(cpp(function.method->result) + " " + function.name + "(" + qualifiedParameters(*function.method) + ");");
+        }
+    }
+
+    void emitQualifiedDefinitions() {
+        qualifiedEmission_ = true;
+        usesBudget_ = true;
+        objectEmission_ = false;
+        workerEmission_ = false;
+        classParallel_ = false;
+        classSynchronization_ = false;
+        for (const auto& [identity, function] : qualifiedFunctions_) {
+            (void)identity;
+            method_ = function.method;
+            if (compiled_)
+                beginImplementationDefinition(function.owner->name);
+            line(std::string(compiled_ ? "" : "inline ") + cpp(method_->result) + " " + function.name +
+                "(" + qualifiedParameters(*method_) + ") {");
+            if (program_.objectEnabled)
+                line("(void)pl_execution;", 1);
+            unusedParameters(*method_, 1);
+            statements(method_->body, 1);
+            line("}");
+            if (compiled_) {
+                endImplementationDefinition();
+                selectedOutput_ = &output_;
+            }
+        }
+        qualifiedEmission_ = false;
+    }
+
+    std::string numericReturnType(const Method& method, const NativeNumericExports::ArrayHelper* helper) const {
+        if (method.result.name != "Array")
+            return cpp(method.result);
+        if (!helper || !helper->returnedArray)
+            throw Diagnostic("numeric private array return lacks a fixed extent", method.offset);
+        return "std::array<" + cpp(method.result.arguments.front()) + ", " +
+            std::to_string(*helper->returnedArray) + ">";
+    }
+
+    std::string numericParameters(const Method& method, const NativeNumericExports::ArrayHelper* helper) const {
+        std::string result;
+        for (std::size_t index = 0; index < method.parameters.size(); ++index) {
+            const auto& parameter = method.parameters[index];
+            if (!result.empty())
+                result += ", ";
+            if (parameter.type.name == "Array") {
+                if (!helper || !helper->parameters.contains(index))
+                    throw Diagnostic("numeric private array parameter lacks a fixed extent", parameter.offset);
+                result += "std::array<" + cpp(parameter.type.arguments.front()) + ", " +
+                    std::to_string(helper->parameters.at(index)) + ">";
+            } else {
+                result += cpp(parameter.type);
+            }
+            result += " " + parameter.name;
+        }
+        return result;
+    }
+
+    bool admitNumeric(const Declaration& owner, const Method& method, bool publicOnly = true,
+                      NativeNumericExports::Projection* projection = nullptr) const {
+        return standaloneHeader_
+            ? NativeNumericExports::admitsHeader(program_, owner, method, publicOnly, projection)
+            : NativeNumericExports::admits(program_, owner, method, publicOnly, projection);
+    }
+
+    void emitNumericMethod(const Method& method, const NativeNumericExports::Projection& projection,
+                           const NativeNumericExports::ArrayHelper* helper = nullptr, bool privateOnly = false) {
+        nativeProjection_ = projection;
+        line(method.visible && !privateOnly ? "public:" : "private:");
+        method_ = &method;
+        line(std::string(projection.constantEvaluable ? "static constexpr " : "static ") +
+            numericReturnType(method, helper) + " " + method.name +
+            "(" + numericParameters(method, helper) + ") noexcept {", 1);
+        unusedParameters(method, 2);
+        statements(method.body, 2);
+        line("}", 1);
+    }
+
+    void emitNativeNumericExports() {
+        // Closed numeric values have a finite syntax/channel-bound execution cost.
+        // Keep the ordinary scoped model API unchanged; only this additive
+        // native projection omits ownership, graph and evaluation-budget state.
+        usesBudget_ = false;
+        objectEmission_ = false;
+        workerEmission_ = false;
+        numericEmission_ = true;
+        for (const auto& declaration : program_.declarations) {
+            for (const auto& method : declaration.methods) {
+                NativeNumericExports::Projection projection;
+                if (!admitNumeric(declaration, method, true, &projection))
+                    continue;
+                if (projection.constantEvaluable)
+                    numericConstantMethods_.insert(method.identity);
+                const auto name = "pl_numeric_call_" + std::to_string(numericFunctions_.size());
+                numericFunctions_.emplace(method.identity, name);
+                line(std::string(projection.constantEvaluable ? "constexpr " : "") + cpp(method.result) +
+                    " " + name + "(" + parameters(method) + ") noexcept;");
+            }
+        }
+        for (const auto& declaration : program_.declarations) {
+            struct MethodPlan {
+                const Method* method;
+                NativeNumericExports::Projection projection;
+            };
+            struct ArrayHelperPlan {
+                const Method* method;
+                NativeNumericExports::ArrayHelper signature;
+                const NativeNumericExports::Projection* projection;
+            };
+            std::vector<MethodPlan> methods;
+            bool selected = false;
+            for (const auto& method : declaration.methods) {
+                NativeNumericExports::Projection projection;
+                if (!admitNumeric(declaration, method, false, &projection))
+                    continue;
+                selected = selected || method.visible;
+                methods.push_back({&method, std::move(projection)});
+            }
+            if (!selected)
+                continue;
+            std::vector<ArrayHelperPlan> helpers;
+            for (const auto& plan : methods) {
+                for (const auto& [helper, signature] : plan.projection.arrayHelpers) {
+                    const bool ownHelper = std::any_of(declaration.methods.begin(), declaration.methods.end(), [&](const Method& method) {
+                        return &method == helper;
+                    });
+                    if (!ownHelper)
+                        continue;
+                    const bool duplicate = std::any_of(helpers.begin(), helpers.end(), [&](const ArrayHelperPlan& emitted) {
+                        return emitted.method == helper && emitted.signature == signature;
+                    });
+                    if (!duplicate)
+                        helpers.push_back({helper, signature, &plan.projection});
+                }
+            }
+            auto [exportNamespace, typeName] = sourceAliasLocation(declaration.sourceName);
+            exportNamespace.replace(0, std::string("source").size(), "native_numeric");
+            line("namespace " + exportNamespace + " {");
+            // Source methods may share the authored class name. A reserved
+            // implementation name prevents C++ from interpreting them as
+            // constructors while the alias preserves the source-qualified API.
+            const auto implementationName = "pl_numeric_" + declaration.name;
+            line("struct " + implementationName + " final {");
+            for (const auto& plan : methods) {
+                const bool arraySignature = plan.method->result.name == "Array" ||
+                    std::any_of(plan.method->parameters.begin(), plan.method->parameters.end(), [](const Field& parameter) {
+                        return parameter.type.name == "Array";
+                    });
+                if (!arraySignature)
+                    emitNumericMethod(*plan.method, plan.projection);
+            }
+            for (const auto& helper : helpers)
+                emitNumericMethod(*helper.method, *helper.projection, &helper.signature);
+            line("};");
+            line("using " + typeName + " = " + implementationName + ";");
+            line("}");
+        }
+        for (const auto& declaration : program_.declarations) {
+            for (const auto& method : declaration.methods) {
+                const auto found = numericFunctions_.find(method.identity);
+                if (found == numericFunctions_.end())
+                    continue;
+                auto [exportNamespace, typeName] = sourceAliasLocation(declaration.sourceName);
+                exportNamespace.replace(0, std::string("source").size(), "native_numeric");
+                line(std::string(numericConstantMethods_.contains(method.identity) ? "inline constexpr " : "inline ") +
+                    cpp(method.result) + " " + found->second + "(" + parameters(method) + ") noexcept {");
+                line("return " + exportNamespace + "::" + typeName + "::" + method.name + "(" + argumentNames(method) + ");", 1);
+                line("}");
+            }
+        }
+    }
+
+    void emitNativeObservationExports() {
+        // Effectful observations use a separate API and manifest profile. The
+        // admitted closure has no floating channels/arithmetic or owner state,
+        // so it can inspect controls before any caller environment admission.
+        usesBudget_ = false;
+        objectEmission_ = false;
+        workerEmission_ = false;
+        numericEmission_ = true;
+        observationEmission_ = true;
+        for (const auto& owner : program_.declarations) {
+            const bool selected = std::any_of(owner.methods.begin(), owner.methods.end(), [&](const Method& method) {
+                return observationMethods_.contains(method.identity);
+            });
+            if (!selected)
+                continue;
+            auto [exportNamespace, typeName] = sourceAliasLocation(owner.sourceName);
+            exportNamespace.replace(0, std::string("source").size(), "native_observation");
+            line("namespace " + exportNamespace + " {");
+            const auto implementationName = "pl_observation_" + owner.name;
+            line("struct " + implementationName + " final {");
+            for (const auto& method : owner.methods) {
+                NativeNumericExports::Projection projection;
+                if (!NativeNumericExports::admitsObservation(program_, owner, method, false, &projection, false))
+                    continue;
+                // Pure policy helpers and nonobserving effect helpers remain
+                // private even when the authored method has public visibility.
+                emitNumericMethod(method, projection, nullptr, !observationMethods_.contains(method.identity));
+            }
+            line("};");
+            line("using " + typeName + " = " + implementationName + ";");
+            line("}");
+        }
+        observationEmission_ = false;
+        numericEmission_ = false;
+    }
+
     void emitRootExecution(unsigned indentation) {
         line("[[maybe_unused]] auto pl_execution = pl_transaction.execution(pl_scope, pl_budget);", indentation);
         if (classParallel_ || classSynchronization_)
@@ -353,6 +788,7 @@ private:
             if (!objectClass(declaration) && !declaration.sourceInterface)
                 continue;
             line("struct " + objectTag(declaration.name) + " {");
+            line("using PureObjectTagOwner = " + objectTag(declaration.name) + ";", 1);
             const auto id = objectClass(declaration) ? objectTypeIds_.at(declaration.name) : 0;
             line("static constexpr std::uint64_t typeId = " + std::to_string(id) + ";", 1);
             line("static bool accepts(std::uint64_t value) noexcept {", 1);
@@ -589,6 +1025,63 @@ private:
         }
         return result + "return " + objectCallFunction(value) + "(" + arguments + "); }())";
     }
+    std::string statelessObjectWorker(const Expr& value) {
+        if (!value->statelessWorkerCall || !objectMethod(value->callable).statelessWorkerCallable)
+            throw Diagnostic("object worker call lacks stateless proof", value->offset);
+        // Preserve the synthetic receiver evaluation's budget charge, without
+        // carrying an ObjectRef, graph transaction or owner state to the worker.
+        std::string result = "([&]() { pl_budget.step(); ";
+        std::string arguments = "pl_budget";
+        for (std::size_t index = 1; index < value->children.size(); ++index) {
+            const auto name = "pl_workerArgument" + std::to_string(index);
+            result += "auto " + name + " = " + expression(value->children[index]) + "; ";
+            arguments += ", std::move(" + name + ")";
+        }
+        return result + "return " + objectFunction(value->callable) + "_value_worker(" + arguments + "); }())";
+    }
+
+    std::string statelessWorkerParameters(const Method& method) const {
+        std::string result = "pipelang::model::EvaluationBudget& pl_budget";
+        for (const auto& parameter : method.parameters)
+            result += ", " + cpp(parameter.type) + " " + parameter.name;
+        return result;
+    }
+
+    void emitStatelessObjectWorkers() {
+        for (const auto& declaration : program_.declarations) {
+            if (!objectClass(declaration))
+                continue;
+            for (const auto& method : declaration.methods) {
+                if (method.statelessWorkerCallable)
+                    line(objectInline() + cpp(method.result) + " " + objectFunction(method.identity) +
+                         "_value_worker(" + statelessWorkerParameters(method) + ");");
+            }
+        }
+        // Definitions use the existing implementation owner when compiled
+        // output is selected; no new translation-unit partition is introduced.
+        for (const auto& declaration : program_.declarations) {
+            if (!objectClass(declaration))
+                continue;
+            for (const auto& method : declaration.methods) {
+                if (!method.statelessWorkerCallable)
+                    continue;
+                beginObjectImplementation(declaration);
+                method_ = &method;
+                workerEmission_ = true;
+                workerCaptures_.clear();
+                line(objectInline() + cpp(method.result) + " " + objectFunction(method.identity) +
+                     "_value_worker(" + statelessWorkerParameters(method) + ") {");
+                validateParameters(method, 1);
+                unusedParameters(method, 1);
+                statements(method.body, 1);
+                line("throw pipelang::model::ExecutionFailure(\"unreachable stateless worker control flow\");", 1);
+                line("}");
+                workerEmission_ = false;
+                endObjectImplementation();
+            }
+        }
+    }
+
     void emitObjectAwait(const Statement& statement, unsigned indentation) {
         const auto& call = statement.expression->children[0];
         const auto suffix = std::to_string(awaitSequence_++);
@@ -737,6 +1230,7 @@ private:
                 endObjectImplementation();
             }
         }
+        emitStatelessObjectWorkers();
         objectEmission_ = true;
         classSynchronization_ = true;
         classParallel_ = usesParallel();
@@ -819,6 +1313,16 @@ private:
     }
 
     bool usesType(const std::string& name) const {
+        const auto found = typeUsage_.find(name);
+        if (found != typeUsage_.end())
+            return found->second;
+        // This query observes only the finalized Program, not emission state.
+        // Keep both positive and negative answers within this Generator lifetime.
+        const auto used = scanTypeUsage(name);
+        typeUsage_.emplace(name, used);
+        return used;
+    }
+    bool scanTypeUsage(const std::string& name) const {
         std::function<bool(const Type&)> inType = [&](const Type& type) {
             if (type.name == name)
                 return true;
@@ -832,7 +1336,7 @@ private:
             return std::any_of(body.begin(), body.end(), [&](const Statement& statement) {
                 return inType(statement.type) || inExpression(statement.expression) ||
                     inExpression(statement.target) || inStatements(statement.body) || inStatements(statement.alternative) ||
-                    inStatements(statement.cleanup);
+                    inStatements(statement.cleanup) || inStatements(statement.initialization) || inStatements(statement.iteration);
             });
         };
         for (const auto& declaration : program_.declarations) {
@@ -896,7 +1400,8 @@ private:
         };
         return std::any_of(body.begin(), body.end(), [&](const Statement& statement) {
             return inExpression(statement.expression) || usesLocalAsync(statement.body) ||
-                usesLocalAsync(statement.alternative) || usesLocalAsync(statement.cleanup);
+                usesLocalAsync(statement.alternative) || usesLocalAsync(statement.cleanup) ||
+                usesLocalAsync(statement.initialization) || usesLocalAsync(statement.iteration);
         });
     }
     bool usesLocalAsync() const {
@@ -910,8 +1415,9 @@ private:
     }
     bool usesLoops(const std::vector<Statement>& body) const {
         return std::any_of(body.begin(), body.end(), [&](const Statement& statement) {
-            return statement.kind == "while" || statement.kind == "foreach" ||
-                usesLoops(statement.body) || usesLoops(statement.alternative) || usesLoops(statement.cleanup);
+            return statement.kind == "while" || statement.kind == "foreach" || statement.kind == "for" ||
+                usesLoops(statement.body) || usesLoops(statement.alternative) || usesLoops(statement.cleanup) ||
+                usesLoops(statement.initialization) || usesLoops(statement.iteration);
         });
     }
     bool usesLoops() const {
@@ -926,13 +1432,15 @@ private:
     bool containsStatement(const std::vector<Statement>& body, const std::string& kind) const {
         return std::any_of(body.begin(), body.end(), [&](const Statement& statement) {
             return statement.kind == kind || containsStatement(statement.body, kind) ||
-                containsStatement(statement.alternative, kind) || containsStatement(statement.cleanup, kind);
+                containsStatement(statement.alternative, kind) || containsStatement(statement.cleanup, kind) ||
+                containsStatement(statement.initialization, kind) || containsStatement(statement.iteration, kind);
         });
     }
     bool hasFinally(const std::vector<Statement>& body) const {
         return std::any_of(body.begin(), body.end(), [&](const Statement& statement) {
             return statement.hasFinally || hasFinally(statement.body) ||
-                hasFinally(statement.alternative) || hasFinally(statement.cleanup);
+                hasFinally(statement.alternative) || hasFinally(statement.cleanup) ||
+                hasFinally(statement.initialization) || hasFinally(statement.iteration);
         });
     }
     bool usesFailureControl() const {
@@ -989,7 +1497,9 @@ private:
             for (const auto& statement : body) {
                 inspectExpression(statement.expression);
                 inspectExpression(statement.target);
+                inspectStatements(statement.initialization);
                 inspectStatements(statement.body);
+                inspectStatements(statement.iteration);
                 inspectStatements(statement.alternative);
                 inspectStatements(statement.cleanup);
             }
@@ -1022,6 +1532,87 @@ private:
         else
             line("pipelang::model::EvaluationBudget pl_budget;", indentation);
     }
+    // A neutral operand cannot mutate state, fail, or change floating status.
+    // Keeping every other operand ordered preserves Source evaluation effects.
+    bool evaluationOrderNeutral(const Expr& value) const {
+        if (!value->convertTo.name.empty())
+            return false;
+        if (value->resolution == "constant" || value->resolution == "enum" ||
+            value->resolution == "ieee_constant" || value->resolution == "minimum_int")
+            return true;
+        if (value->kind == "integer" || value->kind == "uint32" || value->kind == "float" ||
+            value->kind == "float32" || value->kind == "boolean")
+            return true;
+        if (value->kind == "name")
+            return value->resolution == "local";
+        return value->kind == "member" && value->resolution == "record" &&
+            evaluationOrderNeutral(value->children.front());
+    }
+
+    bool directCallOrder(const Expr& value) const {
+        bool hasEffectfulArgument = false;
+        for (std::size_t index = 1; index < value->children.size(); ++index) {
+            if (evaluationOrderNeutral(value->children[index]))
+                continue;
+            if (hasEffectfulArgument)
+                return false;
+            hasEffectfulArgument = true;
+        }
+        return true;
+    }
+
+    std::string floatingMathCall(const std::string& name, const std::string& arguments) const {
+        const std::map<std::string, std::string> functions = {
+            {"IsFinite", "isfinite"}, {"Abs", "abs"}, {"Sqrt", "sqrt"}, {"Log", "log"},
+            {"Sin", "sin"}, {"Cos", "cos"}, {"Tan", "tan"}, {"Asin", "asin"},
+            {"Acos", "acos"}, {"Atan", "atan"}, {"Atan2", "atan2"}, {"Exp", "exp"},
+            {"Expm1", "expm1"}, {"Pow", "pow"}, {"Hypot", "hypot"}, {"Fmod", "fmod"},
+            {"Remainder", "remainder"}, {"CopySign", "copysign"}, {"Cbrt", "cbrt"},
+            {"Tanh", "tanh"}, {"Floor", "floor"}, {"Ceiling", "ceil"}
+        };
+        std::string call;
+        if (name == "Clamp") {
+            call = std::string(standaloneHeader_ ? "std::clamp(" : "pipelang::model::clampFinite(") + arguments + ")";
+        } else if (name == "ILogB") {
+            call = "pipelang::model::integerBinaryExponent(" + arguments + ")";
+        } else if (name == "ScaleB") {
+            call = "pipelang::model::scaleBinaryExponent(" + arguments + ")";
+        } else {
+            call = "std::" + functions.at(name) + "(" + arguments + ")";
+        }
+        return call;
+    }
+
+    std::optional<std::string> directNumericCall(const Expr& value) {
+        if (!standaloneHeader_ || !directCallOrder(value))
+            return std::nullopt;
+        const auto& resolution = value->resolution;
+        if (resolution != "numeric_conversion" && resolution != "numeric_round" &&
+            resolution != "float_math" && resolution != "float_bits" &&
+            resolution != "pure" && resolution != "qualified_pure" && resolution != "result_construct")
+            return std::nullopt;
+        std::string arguments;
+        for (std::size_t index = 1; index < value->children.size(); ++index) {
+            if (!arguments.empty())
+                arguments += ", ";
+            arguments += expression(value->children[index]);
+        }
+        const auto& target = value->children.front();
+        if (resolution == "numeric_conversion")
+            return "static_cast<" + cpp(value->type) + ">(" + arguments + ")";
+        if (resolution == "numeric_round")
+            return "static_cast<std::int64_t>(std::llround(" + arguments + "))";
+        if (resolution == "float_math")
+            return floatingMathCall(target->text, arguments);
+        if (resolution == "float_bits")
+            return "std::bit_cast<" + cpp(value->type) + ">(" + arguments + ")";
+        if (resolution == "result_construct")
+            return cpp(value->type) + "::" + target->text + "(" + arguments + ")";
+        if (resolution == "qualified_pure")
+            return numericFunctions_.at(value->callable) + "(" + arguments + ")";
+        return target->text + "(" + arguments + ")";
+    }
+
     std::string defaultExpression(const Expr& initializer) {
         auto generated = expression(initializer);
         // Independent record defaults have no receiver or local captures.
@@ -1032,7 +1623,11 @@ private:
         }
         return generated;
     }
-    std::string cpp(const Type& type) const { return cppType(type, program_); }
+    std::string cpp(const Type& type) const {
+        if (numericEmission_ && type.name == "string")
+            return "std::string_view";
+        return cppType(type, program_);
+    }
     void line(const std::string& text, unsigned indentation = 0) {
         *selectedOutput_ << std::string(indentation * 4, ' ') << text << '\n';
     }
@@ -1103,7 +1698,7 @@ private:
         return objectEmission_ ? "pl_execution.refreshSegment();" : "pl_transaction.refresh();";
     }
     std::string scopeExpression() const {
-        return objectEmission_ ? "pl_execution.scope" : "pl_scope";
+        return objectEmission_ || qualifiedEmission_ ? "pl_execution.scope" : "pl_scope";
     }
     std::string parameters(const Method& method, bool state = false, bool cancellation = false) const {
         std::string result = state ? "const pl_State& pl_state" : "";
@@ -1185,6 +1780,56 @@ private:
         return usesBudget_ ? "(pl_budget.step(), " + emitted + ")" : emitted;
     }
     std::string expressionValue(const Expr& value) {
+        if (value->resolution == "cancellation_none")
+            return "pipelang::model::CancellationToken{}";
+        if (value->resolution == "floating_environment_observe")
+            return "pipelang::model::observeFloatingEnvironment()";
+        if (numericEmission_ && value->type.name == "FixedArray" &&
+            value->resolution == "collection_construct") {
+            return "([&]() { auto pl_initial = " + expression(value->children.at(1)) +
+                "; return " + cpp(value->type) + "::filledUnchecked(pl_initial); }())";
+        }
+        if (numericEmission_ && value->type.name == "Array") {
+            const auto proof = nativeProjection_.arrayValues.find(value.get());
+            if (proof == nativeProjection_.arrayValues.end())
+                throw Diagnostic("numeric array lacks a bounded local proof", value->offset);
+            if (value->kind == "name")
+                return value->text;
+            if (value->resolution == "collection_construct") {
+                const auto element = cpp(value->type.arguments.front());
+                return "([&]() { auto pl_size = " + expression(value->children.at(1)) +
+                    "; (void)pl_size; auto pl_initial = " + expression(value->children.at(2)) +
+                    "; std::array<" + element + ", " + std::to_string(proof->second) +
+                    "> pl_array; pl_array.fill(pl_initial); return pl_array; }())";
+            }
+        }
+        if (numericEmission_ && value->kind == "member" && value->resolution == "list") {
+            const auto& receiver = value->children.at(0);
+            if (receiver->type.name == "FixedArray")
+                return "([&]() { auto pl_array = " + expression(receiver) +
+                    "; return pl_array.count(); }())";
+            const auto proof = nativeProjection_.arrayValues.find(receiver.get());
+            if (proof == nativeProjection_.arrayValues.end())
+                throw Diagnostic("numeric array count lacks a bounded local proof", value->offset);
+            return "([&]() { auto pl_array = " + expression(receiver) +
+                "; return static_cast<std::int64_t>(pl_array.size()); }())";
+        }
+        if (numericEmission_ && nativeProjection_.arrayOperations.contains(value.get())) {
+            const auto& receiver = value->children.at(0)->children.at(0);
+            const bool mutating = value->resolution == "collection_mutate_set";
+            std::string result = std::string("([&]() { auto") + (mutating ? "&" : "") +
+                " pl_array = " + expression(receiver) + "; auto pl_index = " + expression(value->children.at(1)) + "; ";
+            const std::string element = receiver->type.name == "FixedArray"
+                ? "pl_array.uncheckedAt(static_cast<std::size_t>(pl_index))"
+                : "pl_array[static_cast<std::size_t>(pl_index)]";
+            if (mutating) {
+                result += "auto pl_value = " + expression(value->children.at(2)) +
+                    "; " + element + " = pl_value; ";
+            } else {
+                result += "return " + element + "; ";
+            }
+            return result + "}())";
+        }
         if (value->kind == "null")
             return "std::nullopt";
         if (value->resolution == "constant")
@@ -1215,6 +1860,8 @@ private:
             return objectRecordProjection(value);
         if (value->resolution == "object_field")
             return objectFieldValue(value);
+        if (workerEmission_ && value->statelessWorkerCall)
+            return statelessObjectWorker(value);
         if (value->resolution == "object_construct" || value->resolution == "object_call" || value->resolution == "source_interface_call" || value->resolution == "class_virtual_call")
             return objectCall(value);
         if ((value->resolution == "list_add" || value->resolution.starts_with("collection_mutate_")) &&
@@ -1272,6 +1919,8 @@ private:
                 return "(" + receiver + ").currentCount()";
             if (value->resolution == "error")
                 return "(" + receiver + ").message";
+            if (value->resolution == "bytebuffer_length")
+                return "(" + receiver + ").length()";
             if (value->resolution == "list")
                 return "(" + receiver + ").count()";
             if (value->resolution == "optional")
@@ -1293,6 +1942,22 @@ private:
             if (value->text == "&&" || value->text == "||")
                 return "(" + left + " " + value->text + " " + right + ")";
             std::string operation = "pl_left " + value->text + " pl_right";
+            const bool comparison = value->text == "==" || value->text == "!=" ||
+                value->text == "<" || value->text == "<=" ||
+                value->text == ">" || value->text == ">=";
+            const auto& leftOperand = value->children[0];
+            const auto& operandType = leftOperand->convertTo.name.empty()
+                ? leftOperand->type : leftOperand->convertTo;
+            if (!standaloneHeader_ && comparison && (operandType.name == "float" || operandType.name == "float32")) {
+                // The result type is bool; floating operands identify this boundary.
+                // Conditional volatile reads keep a skipped comparison from raising
+                // native status flags. A volatile result alone permits speculation
+                // of the comparison before its conditionally executed store.
+                const auto nativeType = cpp(operandType);
+                return "([&]() { volatile " + nativeType + " pl_left = " + left +
+                    "; volatile " + nativeType + " pl_right = " + right +
+                    "; return " + operation + "; }())";
+            }
             if (value->type.name != "float" && value->type.name != "float32" && (value->text == "+" || value->text == "-" || value->text == "*" || value->text == "/" || value->text == "%")) {
                 const std::map<std::string, std::string> functions = {
                     {"+", value->type.name == "string" ? "concatenate" : "add"},
@@ -1308,7 +1973,24 @@ private:
                 };
                 operation = "pipelang::model::" + functions.at(value->text) + "(pl_left, pl_right)";
             }
-            if (value->type.name == "float32") {
+            if (standaloneHeader_ &&
+                (evaluationOrderNeutral(value->children[0]) || evaluationOrderNeutral(value->children[1]))) {
+                // Replace the original slots right first; nested emitted operands
+                // may themselves contain names from sequenced lambda lowering.
+                operation.replace(operation.find("pl_right"), 8, "(" + right + ")");
+                operation.replace(operation.find("pl_left"), 7, "(" + left + ")");
+                return "(" + operation + ")";
+            }
+            if (!standaloneHeader_ && numericEmission_ && program_.activeHostNumericEnvironment &&
+                (value->type.name == "float" || value->type.name == "float32")) {
+                static const std::map<std::string, std::string> functions{
+                    {"+", "activeAdd"}, {"-", "activeSubtract"},
+                    {"*", "activeMultiply"}, {"/", "activeDivide"}
+                };
+                return "pipelang::model::" + functions.at(value->text) +
+                    "(pipelang::model::ActiveNumericOperands<" + cpp(value->type) + ">{" + left + ", " + right + "})";
+            }
+            if (!standaloneHeader_ && value->type.name == "float32") {
                 if (program_.projectEnabled) {
                     static const std::map<std::string, std::string> functions{
                         {"+", "addBinary32"}, {"-", "subtractBinary32"},
@@ -1342,12 +2024,29 @@ private:
             return "static_cast<" + cpp(value->type) + ">(" + conditional + ")";
         }
         if (value->kind == "named_construct") {
+            if (standaloneHeader_) {
+                const auto* record = findType(program_, value->type.name);
+                bool ordered = record && record->fields.size() == value->children.size();
+                for (std::size_t index = 0; ordered && index < value->children.size(); ++index)
+                    ordered = record->fields[index].name == value->children[index]->text;
+                if (ordered) {
+                    std::string aggregate = value->text + "{";
+                    for (std::size_t index = 0; index < value->children.size(); ++index) {
+                        if (index != 0)
+                            aggregate += ", ";
+                        aggregate += expression(value->children[index]->children.front());
+                    }
+                    return aggregate + "}";
+                }
+            }
             std::string result = "([&]() { " + value->text + " pl_record{}; ";
             for (const auto& child : value->children)
                 result += "pl_record." + child->text + " = " + expression(child->children[0]) + "; ";
             return result + "return pl_record; }())";
         }
         if (value->kind == "call") {
+            if (const auto direct = directNumericCall(value))
+                return *direct;
             const auto& target = value->children[0];
             std::string result = "([&]() { ";
             if (value->resolution == "host_sync" || value->resolution == "host_sync_value")
@@ -1373,7 +2072,14 @@ private:
             std::string arguments;
             for (std::size_t index = 1; index < value->children.size(); ++index) {
                 const auto name = "pl_argument" + std::to_string(index);
-                result += "auto " + name + " = " + expression(value->children[index]) + "; ";
+                auto argument = expression(value->children[index]);
+                const auto& argumentType = value->children[index]->type.name;
+                if (!standaloneHeader_ && numericEmission_ && program_.activeHostNumericEnvironment &&
+                    (value->resolution == "float_math" || value->resolution == "numeric_conversion" ||
+                     value->resolution == "numeric_round") &&
+                    (argumentType == "float" || argumentType == "float32"))
+                    argument = "pipelang::model::activeFloatingValue(" + argument + ")";
+                result += "auto " + name + " = " + argument + "; ";
                 if (value->resolution == "host_sync" || value->resolution == "host_sync_value")
                     result += "validate(" + name + "); ";
                 if (!arguments.empty())
@@ -1393,12 +2099,44 @@ private:
                 result += "return " + scopeExpression() + ".invokeSynchronousHost([&]() { return pl_receiver->" +
                     target->text + "(" + arguments + "); }); ";
             }
+            else if (value->resolution == "string_byte_length_is")
+                result += "return pipelang::model::byteLengthIs(" + arguments + "); ";
+            else if (value->resolution == "string_byte_at_or")
+                result += "return pipelang::model::byteAtOr(" + arguments + "); ";
+            else if (value->resolution == "numeric_round") {
+                // Native admission already proves the complete signed64 domain.
+                // Repeating the ordinary guard could add floating status flags.
+                if (numericEmission_)
+                    result += "return static_cast<std::int64_t>(std::llround(" + arguments + ")); ";
+                else
+                    result += "return pipelang::model::roundToInt(" + arguments + "); ";
+            }
             else if (value->resolution == "string_starts_with")
                 result += "return pl_argument1.starts_with(pl_argument2); ";
+            else if (value->resolution == "string_utf8_length")
+                result += "return pipelang::model::utf8Length(" + arguments + "); ";
+            else if (value->resolution == "string_from_int")
+                result += "return pipelang::model::stringFromInt(" + arguments + "); ";
+            else if (value->resolution == "string_utf8_slice")
+                result += "return pipelang::model::utf8Slice(" + arguments + "); ";
+            else if (value->resolution == "string_utf8_index_of")
+                result += "return pipelang::model::utf8IndexOf(" + arguments + "); ";
             else if (value->resolution == "error_construct")
                 result += "return pipelang::model::makeError(" + arguments + "); ";
             else if (value->resolution == "construct")
                 result += "return " + target->text + "{" + arguments + "}; ";
+            else if (numericEmission_ && value->resolution == "qualified_pure")
+                result += "return " + numericFunctions_.at(value->callable) + "(" + arguments + "); ";
+            else if (value->resolution == "qualified_pure" || (qualifiedEmission_ && value->resolution == "pure")) {
+                const auto& function = qualifiedFunctions_.at(value->callable);
+                std::string context = "pl_budget";
+                if (program_.objectEnabled)
+                    context += ", pl_execution";
+                result += "return " + function.name + "(" + context + (arguments.empty() ? "" : ", " + arguments) + "); ";
+            }
+            else if (numericEmission_ && (value->resolution == "pure" ||
+                (observationEmission_ && value->resolution == "effect")))
+                result += "return " + target->text + "(" + arguments + "); ";
             else if (workerEmission_ && (value->resolution == "pure" || value->resolution == "effect"))
                 result += "return pl_worker_" + target->text + "(" + state() + budgetArgument() + (arguments.empty() ? "" : ", " + arguments) + "); ";
             else if (value->resolution == "pure")
@@ -1448,17 +2186,11 @@ private:
                 result += "return " + cpp(value->type) + "::Empty(); ";
             else if (value->resolution == "list_at" || value->resolution == "list_add")
                 result += "return pl_receiver." + std::string(value->resolution == "list_at" ? "at" : "add") + "(" + arguments + "); ";
+            else if (value->resolution == "float_bits")
+                result += "return std::bit_cast<" + cpp(value->type) + ">(" + arguments + "); ";
             else if (value->resolution == "float_math") {
-                const std::map<std::string, std::string> functions = {
-                    {"IsFinite", "isfinite"}, {"Abs", "abs"}, {"Sqrt", "sqrt"}, {"Log", "log"},
-                    {"Sin", "sin"}, {"Cos", "cos"}, {"Tan", "tan"}, {"Asin", "asin"},
-                    {"Acos", "acos"}, {"Atan", "atan"}, {"Atan2", "atan2"}, {"Exp", "exp"},
-                    {"Expm1", "expm1"}, {"Pow", "pow"}, {"Hypot", "hypot"}, {"Fmod", "fmod"},
-                    {"Remainder", "remainder"}, {"CopySign", "copysign"}, {"Cbrt", "cbrt"},
-                    {"Tanh", "tanh"}, {"Floor", "floor"}, {"Ceiling", "ceil"}
-                };
-                const auto call = "std::" + functions.at(target->text) + "(" + arguments + ")";
-                if (value->type.name == "float32") {
+                const auto call = floatingMathCall(target->text, arguments);
+                if (!standaloneHeader_ && value->type.name == "float32") {
                     result += "volatile float pl_result = " + call + "; return pl_result; ";
                 } else {
                     result += "return " + call + "; ";
@@ -1484,12 +2216,18 @@ private:
             }
             else if (value->resolution == "numeric_conversion") {
 
-                if (value->type.name == "int") {
+                if (standaloneHeader_) {
+                    result += "return static_cast<" + cpp(value->type) + ">(" + arguments + "); ";
+                } else if (value->type.name == "int") {
                     result += "return pipelang::model::truncateToInt(" + arguments + "); ";
                 } else if (target->text == "FromInt") {
-                    result += "return pipelang::model::roundInteger<" + cpp(value->type) + ">(" + arguments + "); ";
+                    const auto conversion = numericEmission_ && program_.activeHostNumericEnvironment
+                        ? "activeFromInteger" : "roundInteger";
+                    result += "return pipelang::model::" + std::string(conversion) + "<" + cpp(value->type) + ">(" + arguments + "); ";
                 } else if (value->type.name == "float32") {
-                    result += "return pipelang::model::narrowFloat(" + arguments + "); ";
+                    const auto conversion = numericEmission_ && program_.activeHostNumericEnvironment
+                        ? "activeNarrowFloat" : "narrowFloat";
+                    result += "return pipelang::model::" + std::string(conversion) + "(" + arguments + "); ";
                 } else {
                     result += "return pipelang::model::widenFloat(" + arguments + "); ";
                 }
@@ -1504,8 +2242,8 @@ private:
         }
         throw Diagnostic("unsupported emitted expression", value->offset);
     }
-    void validateParameters(const Method& method, unsigned indentation) {
-        if (usesType("float32"))
+    void validateParameters(const Method& method, unsigned indentation, bool environmentIndependent = false) {
+        if (usesType("float32") && !environmentIndependent)
             line("pipelang::model::requireBinary32Environment();", indentation);
         if (program_.objectEnabled)
             line("using pipelang::model::validate;", indentation);
@@ -1543,7 +2281,20 @@ private:
                 line("pipelang::model::raiseError(" + error + ");", indentation);
             } else if (statement.kind == "break" || statement.kind == "continue") {
                 line(statement.kind + ";", indentation);
+            } else if (statement.kind == "for") {
+                if (numericEmission_ && !nativeProjection_.countedLoops.contains(&statement))
+                    throw Diagnostic("numeric for lacks a bounded counter proof", statement.offset);
+                line("{", indentation);
+                statements(statement.initialization, indentation + 1);
+                line("for (; " + expression(statement.expression) + "; [&]() {", indentation + 1);
+                statements(statement.iteration, indentation + 2);
+                line("}()) {", indentation + 1);
+                statements(statement.body, indentation + 2);
+                line("}", indentation + 1);
+                line("}", indentation);
             } else if (statement.kind == "while") {
+                if (numericEmission_ && !nativeProjection_.countedLoops.contains(&statement))
+                    throw Diagnostic("numeric while lacks a bounded counter proof", statement.offset);
                 line("while (" + expression(statement.expression) + ") {", indentation);
                 statements(statement.body, indentation + 1);
                 line("}", indentation);
@@ -1552,13 +2303,18 @@ private:
                 const auto snapshot = "pl_items" + suffix;
                 line("{", indentation);
                 line("auto " + snapshot + " = " + expression(statement.expression) + ";", indentation + 1);
-                if (statement.itemConvertTo.name.empty()) {
+                if (numericEmission_) {
+                    if (!nativeProjection_.arrayLoops.contains(&statement))
+                        throw Diagnostic("numeric foreach lacks a fixed-length proof", statement.offset);
+                    line("for (auto " + statement.name + " : " + snapshot + ") {", indentation + 1);
+                } else if (statement.itemConvertTo.name.empty()) {
                     line("for (auto " + statement.name + " : " + snapshot + ".values()) {", indentation + 1);
                 } else {
                     line("for (auto pl_iterationValue : " + snapshot + ".values()) {", indentation + 1);
                     line("auto " + statement.name + " = pl_iterationValue.template as<" + objectTag(statement.itemConvertTo.name) + ">();", indentation + 2);
                 }
-                line("pl_budget.step();", indentation + 2);
+                if (usesBudget_)
+                    line("pl_budget.step();", indentation + 2);
                 statements(statement.body, indentation + 2);
                 line("}", indentation + 1);
                 line("}", indentation);
@@ -1575,7 +2331,7 @@ private:
                 }
                 line("}", indentation);
             } else if (statement.kind == "return") {
-                if (method_->pure || internalEffect_) {
+                if (method_->pure || internalEffect_ || observationEmission_) {
                     line("return" + (statement.expression ? " " + expression(statement.expression) : "") + ";", indentation);
                 } else {
                     if (statement.expression)
@@ -1602,11 +2358,33 @@ private:
             } else if (statement.kind == "assign" && objectFieldRoot(statement.target)) {
                 emitObjectAssignment(statement.target, expression(statement.expression), indentation);
             } else if (statement.kind == "local") {
-                line(cpp(statement.type) + " " + statement.name + " = " + expression(statement.expression) + ";", indentation);
+                if (numericEmission_ && statement.type.name == "Array") {
+                    const auto proof = nativeProjection_.arrayLocals.find(&statement);
+                    if (proof == nativeProjection_.arrayLocals.end())
+                        throw Diagnostic("numeric array local lacks an inline extent proof", statement.offset);
+                    line("[[maybe_unused]] std::array<" + cpp(statement.type.arguments.front()) + ", " + std::to_string(proof->second) +
+                        "> " + statement.name + " = " + expression(statement.expression) + ";", indentation);
+                } else {
+                    line("[[maybe_unused]] " + cpp(statement.type) + " " + statement.name + " = " + expression(statement.expression) + ";", indentation);
+                }
             } else {
-                line(expression(statement.target) + " = " + expression(statement.expression) + ";", indentation);
+                emitValueAssignment(statement.target, expression(statement.expression), indentation);
             }
         }
+    }
+    void emitValueAssignment(const Expr& target, const std::string& value, unsigned indentation) {
+        if (!usesBudget_) {
+            line(expression(target) + " = " + value + ";", indentation);
+            return;
+        }
+        // C++ assignment evaluates its RHS first. Bind the checked source LHS
+        // before evaluating an effectful RHS, including all target budget ticks.
+        // No cancellation/evaluation step may lose an authoritative returned
+        // capability between that return and assignment to the protected local.
+        line("{", indentation);
+        line("auto& pl_assignmentTarget = " + expression(target) + ";", indentation + 1);
+        line("pl_assignmentTarget = " + value + ";", indentation + 1);
+        line("}", indentation);
     }
     void emitLock(const Statement& statement, unsigned indentation) {
         const auto suffix = std::to_string(lockSequence_++);
@@ -1625,20 +2403,30 @@ private:
         const auto snapshot = "pl_parallelState" + suffix;
         line("{", indentation);
         line("auto " + input + " = " + expression(statement.expression) + ";", indentation + 1);
-        line("const auto& " + snapshot + " = " + state() + ";", indentation + 1);
-        std::string captures = "&" + snapshot;
+        // Ordinary-object worker bodies cannot read any owner field. Their
+        // validated pure helpers require only value arguments and the worker
+        // budget, so do not capture even an unused owner-state reference.
+        std::string captures;
+        if (!objectEmission_) {
+            line("const auto& " + snapshot + " = " + state() + ";", indentation + 1);
+            captures = "&" + snapshot;
+        }
         const auto previousCaptures = workerCaptures_;
         for (const auto& capture : statement.parallelCaptures) {
             const auto alias = "pl_capture" + suffix + "_" + capture.name;
             line("const auto& " + alias + " = " + capture.name + ";", indentation + 1);
-            captures += ", &" + alias;
+            if (!captures.empty())
+                captures += ", ";
+            captures += "&" + alias;
             workerCaptures_[capture.name] = alias;
         }
         line("pipelang::model::parallelForEach(" + input + ", pl_budget, pl_parallelCancellation, pl_parallelOptions,", indentation + 1);
         line("[" + captures + "]([[maybe_unused]] " + cpp(statement.type) + " " + statement.name +
              ", pipelang::model::EvaluationBudget& pl_budget) {", indentation + 2);
-        line("const auto& pl_workerState = " + snapshot + ";", indentation + 3);
-        line("(void)pl_workerState;", indentation + 3);
+        if (!objectEmission_) {
+            line("const auto& pl_workerState = " + snapshot + ";", indentation + 3);
+            line("(void)pl_workerState;", indentation + 3);
+        }
         line("pl_budget.step();", indentation + 3);
         workerEmission_ = true;
         statements(statement.body, indentation + 3);
@@ -1860,7 +2648,7 @@ private:
         localAsync_ = program_.objectEnabled || std::any_of(declaration.methods.begin(), declaration.methods.end(), [&](const Method& method) {
             return usesLocalAsync(method.body);
         });
-        usesBudget_ = program_.objectEnabled || classParallel_ || classSynchronization_ || usesType("Atomic") || usesConcurrentCollections() || localAsync_ || std::any_of(declaration.methods.begin(), declaration.methods.end(), [&](const Method& method) {
+        usesBudget_ = !qualifiedFunctions_.empty() || program_.objectEnabled || classParallel_ || classSynchronization_ || usesType("Atomic") || usesConcurrentCollections() || localAsync_ || std::any_of(declaration.methods.begin(), declaration.methods.end(), [&](const Method& method) {
             return usesLoops(method.body) || containsStatement(method.body, "try") ||
                 containsStatement(method.body, "throw");
         });
@@ -2127,7 +2915,7 @@ private:
         beginMember(result, method.name, parameters(method));
         line("pl_scope.requireOwner();", 2);
         line("try {", 2);
-        validateParameters(method, 3);
+        validateParameters(method, 3, observationMethods_.contains(method.identity));
         declareBudget(3);
         cancellationContext(method, 3);
         line(transactionType() + " pl_transaction(pl_state" + (program_.objectEnabled ? ", pl_objects.domain()" : "") + ");", 3);
@@ -2180,6 +2968,16 @@ private:
         endMember();
     }
     const Program& program_;
+    mutable std::map<std::string, bool> typeUsage_;
+    bool numericEmission_ = false;
+    bool standaloneHeader_ = false;
+    std::set<std::string> numericConstantMethods_;
+    bool observationEmission_ = false;
+    std::set<std::string> observationMethods_;
+    bool qualifiedEmission_ = false;
+    NativeNumericExports::Projection nativeProjection_;
+    std::map<std::string, QualifiedFunction> qualifiedFunctions_;
+    std::map<std::string, std::string> numericFunctions_;
     std::string nameSpace_;
     const Method* method_ = nullptr;
     std::ostringstream output_;
@@ -2252,6 +3050,8 @@ std::string cppType(const Type& type, const Program& program) {
         return "float";
     if (type.name == "string")
         return "std::string";
+    if (type.name == "ByteBuffer")
+        return "pipelang::model::ByteBuffer";
     if (type.name == "CancellationToken")
         return "pipelang::model::CancellationToken";
     const auto* object = findType(program, type.name);
@@ -2259,6 +3059,9 @@ std::string cppType(const Type& type, const Program& program) {
         return "pipelang::model::ObjectRef<pl_object_tag_" + object->name + ">";
     if (isSynchronizationHandle(type.name))
         return "pipelang::model::" + type.name;
+    if (type.name == "FixedArray")
+        return "pipelang::model::FixedArray<" + cppType(type.arguments.front(), program) + ", " +
+            std::to_string(type.fixedExtent.value()) + ">";
     if (type.name == "Task" || type.name == "Result" || type.name == "Optional" || type.name == "List" ||
         type.name == "Atomic" || type.name == "Array" || type.name == "Dictionary" || type.name == "HashSet" ||
         type.name == "Queue" || type.name == "Stack" || type.name == "KeyValuePair" ||
@@ -2280,6 +3083,10 @@ std::string generate(const Program& program, const std::string& nameSpace) {
     return Generator(program).run(nameSpace);
 }
 
+std::string generateCompositionFactory(const Program& program, const std::string& nameSpace, bool compiled) {
+    return Generator(program, compiled).compositionFactory(nameSpace);
+}
+
 CompiledProject generateCompiledProject(const Program& program, const std::string& nameSpace) {
     if (!program.projectEnabled)
         throw Diagnostic("compiled artifacts require project semantics", 0);
@@ -2292,6 +3099,12 @@ std::string generateProjectTypes(const Program& program, const std::string& name
     if (!program.projectEnabled)
         throw Diagnostic("standalone project types require the project protocol", 0);
     return Generator(program).run(nameSpace, true);
+}
+
+std::string generateNumericHeader(const Program& program, const std::string& nameSpace) {
+    if (!program.projectEnabled)
+        throw Diagnostic("numeric headers require project semantics", 0);
+    return Generator(program).runNumericHeader(nameSpace);
 }
 
 nlohmann::json manifest(const Program& program, const std::string& nameSpace) {
@@ -2359,6 +3172,34 @@ nlohmann::json manifest(const Program& program, const std::string& nameSpace) {
     const auto exports = constantsManifest(program, nameSpace);
     if (!exports.empty())
         result["constants"] = exports;
+    if (program.projectEnabled) {
+        if (program.activeHostNumericEnvironment)
+            result["nativeNumericEnvironment"] = "active-host";
+        auto numericExports = nlohmann::json::array();
+        auto observationExports = nlohmann::json::array();
+        for (const auto& declaration : program.declarations) {
+            for (const auto& method : declaration.methods) {
+                NativeNumericExports::Projection numericProjection;
+                if (NativeNumericExports::admits(program, declaration, method, true, &numericProjection)) {
+                    numericExports.push_back({{"owner", declaration.sourceName}, {"method", method.sourceName.empty() ? method.name : method.sourceName},
+                        {"returnType", method.result.text()}, {"parameters", fields(method.parameters, false)},
+                        {"allocationFree", true}, {"noexcept", true},
+                        {"binary32Environment", numericProjection.requiresBinary32Environment
+                            ? (program.activeHostNumericEnvironment ? "active-host" : "caller-admitted") : "not-required"}});
+                }
+                if (NativeNumericExports::admitsObservation(program, declaration, method)) {
+                    observationExports.push_back({{"owner", declaration.sourceName}, {"method", method.sourceName.empty() ? method.name : method.sourceName},
+                        {"returnType", method.result.text()}, {"parameters", fields(method.parameters, false)},
+                        {"allocationFree", true}, {"noexcept", true}, {"binary32Environment", "not-required"},
+                        {"effects", "current-thread-observation"}});
+                }
+            }
+        }
+        if (!numericExports.empty())
+            result["nativeNumericExports"] = std::move(numericExports);
+        if (!observationExports.empty())
+            result["nativeObservationExports"] = std::move(observationExports);
+    }
     return result;
 }
 

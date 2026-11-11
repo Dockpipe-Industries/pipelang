@@ -1,0 +1,44 @@
+module DiLifecycle.Factories;
+import DiLifecycle.Contracts;
+import DiLifecycle.Resources;
+
+public Class ScopedFactory {
+    private ResourcePort port;
+
+    public ScopedFactory(ResourcePort resourcePort) {
+        port = resourcePort;
+    }
+
+    public Result<ScopedResource,string> Create(IRootResource root, ScopeStamp stamp, CancellationToken token) {
+        Result<int,string> opened = Result<int,string>.Failure("fixture.not_acquired");
+        bool transferred = false;
+        try {
+            opened = port.Open("scoped", stamp.identity);
+            if (!opened.IsSuccess) {
+                if (opened.IsCancelled)
+                    return Result<ScopedResource,string>.Cancelled(opened.Error);
+                return Result<ScopedResource,string>.Failure(opened.Error);
+            }
+            if (token.IsCancellationRequested && stamp.failureMode != 4)
+                return Result<ScopedResource,string>.Cancelled("fixture.factory_token_cancelled");
+            if (stamp.failureMode == 1)
+                return Result<ScopedResource,string>.Failure("fixture.factory_failure");
+            if (stamp.failureMode == 2)
+                return Result<ScopedResource,string>.Cancelled("fixture.factory_cancelled");
+            ScopedResource service = new ScopedResource(port, opened.Value, root, stamp);
+            transferred = true;
+            return Result<ScopedResource,string>.Success(service);
+        } finally {
+            if (opened.IsSuccess && !transferred) {
+                Result<void,string> closed = port.Close(opened.Value, CancellationToken.None);
+                if (!closed.IsSuccess)
+                    throw Error(closed.Error);
+            }
+            if (transferred && stamp.failureMode == 4) {
+                Result<void,string> marked = port.Note("factory-transferred", opened.Value, root.Identity());
+                if (!marked.IsSuccess)
+                    throw Error(marked.Error);
+            }
+        }
+    }
+}

@@ -188,7 +188,9 @@ void protocol(Oracle& oracle, const fs::path& root) {
     for (int index = 1; index < 10; ++index)
         layouts += "public Record R" + std::to_string(index) + " { public R" + std::to_string(index - 1) + " left; public R" + std::to_string(index - 1) + " right; } ";
     oracle.refused({"expanded-layout", layouts, "expanded value layout limit"});
-    oracle.refused({"source-bytes", std::string(65537, ' '), "source byte limit"});
+    // Source scaling removed the implicit 64KiB ceiling. Explicit resource
+    // budget refusals belong to ResourceBudgetTests; retain these input bytes.
+    oracle.admitted("source-bytes", std::string(65537, ' '));
     oracle.malformed("duplicate-key", R"({"protocol":"pipelang.native-model.v1","source":"","source":""})");
     oracle.malformed("wrong-protocol", R"({"protocol":"wrong","source":""})");
     oracle.malformed("unknown-field", R"({"protocol":"pipelang.native-model.v1","source":"","surprise":true})");

@@ -11,6 +11,11 @@ transactional root; ordinary public types retain object/value semantics and rece
 stable module-qualified native names. The SDK exposes PROJECT_ROOT/SOURCE_ROOT/ENTRY
 and retains old protocols for explicit compatibility fixtures.
 
+[Source dependency composition](../../../docs/concepts/dependency-injection.md)
+adds explicit `Startup.pipe` registrations, checked construction, owned resource
+cleanup and scoped async service calls. Its ownership and platform limits are documented
+separately from ordinary manual construction.
+
 The native compiler owns class/record/enum typing, method effects, checked integer
 arithmetic, transactions and structured host-service async/await lowering. The
 native view compiler resolves public model fields and pure getters/actions into
@@ -52,6 +57,10 @@ add automatic lock release, explicit permits and cancellable owner-polled async
 waiting without occupying the host-service worker. Request, specialization,
 ownership and shared worker budgets remain bounded.
 
+Owned `FixedArray<T,N>` values, conventional `for` loops and conservative native
+numeric eligibility are documented in the
+[model compiler source contract](../../../src/native/model-compiler/README.md).
+
 The [source-object capability](../../../docs/concepts/pipelang-objects.md) adds
 explicit v3 model exports, ordinary reference-identity instances and source
 Interface dispatch. Owner-confined graphs preserve alias identity, constructor
@@ -60,8 +69,9 @@ owned; native owner-bound reference results remain live handles. Model manifest
 v2 is explicitly refused by the native view compiler and SDK view-binding helper
 until independently qualified.
 
-Generic classes/interfaces, constraints, inference, class inheritance, source resource
-disposal, asynchronous finally and broader task orchestration remain unsupported.
+General asynchronous disposal, asynchronous finally and broader task orchestration
+remain unsupported. Source composition supports explicit synchronous cleanup
+contracts; it does not add a universal disposal convention to ordinary objects.
 The optional view bridge explicitly refuses modules, specialized generics and
 overloaded methods/constructors until independently qualified. Existing consumer
 evidence remains limited to its recorded scope; this is not complete .NET API
@@ -107,3 +117,12 @@ explicit refusals there. A controlled consumer must select and verify its exact
 SDK identity; the package version alone does not authorize mutable SDK selection.
 
 Ordinary-model nullable source uses `T?`, typed values and `null`; the old Optional generic source spelling is rejected. Internal runtime Optional storage and checked access remain unchanged. See [nullable values](../../../docs/concepts/pipelang-nullable-values.md); owning compiler/runtime/SDK qualification is required.
+
+## Optional foreign native dependencies
+
+SDK installs also provide `PipeLangNativeDependencies` for explicit Rust static
+libraries, Go C archives, C# NativeAOT shared libraries and C/C++ CMake libraries.
+See [the native dependency contract](../../native-dependencies/README.md). These
+optional profiles add no required Rust/Go/.NET toolchain to the compiler itself.
+Only a C ABI crosses this boundary; `.pipe` is still compiled by the native
+PipeLang compiler, not translated into another language by these profiles.

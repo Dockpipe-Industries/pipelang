@@ -84,7 +84,9 @@ private:
         for (const auto& statement : statements) {
             validateReceiver(declaration, statement.expression);
             validateReceiver(declaration, statement.target);
+            validateStatements(declaration, statement.initialization);
             validateStatements(declaration, statement.body);
+            validateStatements(declaration, statement.iteration);
             validateStatements(declaration, statement.alternative);
             validateStatements(declaration, statement.cleanup);
         }
@@ -159,7 +161,9 @@ private:
             rewriteExpression(statement.target);
             for (auto& capture : statement.parallelCaptures)
                 rewriteField(capture, true);
+            rewriteStatements(statement.initialization);
             rewriteStatements(statement.body);
+            rewriteStatements(statement.iteration);
             rewriteStatements(statement.alternative);
             rewriteStatements(statement.cleanup);
         }

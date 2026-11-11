@@ -3,6 +3,7 @@
 
 #include "compiler.hpp"
 #include "CompiledProject.hpp"
+#include "CompositionSyntax.hpp"
 #include "../lexer/lexer.hpp"
 #include <map>
 #include <memory>
@@ -10,17 +11,6 @@
 #include <vector>
 
 namespace pipelang::models {
-
-struct Type {
-    std::string name;
-    std::vector<Type> arguments;
-    std::string sourceName = {};
-    std::string text() const;
-    std::string displayText() const;
-    bool operator==(const Type& other) const {
-        return name == other.name && arguments == other.arguments;
-    }
-};
 
 inline bool isConcurrentCollection(const std::string& name) {
     return name == "ConcurrentDictionary" || name == "ConcurrentQueue" ||
@@ -49,6 +39,10 @@ struct Expression {
     std::string callable = {};
     std::string owner = {};
     std::vector<std::string> targets = {};
+    // Only an authored implicit same-instance call may use receiver-free worker
+    // lowering. Explicit receivers retain their ordinary ownership contract.
+    bool implicitObjectCall = false;
+    bool statelessWorkerCall = false;
     Type convertTo = {};
     std::shared_ptr<Expression> constantValue = {};
 };
@@ -79,6 +73,8 @@ struct Statement {
     std::vector<Field> parallelCaptures = {};
     Type itemConvertTo = {};
     std::size_t offset = 0;
+    std::vector<Statement> initialization = {};
+    std::vector<Statement> iteration = {};
 };
 
 
@@ -100,12 +96,16 @@ struct Method {
     std::set<std::string> parallelCalls = {};
     std::set<std::string> cleanupCalls = {};
     bool workerCallable = false;
+    bool statelessWorkerCallable = false;
     std::vector<Expr> fieldInitializers = {};
     std::set<std::string> lockCalls = {};
     bool protectedMember = false;
     bool virtualMethod = false;
     bool overrideMethod = false;
     Expr baseConstructor = {};
+    // Checked closed dispatch, retained for consumers selecting a method without
+    // an authored call expression (for example a composition factory binding).
+    std::vector<std::string> dispatchTargets = {};
 };
 
 struct Declaration {
@@ -135,6 +135,7 @@ struct Declaration {
 
 struct Program {
     std::vector<Declaration> declarations;
+    std::vector<CompositionDeclaration> compositions;
     std::string module = {};
     std::vector<std::string> imports = {};
     std::vector<std::size_t> importOffsets = {};
@@ -142,6 +143,7 @@ struct Program {
     std::size_t expressionCount = 0;
     bool objectEnabled = false;
     bool projectEnabled = false;
+    bool activeHostNumericEnvironment = false;
     std::map<std::string, std::size_t> projectGenericRecords = {};
     std::vector<std::string> modelExports = {};
 };
@@ -153,9 +155,11 @@ Program parseModuleHeader(const std::string& source);
 std::string moduleIdentityFromStem(const std::string& stem);
 void check(Program& program);
 std::string generate(const Program& program, const std::string& nameSpace);
+std::string generateCompositionFactory(const Program& program, const std::string& nameSpace, bool compiled = false);
 CompiledProject generateCompiledProject(const Program& program, const std::string& nameSpace);
 
 std::string generateProjectTypes(const Program& program, const std::string& nameSpace);
+std::string generateNumericHeader(const Program& program, const std::string& nameSpace);
 Expr foldConstant(const Expr& expression);
 std::string constantLiteral(const Expr& expression);
 std::string constantsHeader(const Program& program, const std::string& nameSpace);

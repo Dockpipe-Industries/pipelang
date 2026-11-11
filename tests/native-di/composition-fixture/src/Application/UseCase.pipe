@@ -1,0 +1,40 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Application;
+import DiFixture.Contracts;
+
+public Class UseCase : IUseCase {
+    private int identity;
+    private IRequestService request;
+    private ConstructionPolicy policyReader;
+    private int operationCount = 0;
+
+    public UseCase(ConstructionPolicy policy, IIdentitySequence identities, IRequestService requestService) {
+        identity = identities.Next();
+        Result<int,string> admitted = policy.Read("transient", requestService.ScopeIdentity());
+        if (!admitted.IsSuccess)
+            throw Error(admitted.Error);
+        request = requestService;
+        policyReader = policy;
+    }
+
+    public pure int Identity() => identity;
+    public pure int RequestIdentity() => request.Identity();
+    public pure int ScopeIdentity() => request.ScopeIdentity();
+    public pure string Tenant() => request.Tenant();
+    public pure int RootIdentity() => request.RootIdentity();
+
+    public Result<int,string> ReadPolicy() {
+        operationCount = operationCount + 1;
+        return policyReader.Read("operation", request.ScopeIdentity());
+    }
+
+    public pure int OperationCount() => operationCount;
+
+    public pure int Echo(int context, int execution, int outcome) => context * 100 + execution * 10 + outcome;
+
+    public Result<int,string> ObserveCancellation(CancellationToken token) {
+        if (token.IsCancellationRequested)
+            return Result<int,string>.Cancelled("fixture.source_token_cancelled");
+        return Result<int,string>.Success(identity);
+    }
+}

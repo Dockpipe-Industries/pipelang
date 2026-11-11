@@ -1,10 +1,10 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "source_set.hpp"
+#include "ResourceBudgetReceipt.hpp"
 
 namespace pipelang::tools {
 namespace {
-constexpr std::size_t maximumSourceBytes = 65536;
-constexpr std::size_t maximumModules = 128;
+constexpr std::size_t maximumDescriptorBytes = 65536;
 constexpr const char* sourceSetProtocol = "pipelang.native-model-source-set.v1";
 
 void nonsymbolicInput(const fs::path& path) {
@@ -24,20 +24,21 @@ SourceSet SourceSet::load(const fs::path& descriptor) {
     require(descriptor.generic_string().find_first_of(";\r\n") == std::string::npos,
             "source-set descriptor path cannot contain CMake list or line separators");
     SourceSet result;
+    result.budget_ = models::resourceBudget();
     result.descriptor_ = descriptor.lexically_normal();
-    result.descriptorBytes_ = readFile(result.descriptor_, maximumSourceBytes);
-    const auto value = parseJson(result.descriptorBytes_, maximumSourceBytes);
+    result.descriptorBytes_ = readFile(result.descriptor_, maximumDescriptorBytes);
+    const auto value = parseJson(result.descriptorBytes_, maximumDescriptorBytes);
     exactObject(value, {"protocol", "entry", "modules"}, {"models"}, "model source set");
     require(value.at("protocol") == sourceSetProtocol, "unsupported model source-set protocol");
     result.entry_ = text(value.at("entry"), "entry module", 1024);
     const auto& modules = value.at("modules");
-    require(modules.is_array() && !modules.empty() && modules.size() <= maximumModules,
-            "source set requires 1..128 declared modules");
+    require(modules.is_array() && !modules.empty() && modules.size() <= result.budget_.modules,
+            "source-set modules resource budget exceeded; configure modules");
     result.compilerProtocol_ = value.contains("models") ? "pipelang.native-model.v3" : "pipelang.native-model.v2";
     if (value.contains("models")) {
         const auto& models = value.at("models");
-        require(models.is_array() && !models.empty() && models.size() <= maximumModules,
-                "source-set models require 1..128 explicit exports");
+        require(models.is_array() && !models.empty() && models.size() <= result.budget_.declarations,
+                "source-set exports resource budget exceeded; configure declarations");
         std::set<std::string> names;
         for (const auto& model : models)
             require(names.insert(text(model, "exported model", 1024)).second, "duplicate source-set model export");
@@ -66,7 +67,10 @@ SourceSet SourceSet::load(const fs::path& descriptor) {
         const auto path = result.descriptor_.parent_path() / relative;
         require(path != result.descriptor_, "source-set descriptor cannot also be a source module");
         nonsymbolicInput(path);
-        const auto bytes = readFile(path, maximumSourceBytes - totalBytes);
+        const auto sourceBudget = std::min(result.budget_.indexedBytes, result.budget_.inputBytes);
+        require(totalBytes <= sourceBudget && fs::file_size(path) <= sourceBudget - totalBytes,
+                "source-set input_bytes/indexed_bytes resource budget exceeded; configure input_bytes/indexed_bytes");
+        const auto bytes = readFile(path, sourceBudget - totalBytes);
         require(!bytes.empty(), "source-set module cannot be empty");
         totalBytes += bytes.size();
         result.modules_.push_back({{"name", name}, {"source", bytes}});
@@ -107,14 +111,18 @@ Json SourceSet::information() const {
     Json dependencies = Json::array();
     for (const auto& path : dependencies_)
         dependencies.push_back(path.generic_string());
-    return {{"protocol", "pipelang.native-model-source-set-info.v1"},
-            {"source_set", receipt()}, {"dependencies", dependencies}};
+    Json result{{"protocol", "pipelang.native-model-source-set-info.v1"},
+            {"source_set", receipt()}, {"dependencies", dependencies},
+            {"resource_budget", resourceBudgetReceipt(budget_)}};
+    require(canonical(result).size() <= budget_.outputBytes,
+            "source-set information output_bytes resource budget exceeded; configure output_bytes");
+    return result;
 }
 
 void SourceSet::verifyUnchanged() const {
     for (std::size_t index = 0; index < dependencies_.size(); ++index) {
         nonsymbolicInput(dependencies_[index]);
-        require(readFile(dependencies_[index], maximumSourceBytes) == contents_[index],
+        require(readFile(dependencies_[index], contents_[index].size()) == contents_[index],
                 "source-set input changed during compilation");
     }
 }

@@ -1,28 +1,33 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "CompiledProjectFiles.hpp"
+#include "../model-compiler/ResourceBudget.hpp"
 
 #include <algorithm>
+#include <charconv>
 
 namespace pipelang::tools {
 namespace {
 
 const std::set<std::string> fixedNames{
-    "StandaloneConstants.hpp", "Model.hpp", "Types.hpp", "Objects.hpp", "model.json", "bindings.json"
+    "StandaloneConstants.hpp", "Model.hpp", "Types.hpp", "Numeric.hpp", "Objects.hpp", "model.json", "bindings.json",
+    "CompositionPlan.json", "CompositionFactory.hpp"
 };
 
-bool implementationName(const std::string& name) {
+bool implementationName(const std::string& name, std::size_t maximumUnits = models::resourceBudget().implementationUnits) {
     if (!name.starts_with("Implementation_") || !name.ends_with(".cpp"))
         return false;
     const auto ordinal = name.substr(15, name.size() - 19);
-    if (ordinal.empty() || ordinal.size() > 3 || (ordinal.size() > 1 && ordinal.front() == '0'))
+    if (ordinal.empty() || (ordinal.size() > 1 && ordinal.front() == '0'))
         return false;
     if (!std::all_of(ordinal.begin(), ordinal.end(), [](char value) { return value >= '0' && value <= '9'; }))
         return false;
-    return std::stoul(ordinal) < 256;
+    std::size_t index = 0;
+    const auto parsed = std::from_chars(ordinal.data(), ordinal.data() + ordinal.size(), index);
+    return parsed.ec == std::errc{} && parsed.ptr == ordinal.data() + ordinal.size() && index < maximumUnits;
 }
 
-bool ownedName(const std::string& name) {
-    return fixedNames.contains(name) || implementationName(name);
+bool ownedName(const std::string& name, std::size_t maximumUnits = models::resourceBudget().implementationUnits) {
+    return fixedNames.contains(name) || implementationName(name, maximumUnits);
 }
 
 }
@@ -33,8 +38,8 @@ Json compiledProjectPlan(const Json& implementation, bool withContents) {
             implementation.at("emission") == (withContents ? "sources" : "plan"),
             "compiled project implementation protocol or emission mismatch");
     const auto& files = implementation.at("files");
-    require(files.is_array() && !files.empty() && files.size() <= 257,
-            "compiled project artifact count exceeds its bound");
+    require(files.is_array() && !files.empty() && files.size() - 1 <= models::resourceBudget().implementationUnits,
+            "compiled project implementation_units resource budget exceeded; configure implementation_units");
     auto plan = Json::array();
     std::set<std::string> names;
     std::size_t units = 0;
@@ -52,7 +57,7 @@ Json compiledProjectPlan(const Json& implementation, bool withContents) {
         if (!privateHeader)
             ++units;
         if (withContents)
-            text(file.at("content"), "compiled project file content", 4U << 20);
+            text(file.at("content"), "compiled project file content", models::resourceBudget().outputBytes);
         plan.push_back({{"name", name}, {"kind", file.at("kind")}});
     }
     require(names.contains("Objects.hpp"), "compiled project requires its private declarations");
@@ -71,14 +76,19 @@ std::set<std::string> compiledProjectOwnedNames(const fs::path& output) {
     require(fs::is_directory(output), "output must be a directory");
     if (fs::is_empty(output))
         return owned;
-    const auto receipt = parseJson(readFile(output / "bindings.json", 4U << 20), 4U << 20);
+    const auto receipt = parseJson(readFile(output / "bindings.json", models::resourceBudget().outputBytes), models::resourceBudget().outputBytes);
     require(receipt.is_object() && receipt.value("protocol", std::string{}) == "pipelang.native-model-artifacts.v4" &&
             receipt.contains("generated") && receipt.at("generated").is_object(),
             "compiled project output requires its prior ownership receipt");
-    require(receipt.at("generated").size() <= 261, "compiled project receipt exceeds its file bound");
+    const auto previousBudget = receipt.contains("resource_budget")
+        ? models::ResourceBudget::fromJson(receipt.at("resource_budget").at("profile")) : models::ResourceBudget{};
+    const auto fixedCount = fixedNames.size() - 1;
+    require(receipt.at("generated").size() <= fixedCount ||
+            receipt.at("generated").size() - fixedCount <= previousBudget.implementationUnits,
+            "compiled project receipt exceeds its implementation_units resource budget");
     owned.insert("bindings.json");
     for (const auto& [name, digest] : receipt.at("generated").items()) {
-        require(ownedName(name) && name != "bindings.json", "unowned compiled project receipt filename");
+        require(ownedName(name, previousBudget.implementationUnits) && name != "bindings.json", "unowned compiled project receipt filename");
         const auto expected = text(digest, "generated artifact digest", 64);
         if (fs::exists(output / name))
             require(fileHash(output / name) == expected,

@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "ProjectModuleTests.hpp"
+#include "BuildTimestamp.h"
 #include "../../src/native/sdk-tools/SourceProject.hpp"
 #include "../../src/native/sdk-tools/bindings.hpp"
 #include <algorithm>
@@ -173,7 +174,7 @@ void boundedProtocols(const fs::path& prefix) {
                                       {{"name", "Shared"}, {"source", padded}, {"path", "B.pipe"}}});
     require(compileProject(prefix, project).at("ok") == true, "project rejected exact 64KiB aggregate source");
     project["modules"][1]["source"] = padded + ' ';
-    require(compileProject(prefix, project).at("ok") == false, "project widened its aggregate source-byte budget");
+    require(compileProject(prefix, project).at("ok") == true, "project retained the obsolete 64KiB source closure ceiling");
 
     Json legacy = {{"protocol", "pipelang.native-model.v2"}, {"entry", "Shared"},
                    {"modules", {{{"name", "Shared"}, {"source", "module Shared; public Record A {}"}},
@@ -186,12 +187,13 @@ void boundedProtocols(const fs::path& prefix) {
 }
 
 void largeSdkTransport(const fs::path& prefix, const fs::path& root) {
-    // Shared portable components make the request exceed 1 MiB with a small
-    // number of physical inputs. The separate protocol test retains 4096 parts.
+    // Short paths fit macOS PATH_MAX while enough physical inputs keep the
+    // request above 1 MiB and its repeated-path receipts below 4 MiB. The
+    // separate protocol test retains the general 4096-part boundary.
     fs::path relative = "domain";
-    for (int component = 0; component < 14; ++component)
-        relative /= std::string(200, static_cast<char>('a' + component));
-    constexpr int fragments = 384;
+    for (int component = 0; component < 3; ++component)
+        relative /= std::string(160, static_cast<char>('a' + component));
+    constexpr int fragments = 2048;
     const auto directory = root / "src" / relative;
     fs::create_directories(directory);
     require(fs::is_directory(directory), "large SDK fixture input directory was not created");
@@ -268,8 +270,10 @@ int main() {
         require(current != previous, "adding/removing a selected module part did not regenerate its receipt");
         previous = current;
     };
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(root / "src/domain/NewPart.pipe", "module Gameplay; public Record NewPart {}\n");
     regenerate();
+    pipelang::tests::waitForBuildTimestampTick(build);
     fs::remove(root / "src/domain/NewPart.pipe");
     regenerate();
 }

@@ -1,8 +1,11 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "bindings.hpp"
+#include "ResourceBudgetReceipt.hpp"
+#include "../model-compiler/ScopedResourceBudget.hpp"
 #include "source_set.hpp"
 #include "SourceProject.hpp"
 #include "CompiledProjectFiles.hpp"
+#include "CompositionPlanAdmission.hpp"
 #include <optional>
 #include <algorithm>
 #include <cmath>
@@ -17,11 +20,18 @@ constexpr const char* viewProtocol = "pipelang.native-model-view.v1";
 constexpr const char* styleProtocol = "pipelang.native-style-descriptor.v1";
 Json compile(const fs::path& tool, const Json& request, const std::string& protocol, bool inspection = false) {
     const auto payload = request.dump();
-    const std::size_t requestLimit = (protocol == "pipelang.native-model-project.v1" || protocol == "pipelang.native-model-project.v2") ? 4U << 20 : 1U << 20;
-    require(payload.size() <= requestLimit, "native request exceeds its capacity");
-    const std::size_t responseLimit = protocol == "pipelang.native-model.v2" || protocol == "pipelang.native-model.v3" || protocol == "pipelang.native-model-project.v1" || protocol == "pipelang.native-model-project.v2"
-        ? 4U << 20 : 1U << 20;
-    const auto result = process({tool.string()}, payload, std::chrono::seconds(45), responseLimit);
+    const bool ordinaryModel = protocol.starts_with("pipelang.native-model.") ||
+                               protocol.starts_with("pipelang.native-model-project.");
+    const std::size_t requestLimit = ordinaryModel ? models::resourceBudget().inputBytes : 1U << 20;
+    require(payload.size() <= requestLimit,
+            "native request input_bytes resource budget exceeded; configure input_bytes");
+    const std::size_t responseLimit = ordinaryModel ? models::resourceBudget().outputBytes : 1U << 20;
+    std::vector<std::string> command{tool.string()};
+    if (ordinaryModel) {
+        command.push_back("--resource-budget-json");
+        command.push_back(models::resourceBudget().json().dump());
+    }
+    const auto result = process(command, payload, std::chrono::seconds(45), responseLimit);
     require(result.exit == 0 && result.diagnostic.empty(), "native compiler process failed or emitted diagnostics (exit " + std::to_string(result.exit) + "): " + result.diagnostic);
     auto response = parseJson(result.output, responseLimit);
     require(response.is_object() && response.contains("protocol") && response.at("protocol") == protocol &&
@@ -33,17 +43,35 @@ Json compile(const fs::path& tool, const Json& request, const std::string& proto
     std::set<std::string> required{"protocol", "ok", "header", "manifest"};
     if (inspection)
         required.insert("style_descriptor");
-    if (protocol == "pipelang.native-model-project.v1" || protocol == "pipelang.native-model-project.v2")
+    if (protocol == "pipelang.native-model-project.v1" || protocol == "pipelang.native-model-project.v2") {
         required.insert("types_header");
+        required.insert("numeric_header");
+    }
     if (protocol == "pipelang.native-model-project.v2")
         required.insert("implementation");
-    const std::set<std::string> optional = protocol == viewProtocol
+    std::set<std::string> optional = protocol == viewProtocol
         ? std::set<std::string>{} : std::set<std::string>{"constants_header"};
+    if (protocol.starts_with("pipelang.native-model-project.")) {
+        optional.insert("composition_plans");
+        optional.insert("composition_factory_header");
+    }
     exactObject(response, required, optional, "native response");
+    if (response.contains("composition_plans"))
+        admitCompositionPlans(response.at("composition_plans"));
+    const bool factoryRequested = request.value("composition_emission", std::string{}) == "factory";
+    require(response.contains("composition_factory_header") == factoryRequested,
+            "composition factory artifact must match its explicit request");
+    if (factoryRequested) {
+        require(response.contains("composition_plans"), "composition factory requires a checked composition plan");
+        require(!text(response.at("composition_factory_header"), "composition factory header", responseLimit).empty(),
+                "composition factory header cannot be empty");
+    }
     if (response.contains("constants_header"))
         text(response.at("constants_header"), "standalone constants header", responseLimit);
     if (response.contains("types_header"))
         text(response.at("types_header"), "generated project types header", responseLimit);
+    if (response.contains("numeric_header"))
+        text(response.at("numeric_header"), "generated caller-host numeric header", responseLimit);
     text(response.at("header"), "generated header", responseLimit);
     return response;
 }
@@ -98,7 +126,7 @@ std::string viewSourceFormat(const fs::path& path) {
 
 std::string source(const fs::path& path) {
     require(path.is_absolute(), "source must be absolute");
-    auto bytes = readFile(path, 65536);
+    auto bytes = readFile(path, models::resourceBudget().inputBytes);
     require(!bytes.empty(), "source cannot be empty");
     return bytes;
 }
@@ -111,7 +139,13 @@ Json generateArtifacts(const fs::path& prefix, const fs::path& manifest, const s
                       const fs::path& output, bool styleInspection, bool withView, const fs::path& descriptor = {},
                       const fs::path& projectRoot = {}, const fs::path& sourceRoot = {},
                       const fs::path& entry = {}, bool compiled = false, bool planning = false,
-                      const std::string& expectedPlan = {}) {
+                      const std::string& expectedPlan = {}, const std::string& numericEnvironment = {},
+                      bool requireCompositionPlan = false, bool emitCompositionFactory = false) {
+    require(!requireCompositionPlan || !projectRoot.empty(), "composition plans require PROJECT_ROOT");
+    require(!emitCompositionFactory || (!projectRoot.empty() && !withView),
+            "composition factories require a headless PROJECT_ROOT");
+    require(numericEnvironment.empty() || (numericEnvironment == "active-host" && !projectRoot.empty()),
+            "native numeric environment requires an active-host project selection");
     require(withView || !styleInspection, "headless model generation cannot inspect view styles");
     const auto viewFormat = withView ? viewSourceFormat(view) : std::string{};
     require(descriptor.empty() || (!withView && model.empty()), "source sets are headless inputs, exclusive with MODEL");
@@ -194,17 +228,31 @@ Json generateArtifacts(const fs::path& prefix, const fs::path& manifest, const s
             request["emit"] = planning ? "plan" : "sources";
         }
     }
+    if (!numericEnvironment.empty())
+        request["native_numeric_environment"] = numericEnvironment;
+    if (emitCompositionFactory)
+        request["composition_emission"] = "factory";
     const auto modelResponse = compile(modelTool, request, selectedProtocol);
     Json implementationPlan;
     std::string planIdentity;
     if (compiled) {
         implementationPlan = compiledProjectPlan(modelResponse.at("implementation"), !planning);
-        planIdentity = sha256(canonical(implementationPlan));
+        Json identity = implementationPlan;
+        if (!numericEnvironment.empty() || emitCompositionFactory) {
+            identity = Json{{"implementation", implementationPlan}};
+            if (!numericEnvironment.empty())
+                identity["native_numeric_environment"] = numericEnvironment;
+            if (emitCompositionFactory)
+                identity["composition_emission"] = "factory";
+        }
+        planIdentity = sha256(canonical(identity));
         require(planning || expectedPlan == planIdentity,
                 "compiled project plan changed; reconfigure the owning CMake target");
     }
     const auto& modelManifest = modelResponse.at("manifest");
     admitModel(modelManifest, nameSpace);
+    require(modelManifest.value("nativeNumericEnvironment", "") == numericEnvironment,
+            "compiler changed the selected native numeric environment");
     require(modelResponse.contains("constants_header") == modelManifest.contains("constants"),
         "constant exports and standalone header must be published together");
     if (sourceSet || project) {
@@ -248,15 +296,29 @@ Json generateArtifacts(const fs::path& prefix, const fs::path& manifest, const s
         information["protocol"] = "pipelang.native-model-project-compile-info.v1";
         information["implementation"] = implementationPlan;
         information["plan_sha256"] = planIdentity;
-        require(canonical(information).size() <= (4U << 20), "compiled project information exceeds capacity");
+        if (!numericEnvironment.empty())
+            information["native_numeric_environment"] = numericEnvironment;
+        if (emitCompositionFactory)
+            information["composition_emission"] = "factory";
+        information["resource_budget"] = resourceBudgetReceipt();
+        require(canonical(information).size() <= models::resourceBudget().outputBytes,
+                "compiled project information output_bytes resource budget exceeded; configure output_bytes");
         return information;
     }
+    require(!requireCompositionPlan || modelResponse.contains("composition_plans"),
+            "required composition plan is absent; author a project composition declaration");
     std::map<std::string, std::string> outputs{
         {"Model.hpp", modelResponse.at("header").get<std::string>()}, {"model.json", canonical(modelManifest)},
         {"StandaloneConstants.hpp", modelResponse.value("constants_header", std::string("#pragma once\n"))}
     };
+    if (modelResponse.contains("composition_plans"))
+        outputs["CompositionPlan.json"] = canonical(modelResponse.at("composition_plans"));
+    if (emitCompositionFactory)
+        outputs["CompositionFactory.hpp"] = modelResponse.at("composition_factory_header").get<std::string>();
     if (modelResponse.contains("types_header"))
         outputs["Types.hpp"] = modelResponse.at("types_header").get<std::string>();
+    if (modelResponse.contains("numeric_header"))
+        outputs["Numeric.hpp"] = modelResponse.at("numeric_header").get<std::string>();
     if (compiled) {
         for (const auto& file : modelResponse.at("implementation").at("files"))
             outputs.emplace(file.at("name").get<std::string>(), file.at("content").get<std::string>());
@@ -272,6 +334,11 @@ Json generateArtifacts(const fs::path& prefix, const fs::path& manifest, const s
                  {"model_source_sha256", sha256(modelBytes)},
                  {"tools", {{"model", {{"protocol", modelProtocol}, {"sha256", hashes.at("model")}}}}},
                  {"generated", Json::object()}};
+    receipt["resource_budget"] = resourceBudgetReceipt();
+    if (!numericEnvironment.empty())
+        receipt["native_numeric_environment"] = numericEnvironment;
+    if (emitCompositionFactory)
+        receipt["composition_emission"] = "factory";
     if (sourceSet) {
         receipt["protocol"] = "pipelang.native-model-artifacts.v2";
         receipt.erase("model_source_sha256");
@@ -297,6 +364,7 @@ Json generateArtifacts(const fs::path& prefix, const fs::path& manifest, const s
         sourceSet->verifyUnchanged();
     if (project)
         project->verifyUnchanged();
+    verifyResourceBudgetUnchanged();
     if (compiled)
         publishCompiledProject(output, outputs);
     else
@@ -323,9 +391,12 @@ Json generateSourceSetBindings(const fs::path& prefix, const fs::path& manifest,
 Json generateProjectBindings(const fs::path& prefix, const fs::path& manifest, const std::string& manifestHash,
                              const fs::path& modelTool, const fs::path& projectRoot,
                              const fs::path& sourceRoot, const fs::path& entry,
-                             const std::string& nameSpace, const fs::path& output) {
+                             const std::string& nameSpace, const fs::path& output,
+                             const std::string& numericEnvironment, bool requireCompositionPlan,
+                             bool emitCompositionFactory) {
     return generateArtifacts(prefix, manifest, manifestHash, modelTool, {},
-        {}, {}, nameSpace, output, false, false, {}, projectRoot, sourceRoot, entry);
+        {}, {}, nameSpace, output, false, false, {}, projectRoot, sourceRoot, entry, false, false, {}, numericEnvironment,
+        requireCompositionPlan, emitCompositionFactory);
 }
 
 Json generateModelBindings(const fs::path& prefix, const fs::path& manifest, const std::string& manifestHash,
@@ -337,18 +408,23 @@ Json generateModelBindings(const fs::path& prefix, const fs::path& manifest, con
 Json compiledProjectInformation(const fs::path& prefix, const fs::path& manifest,
                                 const std::string& manifestHash, const fs::path& modelTool,
                                 const fs::path& projectRoot, const fs::path& sourceRoot,
-                                const fs::path& entry, const std::string& nameSpace) {
+                                const fs::path& entry, const std::string& nameSpace,
+                                const std::string& numericEnvironment, bool emitCompositionFactory) {
     return generateArtifacts(prefix, manifest, manifestHash, modelTool, {},
-        {}, {}, nameSpace, {}, false, false, {}, projectRoot, sourceRoot, entry, true, true);
+        {}, {}, nameSpace, {}, false, false, {}, projectRoot, sourceRoot, entry, true, true, {}, numericEnvironment,
+        emitCompositionFactory, emitCompositionFactory);
 }
 
 Json generateCompiledProjectBindings(const fs::path& prefix, const fs::path& manifest,
                                      const std::string& manifestHash, const fs::path& modelTool,
                                      const fs::path& projectRoot, const fs::path& sourceRoot,
                                      const fs::path& entry, const std::string& nameSpace,
-                                     const fs::path& output, const std::string& expectedPlan) {
+                                     const fs::path& output, const std::string& expectedPlan,
+                                     const std::string& numericEnvironment, bool requireCompositionPlan,
+                                     bool emitCompositionFactory) {
     return generateArtifacts(prefix, manifest, manifestHash, modelTool, {},
-        {}, {}, nameSpace, output, false, false, {}, projectRoot, sourceRoot, entry, true, false, expectedPlan);
+        {}, {}, nameSpace, output, false, false, {}, projectRoot, sourceRoot, entry, true, false, expectedPlan, numericEnvironment,
+        requireCompositionPlan, emitCompositionFactory);
 }
 
 }

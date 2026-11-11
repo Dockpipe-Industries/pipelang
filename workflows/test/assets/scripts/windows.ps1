@@ -25,7 +25,7 @@ if ($null -eq $selectionText) {
     $selectionText = 'all'
 }
 $fixtureSelection = @($selectionText.Split([char[]]" `t`r`n", [StringSplitOptions]::RemoveEmptyEntries))
-$knownFixtures = 'semantics synchronous-host initialization-budget list-reads fundamentals uint32 uint32-integer-only iteration async-composition failure-cleanup composition parallel_source collections_source mixed concurrent_source synchronization_source objects_source objects_composition interfaces_source synchronous_host_objects initialization_budget_objects list_read_objects uint32_objects foundation foundation_objects project compiled-project class-inheritance extended_collections parallel_runtime concurrent_runtime synchronization_runtime lazy_task_scope synchronous_host_scope initialization_budget_runtime object_runtime object_transaction'.Split(' ')
+$knownFixtures = 'semantics synchronous-host initialization-budget list-reads fundamentals uint32 uint32-integer-only iteration async-composition failure-cleanup composition parallel_source collections_source mixed concurrent_source synchronization_source objects_source objects_composition interfaces_source synchronous_host_objects initialization_budget_objects list_read_objects uint32_objects foundation foundation_objects byte_buffers byte_buffer_objects native-numeric project compiled-project class-inheritance extended_collections parallel_runtime concurrent_runtime synchronization_runtime lazy_task_scope synchronous_host_scope initialization_budget_runtime object_runtime object_transaction'.Split(' ')
 if ($fixtureSelection.Count -eq 0) {
     throw 'Native fixture selection must not be empty'
 }
@@ -101,8 +101,34 @@ if ($suites -contains 'fundamentals') {
 $extended = Join-Path $proof 'extended'
 Invoke-Unit 'extended-generate' (Join-Path $build 'sdk-tools/pipelang-extended-tests.exe') @($script:SourceRoot, $sdk, $extended)
 foreach ($fixture in @('composition', 'parallel_source', 'collections_source', 'mixed', 'concurrent_source',
-    'synchronization_source', 'objects_source', 'objects_composition', 'interfaces_source', 'synchronous_host_objects', 'initialization_budget_objects', 'list_read_objects', 'uint32_objects', 'foundation', 'foundation_objects')) {
+    'synchronization_source', 'objects_source', 'objects_composition', 'interfaces_source', 'synchronous_host_objects', 'initialization_budget_objects', 'list_read_objects', 'uint32_objects', 'foundation', 'foundation_objects', 'byte_buffers', 'byte_buffer_objects')) {
     Compile-SelectedFixture $fixture (Join-Path $script:SourceRoot "tests/native-models/$fixture.cpp") $extended $sdk $tools
+}
+$numericProof = Join-Path $proof 'native-numeric'
+Invoke-Unit 'native-numeric-generate' (Join-Path $build 'sdk-tools/pipelang-sdk-tool-tests.exe') @('--native-numeric-fixture', $sdk, $numericProof)
+Compile-SelectedFixture 'native-numeric' (Join-Path $numericProof 'main.cpp') (Join-Path $numericProof 'generated') $sdk $tools
+if ($fixtureSelection -contains 'all' -or $fixtureSelection -contains 'native-numeric') {
+    $observationProject = Join-Path $numericProof 'observation'
+    foreach ($observationMode in @('normal', 'sanitizer')) {
+        $observationSanitizers = 'OFF'
+        if ($observationMode -eq 'sanitizer') {
+            $observationSanitizers = 'ON'
+        }
+        $observationBuild = Join-Path $observationProject $observationMode
+        Invoke-Unit "ordinary-observation-$observationMode-configure" $tools.cmake @('-S', $observationProject,
+            '-B', $observationBuild, '-G', 'Ninja', "-DCMAKE_PREFIX_PATH=$sdk",
+            "-DCMAKE_CXX_COMPILER=$($tools.cxx)", '-DCMAKE_BUILD_TYPE=Release',
+            "-DOBSERVATION_SANITIZERS=$observationSanitizers")
+        Invoke-Unit "ordinary-observation-$observationMode-build" $tools.cmake @('--build', $observationBuild, '--parallel', '1')
+        if ($observationMode -eq 'sanitizer') {
+            foreach ($library in Get-ChildItem -LiteralPath $tools.runtime -Filter '*.dll' -File) {
+                Copy-Item -LiteralPath $library.FullName -Destination $observationBuild -Force
+            }
+            $env:ASAN_OPTIONS = 'detect_leaks=0:halt_on_error=1'
+            $env:UBSAN_OPTIONS = 'halt_on_error=1:print_stacktrace=1'
+        }
+        Invoke-Unit "ordinary-observation-$observationMode-run" (Join-Path $observationBuild 'ordinary_observation.exe') @()
+    }
 }
 $projectProof = Join-Path $proof 'project'
 Invoke-Unit 'project-generate' (Join-Path $build 'sdk-tools/pipelang-sdk-tool-tests.exe') @('--project-fixture', $sdk, $projectProof)

@@ -81,7 +81,7 @@ for selected_fixture in "$@"; do
                 exit 1
             fi
             ;;
-        semantics|synchronous-host|initialization-budget|list-reads|fundamentals|uint32|uint32-integer-only|iteration|async-composition|failure-cleanup|composition|parallel_source|collections_source|mixed|concurrent_source|synchronization_source|objects_source|objects_composition|interfaces_source|synchronous_host_objects|initialization_budget_objects|list_read_objects|uint32_objects|foundation|foundation_objects|project|compiled-project|class-inheritance|extended_collections|parallel_runtime|concurrent_runtime|synchronization_runtime|lazy_task_scope|synchronous_host_scope|initialization_budget_runtime|object_runtime|object_transaction) ;;
+        semantics|synchronous-host|initialization-budget|list-reads|fundamentals|uint32|uint32-integer-only|iteration|async-composition|failure-cleanup|composition|parallel_source|collections_source|mixed|concurrent_source|synchronization_source|objects_source|objects_composition|interfaces_source|synchronous_host_objects|initialization_budget_objects|list_read_objects|uint32_objects|foundation|foundation_objects|byte_buffers|byte_buffer_objects|native-numeric|project|compiled-project|class-inheritance|extended_collections|parallel_runtime|concurrent_runtime|synchronization_runtime|lazy_task_scope|synchronous_host_scope|initialization_budget_runtime|object_runtime|object_transaction) ;;
         *) echo "Unknown native fixture selection: $selected_fixture" >&2; exit 1 ;;
     esac
 done
@@ -143,9 +143,121 @@ case " $PIPELANG_NATIVE_COMPAT_SUITES " in
     *" fundamentals "*) unit numeric-guards "$build/sdk-tools/pipelang-extended-tests" --numeric-guard "$sdk" "$proof/fundamentals/NumericDefaults.hpp" ;;
 esac
 unit extended-generate "$build/sdk-tools/pipelang-extended-tests" "$PWD" "$sdk" "$proof/extended"
-for fixture in composition parallel_source collections_source mixed concurrent_source synchronization_source objects_source objects_composition interfaces_source synchronous_host_objects initialization_budget_objects list_read_objects uint32_objects foundation foundation_objects; do
+for fixture in composition parallel_source collections_source mixed concurrent_source synchronization_source objects_source objects_composition interfaces_source synchronous_host_objects initialization_budget_objects list_read_objects uint32_objects foundation foundation_objects byte_buffers byte_buffer_objects; do
     compile_fixture "$fixture" "tests/native-models/$fixture.cpp" "$proof/extended"
 done
+unit native-numeric-generate "$build/sdk-tools/pipelang-sdk-tool-tests" --native-numeric-fixture "$sdk" "$proof/native-numeric"
+compile_fixture native-numeric "$proof/native-numeric/main.cpp" "$proof/native-numeric/generated"
+case " $fixture_selection " in
+    *" all "*|*" native-numeric "*)
+        active_project="$proof/native-numeric/active"
+        for active_mode in normal sanitizer; do
+            active_sanitizers=OFF
+            if [ "$active_mode" = sanitizer ]; then
+                active_sanitizers=ON
+            fi
+            active_build="$active_project/$active_mode"
+            unit "active-numeric-$active_mode-configure" "$PIPELANG_CMAKE" -S "$active_project" \
+                -B "$active_build" -DCMAKE_PREFIX_PATH="$sdk" \
+                -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" -DCMAKE_BUILD_TYPE=Release \
+                -DACTIVE_SANITIZERS="$active_sanitizers"
+            unit "active-numeric-$active_mode-build" "$PIPELANG_CMAKE" --build "$active_build" --parallel 1
+            if [ "$active_mode" = sanitizer ]; then
+                unit active-numeric-sanitizer-run /usr/bin/env \
+                    ASAN_OPTIONS=detect_leaks=$([ "$PIPELANG_NATIVE_PLATFORM" = linux ] && echo 1 || echo 0):halt_on_error=1 \
+                    UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 "$active_build/active_numeric"
+            else
+                unit active-numeric-normal-run "$active_build/active_numeric"
+            fi
+        done
+        structured_project="$proof/native-numeric/structured-values"
+        for structured_mode in normal sanitizer; do
+            structured_sanitizers=OFF
+            if [ "$structured_mode" = sanitizer ]; then
+                structured_sanitizers=ON
+            fi
+            structured_build="$structured_project/$structured_mode"
+            unit "structured-values-$structured_mode-configure" "$PIPELANG_CMAKE" -S "$structured_project" -B "$structured_build" \
+                -DSTRUCTURED_SDK_PREFIX="$sdk" -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" -DCMAKE_BUILD_TYPE=Release \
+                -DSTRUCTURED_SANITIZERS="$structured_sanitizers"
+            unit "structured-values-$structured_mode-build" "$PIPELANG_CMAKE" --build "$structured_build" --parallel 1
+            for structured_executable in structured_values structured_headers; do
+                if [ "$structured_mode" = sanitizer ]; then
+                    unit "structured-values-$structured_executable-sanitizer-run" /usr/bin/env \
+                        ASAN_OPTIONS=detect_leaks=$([ "$PIPELANG_NATIVE_PLATFORM" = linux ] && echo 1 || echo 0):halt_on_error=1 \
+                        UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+                        "$structured_build/$structured_executable"
+                else
+                    unit "structured-values-$structured_executable-normal-run" "$structured_build/$structured_executable"
+                fi
+            done
+        done
+        fixed_array_project="$proof/native-numeric/fixed-arrays"
+        for fixed_array_mode in normal sanitizer; do
+            fixed_array_sanitizers=OFF
+            if [ "$fixed_array_mode" = sanitizer ]; then
+                fixed_array_sanitizers=ON
+            fi
+            fixed_array_build="$fixed_array_project/$fixed_array_mode"
+            unit "fixed-arrays-$fixed_array_mode-configure" "$PIPELANG_CMAKE" -S "$fixed_array_project" -B "$fixed_array_build" \
+                -DFIXED_ARRAY_SDK_PREFIX="$sdk" -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" -DCMAKE_BUILD_TYPE=Release \
+                -DFIXED_ARRAY_SANITIZERS="$fixed_array_sanitizers"
+            unit "fixed-arrays-$fixed_array_mode-build" "$PIPELANG_CMAKE" --build "$fixed_array_build" --parallel 1
+            for fixed_array_executable in fixed_arrays fixed_array_headers; do
+                if [ "$fixed_array_mode" = sanitizer ]; then
+                    unit "fixed-arrays-$fixed_array_executable-sanitizer-run" /usr/bin/env \
+                        ASAN_OPTIONS=detect_leaks=$([ "$PIPELANG_NATIVE_PLATFORM" = linux ] && echo 1 || echo 0):halt_on_error=1 \
+                        UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+                        "$fixed_array_build/$fixed_array_executable"
+                else
+                    unit "fixed-arrays-$fixed_array_executable-normal-run" "$fixed_array_build/$fixed_array_executable"
+                fi
+            done
+        done
+        for_loop_project="$proof/native-numeric/for-loops"
+        for for_loop_mode in normal sanitizer; do
+            for_loop_sanitizers=OFF
+            if [ "$for_loop_mode" = sanitizer ]; then
+                for_loop_sanitizers=ON
+            fi
+            for_loop_build="$for_loop_project/$for_loop_mode"
+            unit "for-loops-$for_loop_mode-configure" "$PIPELANG_CMAKE" -S "$for_loop_project" -B "$for_loop_build" \
+                -DFOR_LOOP_SDK_PREFIX="$sdk" -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" -DCMAKE_BUILD_TYPE=Release \
+                -DFOR_LOOP_SANITIZERS="$for_loop_sanitizers"
+            unit "for-loops-$for_loop_mode-build" "$PIPELANG_CMAKE" --build "$for_loop_build" --parallel 1
+            for for_loop_executable in for_loops for_loop_headers; do
+                if [ "$for_loop_mode" = sanitizer ]; then
+                    unit "for-loops-$for_loop_executable-sanitizer-run" /usr/bin/env \
+                        ASAN_OPTIONS=detect_leaks=$([ "$PIPELANG_NATIVE_PLATFORM" = linux ] && echo 1 || echo 0):halt_on_error=1 \
+                        UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+                        "$for_loop_build/$for_loop_executable"
+                else
+                    unit "for-loops-$for_loop_executable-normal-run" "$for_loop_build/$for_loop_executable"
+                fi
+            done
+        done
+        observation_project="$proof/native-numeric/observation"
+        for observation_mode in normal sanitizer; do
+            observation_sanitizers=OFF
+            if [ "$observation_mode" = sanitizer ]; then
+                observation_sanitizers=ON
+            fi
+            observation_build="$observation_project/$observation_mode"
+            unit "ordinary-observation-$observation_mode-configure" "$PIPELANG_CMAKE" -S "$observation_project" \
+                -B "$observation_build" -DCMAKE_PREFIX_PATH="$sdk" \
+                -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" -DCMAKE_BUILD_TYPE=Release \
+                -DOBSERVATION_SANITIZERS="$observation_sanitizers"
+            unit "ordinary-observation-$observation_mode-build" "$PIPELANG_CMAKE" --build "$observation_build" --parallel 1
+            if [ "$observation_mode" = sanitizer ]; then
+                unit ordinary-observation-sanitizer-run /usr/bin/env \
+                    ASAN_OPTIONS=detect_leaks=$([ "$PIPELANG_NATIVE_PLATFORM" = linux ] && echo 1 || echo 0):halt_on_error=1 \
+                    UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 "$observation_build/ordinary_observation"
+            else
+                unit ordinary-observation-normal-run "$observation_build/ordinary_observation"
+            fi
+        done
+        ;;
+esac
 unit project-generate "$build/sdk-tools/pipelang-sdk-tool-tests" --project-fixture "$sdk" "$proof/project"
 compile_fixture project "$proof/project/main.cpp" "$proof/project/generated"
 case " $fixture_selection " in

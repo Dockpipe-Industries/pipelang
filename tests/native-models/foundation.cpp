@@ -90,12 +90,68 @@ void constantsAndStrings(App& model) {
     assert(!model.Prefix(std::string("a\0b", 3), std::string("a\0c", 3)));
     assert(model.Prefix("\xc3\xa9lan", "\xc3\xa9"));
 }
+
+template<class Callback>
+void expectTextFailure(Callback callback) {
+    bool failed = false;
+    try {
+        callback();
+    } catch (const ExecutionFailure&) {
+        failed = true;
+    }
+    assert(failed);
+}
+
+void utf8Text(App& model) {
+    const std::string text = "a\xc3\xa9\xf0\x9f\x9a\x80z";
+    assert(model.ByteLength(text) == 8);
+    assert(model.ByteLength("") == 0);
+    assert(model.ByteLength(std::string("a\0b", 3)) == 3);
+    assert(model.ByteSlice(text, 1, 2) == "\xc3\xa9");
+    assert(model.ByteSlice(text, 3, 4) == "\xf0\x9f\x9a\x80");
+    assert(model.ByteSlice(text, 0, 8) == text);
+    assert(model.ByteSlice(text, 8, 0).empty());
+    assert(model.ByteSlice("", 0, 0).empty());
+    assert(model.ByteIndexOf(text, "\xc3\xa9", 0) == 1);
+    assert(model.ByteIndexOf(text, "z", 3) == 7);
+    assert(model.ByteIndexOf(text, "a", 1) == -1);
+    assert(model.ByteIndexOf(text, "z", 8) == -1);
+    assert(model.ByteIndexOf(text, "", 8) == 8);
+    assert(model.ByteIndexOf("", "", 0) == 0);
+    assert(model.ByteIndexOf(std::string("a\0b", 3), std::string("\0b", 2), 0) == 1);
+    for (const auto start : {-1, 2, 4, 5, 6, 9}) {
+        expectTextFailure([&] { (void)model.ByteSlice(text, start, 0); });
+        expectTextFailure([&] { (void)model.ByteIndexOf(text, "", start); });
+    }
+    expectTextFailure([&] { (void)model.ByteSlice(text, 0, -1); });
+    expectTextFailure([&] { (void)model.ByteSlice(text, 0, 2); });
+    expectTextFailure([&] { (void)model.ByteSlice(text, 0, INT64_MAX); });
+    expectTextFailure([&] { (void)model.ByteIndexOf(text, "", INT64_MIN); });
+    expectTextFailure([&] { (void)model.ByteLength(std::string("\xff", 1)); });
+    expectTextFailure([&] { (void)model.ByteIndexOf(text, std::string("\x80", 1), 0); });
+    expectTextFailure([&] { (void)model.ByteLength(std::string(maximumStringBytes + 1, 'x')); });
+    const std::string maximum(maximumStringBytes, 'x');
+    assert(model.ByteLength(maximum) == static_cast<std::int64_t>(maximumStringBytes));
+    assert(model.ByteSlice(maximum, 0, maximumStringBytes) == maximum);
+    assert(model.IntegerText(0) == "0");
+    assert(model.IntegerText(42) == "42");
+    assert(model.IntegerText(-42) == "-42");
+    assert(model.IntegerText(INT64_MAX) == "9223372036854775807");
+    assert(model.IntegerText(INT64_MIN) == "-9223372036854775808");
+    assert(model.OrderedSlice().value() == "bc" && model.snapshot().sequence == 123);
+    assert(model.OrderedSearch().value() == 1 && model.snapshot().sequence == 123);
+    assert(model.OrderedInteger().value() == "-42" && model.snapshot().sequence == 1);
+    const auto calls = model.snapshot().calls;
+    assert(model.InvalidSlice().is_failure());
+    assert(model.snapshot().calls == calls);
+}
 }
 
 int main() {
     auto queries = std::make_shared<Queries>();
     App model(queries);
     constantsAndStrings(model);
+    utf8Text(model);
     Numbers foldedOnly(TaskOptions{4, 1});
     (void)foldedOnly;
     const auto literalBoundary = budgetBoundary([&](std::int64_t count) { return model.SumLiteral(count); });

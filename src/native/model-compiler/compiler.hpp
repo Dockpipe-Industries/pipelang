@@ -2,6 +2,7 @@
 #pragma once
 
 #include "../third_party/nlohmann/json.hpp"
+#include "ResourceBudget.hpp"
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -9,7 +10,7 @@
 
 namespace pipelang::models {
 
-inline constexpr std::size_t sourceLimit = 64 * 1024;
+inline constexpr std::size_t sourcePathLimit = 64 * 1024;
 inline constexpr std::size_t messageLimit = 4 * 1024 * 1024;
 
 struct Diagnostic : std::runtime_error {
@@ -36,10 +37,15 @@ nlohmann::json compileModuleObjects(const std::vector<ModuleSource>& modules, co
                                     const std::vector<std::string>& models, const std::string& nameSpace);
 
 nlohmann::json compileProjectModules(const std::vector<ModuleSource>& modules, const std::string& entry,
-                                    const std::string& nameSpace);
+                                    const std::string& nameSpace, bool activeHostNumericEnvironment = false);
 
 nlohmann::json compileProjectImplementation(const std::vector<ModuleSource>& modules,
                                            const std::string& entry, const std::string& nameSpace,
-                                           const std::string& emission);
+                                           const std::string& emission, bool activeHostNumericEnvironment = false);
+
+nlohmann::json compileProjectCompositionFactory(const std::vector<ModuleSource>& modules,
+                                                const std::string& entry, const std::string& nameSpace,
+                                                const std::string& emission = {},
+                                                bool activeHostNumericEnvironment = false);
 
 }

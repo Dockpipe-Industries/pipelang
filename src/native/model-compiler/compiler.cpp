@@ -1,7 +1,10 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "composition.hpp"
+#include "OutputBudgetStream.hpp"
+#include "CompositionPlanner.hpp"
 
 #include <cctype>
+#include <ostream>
 
 namespace pipelang::models {
 namespace {
@@ -22,11 +25,15 @@ void validateNamespace(const std::string& nameSpace) {
 nlohmann::json compileProgram(Program program, const std::string& nameSpace,
                               const std::string& protocol,
                               const std::vector<std::string>& models = {},
-                              const std::string& emission = {}) {
+                              const std::string& emission = {},
+                              bool emitCompositionFactory = false) {
     program.objectEnabled = protocol == "pipelang.native-model.v3" || program.projectEnabled;
     program.modelExports = models;
     normalizeComposition(program);
     check(program);
+    const auto plans = compositionPlans(program);
+    if (emitCompositionFactory && program.compositions.empty())
+        throw Diagnostic("composition factory emission requires a source composition declaration", 0);
     nlohmann::json response;
     if (emission.empty()) {
         response = {{"protocol", protocol}, {"ok", true}, {"header", generate(program, nameSpace)},
@@ -45,10 +52,22 @@ nlohmann::json compileProgram(Program program, const std::string& nameSpace,
         response["implementation"] = {{"protocol", "pipelang.native-project-implementation.v1"},
                                        {"emission", emission}, {"files", std::move(files)}};
     }
-    if (program.projectEnabled)
+    if (program.projectEnabled) {
         response["types_header"] = generateProjectTypes(program, nameSpace);
+        response["numeric_header"] = generateNumericHeader(program, nameSpace);
+    }
     if (!constantsManifest(program, nameSpace).empty())
         response["constants_header"] = constantsHeader(program, nameSpace);
+    if (!program.compositions.empty())
+        response["composition_plans"] = plans;
+    if (emitCompositionFactory)
+        response["composition_factory_header"] = generateCompositionFactory(program, nameSpace, !emission.empty());
+    // Include the CLI newline in the common direct/API output budget.
+    OutputBudgetStream counter(resourceBudget().outputBytes - 1);
+    std::ostream output(&counter);
+    output << response;
+    if (!output || counter.exceeded())
+        throw Diagnostic("output_bytes resource budget exceeded; configure output_bytes", 0);
     return response;
 }
 
@@ -84,9 +103,10 @@ nlohmann::json compileModuleObjects(const std::vector<ModuleSource>& modules, co
 }
 
 nlohmann::json compileProjectModules(const std::vector<ModuleSource>& modules, const std::string& entry,
-                                    const std::string& nameSpace) {
+                                    const std::string& nameSpace, bool activeHostNumericEnvironment) {
     validateNamespace(nameSpace);
     auto program = linkModules(modules, entry, true, true);
+    program.activeHostNumericEnvironment = activeHostNumericEnvironment;
     std::vector<std::string> models;
     for (const auto& declaration : program.declarations) {
         if (declaration.modelDeclared)
@@ -97,17 +117,36 @@ nlohmann::json compileProjectModules(const std::vector<ModuleSource>& modules, c
 
 nlohmann::json compileProjectImplementation(const std::vector<ModuleSource>& modules,
                                            const std::string& entry, const std::string& nameSpace,
-                                           const std::string& emission) {
+                                           const std::string& emission, bool activeHostNumericEnvironment) {
     validateNamespace(nameSpace);
     if (emission != "plan" && emission != "sources")
         throw Diagnostic("compiled project emission must be plan or sources", 0);
     auto program = linkModules(modules, entry, true, true);
+    program.activeHostNumericEnvironment = activeHostNumericEnvironment;
     std::vector<std::string> models;
     for (const auto& declaration : program.declarations) {
         if (declaration.modelDeclared)
             models.push_back(declaration.sourceName);
     }
     return compileProgram(std::move(program), nameSpace, "pipelang.native-model-project.v2", models, emission);
+}
+
+nlohmann::json compileProjectCompositionFactory(const std::vector<ModuleSource>& modules,
+                                                const std::string& entry, const std::string& nameSpace,
+                                                const std::string& emission, bool activeHostNumericEnvironment) {
+    validateNamespace(nameSpace);
+    if (!emission.empty() && emission != "plan" && emission != "sources")
+        throw Diagnostic("compiled composition emission must be plan or sources", 0);
+    auto program = linkModules(modules, entry, true, true);
+    program.activeHostNumericEnvironment = activeHostNumericEnvironment;
+    std::vector<std::string> models;
+    for (const auto& declaration : program.declarations) {
+        if (declaration.modelDeclared)
+            models.push_back(declaration.sourceName);
+    }
+    const std::string protocol = emission.empty()
+        ? "pipelang.native-model-project.v1" : "pipelang.native-model-project.v2";
+    return compileProgram(std::move(program), nameSpace, protocol, models, emission, true);
 }
 
 }

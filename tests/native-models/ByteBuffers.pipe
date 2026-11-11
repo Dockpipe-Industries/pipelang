@@ -1,0 +1,70 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class ByteBuffers {
+    private ByteBufferHost host;
+    public ByteBuffer stored;
+    public int sequence = 0;
+
+    public ByteBuffers(ByteBufferHost service) {
+        host = service;
+    }
+
+    public pure int Length(ByteBuffer value) => value.Length;
+    public pure uint32 At(ByteBuffer value, int index) => value.At(index);
+    public pure ByteBuffer Slice(ByteBuffer value, int start, int count) => value.Slice(start, count);
+    public pure int IndexOf(ByteBuffer value, ByteBuffer pattern, int start) => value.IndexOf(pattern, start);
+    public pure string Decode(ByteBuffer value) => value.DecodeUtf8();
+    public pure ByteBuffer Encode(string value) => ByteBuffer.FromUtf8(value);
+    public pure bool Equal(ByteBuffer left, ByteBuffer right) => left == right;
+
+    public pure ByteBuffer Build() {
+        ByteBuffer value = ByteBuffer.Empty();
+        value.Add(0u);
+        value.Add(255u);
+        value.Append(ByteBuffer.FromUtf8("tail"));
+        return value;
+    }
+
+    public void Store(ByteBuffer value) {
+        stored = value;
+    }
+
+    public void AppendStored(ByteBuffer value) {
+        stored.Append(value);
+    }
+
+    public void InvalidAdd(uint32 value) {
+        stored.Add(1u);
+        stored.Add(value);
+    }
+
+    public void InvalidDecode() {
+        stored.Add(255u);
+        string text = stored.DecodeUtf8();
+    }
+
+    private int Next(int value, int ordinal) {
+        sequence = sequence * 10 + ordinal;
+        return value;
+    }
+
+    private ByteBuffer NextBytes(ByteBuffer value, int ordinal) {
+        sequence = sequence * 10 + ordinal;
+        return value;
+    }
+
+    public ByteBuffer Ordered(ByteBuffer value) {
+        sequence = 0;
+        return NextBytes(value, 1).Slice(Next(1, 2), Next(2, 3));
+    }
+
+    public Result<ByteBufferPacket,string> Exchange(ByteBufferPacket packet) {
+        return host.Exchange(packet);
+    }
+
+    public async Task<Result<ByteBuffer,string>> Read(ByteBuffer input, CancellationToken cancellation) {
+        Result<ByteBuffer,string> result = await host.Read(input, cancellation);
+        if (result.IsSuccess)
+            stored = result.Value;
+        return result;
+    }
+}

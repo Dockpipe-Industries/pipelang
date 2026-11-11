@@ -1,11 +1,15 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "../../src/native/sdk-tools/bindings.hpp"
 #include "../../src/native/sdk-tools/source_set.hpp"
+#include "../../src/native/model-compiler/ScopedResourceBudget.hpp"
 #include "ProjectTests.hpp"
+#include "BuildTimestamp.h"
+#include "NativeNumericExportTests.hpp"
 #include "CompiledProjectTests.hpp"
 #include "CompiledOwnerFixture.hpp"
 #include "ProjectModuleTests.hpp"
 #include <chrono>
+#include <cerrno>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -13,6 +17,7 @@
 #include "windows_junction.hpp"
 #ifndef _WIN32
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -94,6 +99,40 @@ void primitiveContracts(const fs::path& root, const fs::path& self) {
     refuse([&] { process({self.string(), "--flood"}, {}, std::chrono::seconds(2), 128); }, "process output limit");
     const auto result = process({self.string(), "--echo"}, "literal $(not-a-command) `text`\n");
     require(result.exit == 0 && result.output == "literal $(not-a-command) `text`\n" && result.diagnostic.empty(), "process transport changed literal data");
+#ifndef _WIN32
+    const auto expectExecFailure = [&](const fs::path& executable, int expectedError, const fs::path& log = {}) {
+        const auto failed = process({executable.string()}, {}, std::chrono::seconds(2), 65536, 65536, {}, log);
+        const auto expected = "native process exec failed (errno " + std::to_string(expectedError) + ")\n";
+        require(failed.exit == 127 && failed.output.empty() && failed.diagnostic == expected,
+                "executable failure lost its exit status or errno diagnostic: " + failed.diagnostic);
+        if (!log.empty())
+            require(readFile(log, 65536) == expected, "executable failure was not captured in its process log");
+    };
+    const auto absent = root / "absent-process-executable";
+    require(!fs::exists(absent), "missing-executable fixture must be absent");
+    expectExecFailure(absent, ENOENT, root / "missing-process.log");
+    const auto invalidExecutable = root / "invalid-process-executable";
+    atomicWrite(invalidExecutable, "not an executable format\n");
+    fs::permissions(invalidExecutable, fs::perms::owner_read | fs::perms::owner_write);
+    expectExecFailure(invalidExecutable, EACCES);
+    fs::permissions(invalidExecutable, fs::perms::owner_all);
+    expectExecFailure(invalidExecutable, ENOEXEC);
+    refuse([&] { process({absent.string()}, {}, std::chrono::seconds(2), 65536, 1); },
+            "executable diagnostic capacity", "output exceeds its capacity");
+    for (int attempt = 0; attempt < 64; ++attempt) {
+        const auto startup = process({self.string(), "--process-group"}, {}, std::chrono::seconds(2));
+        require(startup.exit == 0 && startup.diagnostic.empty(),
+                "private process-group startup failed on attempt " + std::to_string(attempt)
+                    + ": " + startup.diagnostic);
+        const auto identity = parseJson(startup.output);
+        require(identity.is_array() && identity.size() == 2,
+                "private process-group child returned an invalid identity");
+        const auto childPid = identity.at(0).get<pid_t>();
+        const auto childGroup = identity.at(1).get<pid_t>();
+        require(childPid > 0 && childGroup == childPid && childGroup != ::getpgrp(),
+                "native child did not execute in its own private process group");
+    }
+#endif
 }
 
 void admissionAndPublication(const fs::path& root, const fs::path& self) {
@@ -328,8 +367,15 @@ void sourceSetAdmission(const fs::path& root, const fs::path& self) {
             objects.at("tools").at("model").at("protocol") == "pipelang.native-model.v3",
             "explicit source model exports did not select the object protocol");
     atomicWrite(descriptor, canonical(declared));
-    atomicWrite(values, std::string(65536, 'x'));
-    refuse([&] { generate(); }, "aggregate module source bound");
+    atomicWrite(values, "module Values;\n" + std::string(65536, ' ') +
+                        "public Record Position { public int x = 1; }");
+    require(generate().contains("source_set"), "source-set retained the obsolete source-byte ceiling");
+    {
+        auto budget = pipelang::models::resourceBudget();
+        budget.inputBytes = 65536;
+        const pipelang::models::ScopedResourceBudget scopedBudget(budget);
+        refuse([&] { generate(); }, "explicit source-set input resource budget");
+    }
     atomicWrite(values, "module Values; public Record Position { public int x = 1; }");
 #ifndef _WIN32
     const auto actual = directory / "actual-values";
@@ -392,6 +438,7 @@ void installedSourceSet(const fs::path& source, const fs::path& prefix, const fs
     const auto initial = editedOffset.find("amount = 3");
     require(initial != std::string::npos, "source dependency fixture marker is missing");
     editedOffset.replace(initial, std::string("amount = 3").size(), "amount = 7");
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(offset, editedOffset);
     invoke(compile);
     invoke({consumer.string(), "11"});
@@ -405,6 +452,7 @@ void installedSourceSet(const fs::path& source, const fs::path& prefix, const fs
     auto expanded = parseJson(descriptorBytes);
     expanded["modules"].push_back({{"name", "Extras"}, {"path", "Extras.pipe"}});
     const auto extras = checkout / "models/Extras.pipe";
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(extras, "module Extras; public Record Marker { public int value = 5; }");
     auto importing = appBytes;
     importing.insert(importing.find('\n') + 1, "import Extras;\n");
@@ -416,10 +464,12 @@ void installedSourceSet(const fs::path& source, const fs::path& prefix, const fs
     require(expandedReceipt.at("source_set").at("modules").size() == 6,
             "descriptor addition did not reconfigure the closed dependency set");
     const auto extraHeader = fileHash(header);
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(extras, "module Extras; public Record Marker { public int value = 6; }");
     invoke(compile);
     require(fileHash(header) != extraHeader, "newly declared dependency was not tracked by CMake");
 
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(app, appBytes);
     atomicWrite(descriptor, descriptorBytes);
     fs::remove(extras);
@@ -430,6 +480,7 @@ void installedSourceSet(const fs::path& source, const fs::path& prefix, const fs
 
     const auto acceptedHeader = readFile(header, 1U << 20);
     const auto acceptedReceipt = readFile(bindings, 1U << 20);
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(extras, "module Extras; public Record Unreachable { }");
     atomicWrite(descriptor, canonical(expanded));
     const auto refused = process(compile, {}, std::chrono::seconds(90));
@@ -437,6 +488,7 @@ void installedSourceSet(const fs::path& source, const fs::path& prefix, const fs
     require(readFile(header, 1U << 20) == acceptedHeader &&
             readFile(bindings, 1U << 20) == acceptedReceipt,
             "compiler refusal replaced the last good installed-consumer artifacts");
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(descriptor, descriptorBytes);
     fs::remove(extras);
     invoke(compile);
@@ -464,7 +516,9 @@ void legacyUnsignedTokenBoundary(const fs::path& prefix) {
     const auto lexer = nativeExecutable(prefix / "bin/pipelang-cpp-lexer");
     const auto tokenize = [&](const std::string& source) {
         const auto result = process({lexer.string()}, canonical({{"contract", "pipelang.lexer.request.v1"}, {"source", source}}));
-        require(result.exit == 0 && result.diagnostic.empty(), "legacy lexer transport failed");
+        require(result.exit == 0 && result.diagnostic.empty(),
+                "legacy lexer transport failed for " + source + ": exit=" + std::to_string(result.exit) +
+                "; stdout=" + result.output + "; stderr=" + result.diagnostic);
         return parseJson(result.output);
     };
     for (const std::string source : {"1u", "0xffffffffu"}) {
@@ -621,6 +675,12 @@ int main(int argc, char** argv) {
         const auto name = fs::path(argv[0]).stem().string();
         if (name == "fake-model" || name == "fake-view")
             return fakeTool(name == "fake-model");
+#ifndef _WIN32
+        if (argc == 2 && std::string(argv[1]) == "--process-group") {
+            std::cout << Json::array({::getpid(), ::getpgrp()}).dump();
+            return 0;
+        }
+#endif
         if (argc == 2 && std::string(argv[1]) == "--sleep") {
             std::this_thread::sleep_for(std::chrono::seconds(30));
             return 0;
@@ -657,6 +717,10 @@ int main(int argc, char** argv) {
             compiledProjectContracts(argv[2], argv[3]);
             return 0;
         }
+        if (argc == 4 && std::string(argv[1]) == "--native-numeric-fixture") {
+            nativeNumericExportContracts(argv[2], argv[3]);
+            return 0;
+        }
         if (argc == 4 && std::string(argv[1]) == "--project-fixture") {
             generateProjectFixture(argv[2], argv[3]);
             return 0;
@@ -671,6 +735,7 @@ int main(int argc, char** argv) {
         sourceSetAdmission(output, self);
         installedSdk(argv[1], argv[2], output);
         installedSourceSet(argv[1], argv[2], output);
+        nativeNumericExportContracts(argv[2], output / "native-numeric");
         projectContracts(argv[2], output / "projects");
         projectModuleContracts(argv[2], output / "module-parts");
         atomicWrite(output / "acceptance.json", canonical({{"status", "passed"}, {"refusals", refusals},

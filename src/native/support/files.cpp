@@ -81,7 +81,10 @@ void atomicWrite(const fs::path& path, std::string_view bytes) {
 }
 namespace {
 const std::set<std::string>& bindingNames() {
-    static const std::set<std::string> names{"StandaloneConstants.hpp", "Model.hpp", "Types.hpp", "model.json", "ModelView.hpp", "view.json", "bindings.json", "style.json"};
+    static const std::set<std::string> names{
+        "StandaloneConstants.hpp", "Model.hpp", "Types.hpp", "Numeric.hpp", "model.json",
+        "ModelView.hpp", "view.json", "bindings.json", "style.json", "CompositionPlan.json", "CompositionFactory.hpp"
+    };
     return names;
 }
 void ownedPreflight(const fs::path& output, const std::set<std::string>& names) {

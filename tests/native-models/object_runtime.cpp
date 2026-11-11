@@ -343,6 +343,492 @@ void allocationFailures() {
     assert(failures != 0);
 }
 
+void mutationCallableLifetimeAndCategory() {
+    ObjectOwner owner;
+    GraphTransaction transaction(owner.domain());
+    auto counter = transaction.create<CounterState>(CounterTag{});
+    transaction.commit();
+
+    struct Callback {
+        int& copies;
+        int& moves;
+        int& calls;
+        int& destructions;
+        bool& refuseCopy;
+
+        Callback(int& copyCount, int& moveCount, int& callCount, int& destructionCount,
+                 bool& copyRefusal)
+            : copies(copyCount), moves(moveCount), calls(callCount), destructions(destructionCount),
+              refuseCopy(copyRefusal) {
+        }
+
+        Callback(const Callback& other)
+            : copies(other.copies), moves(other.moves), calls(other.calls),
+              destructions(other.destructions), refuseCopy(other.refuseCopy) {
+            ++copies;
+            if (refuseCopy)
+                throw std::bad_alloc();
+        }
+
+        Callback(Callback&& other) noexcept
+            : copies(other.copies), moves(other.moves), calls(other.calls),
+              destructions(other.destructions), refuseCopy(other.refuseCopy) {
+            ++moves;
+        }
+
+        ~Callback() {
+            ++destructions;
+        }
+
+        void operator()(CounterState& state) & {
+            ++calls;
+            state.value += 1;
+        }
+
+        void operator()(CounterState&) && = delete;
+        Callback* operator&() = delete;
+        const Callback* operator&() const = delete;
+    };
+
+    int copies = 0;
+    int moves = 0;
+    int calls = 0;
+    int destructions = 0;
+    bool refuseCopy = true;
+    Callback callback(copies, moves, calls, destructions, refuseCopy);
+    ObjectOwner foreignOwner;
+    GraphTransaction foreign(foreignOwner.domain());
+    bool copyFailed = false;
+    try {
+        // Parameter copying must precede checkedReference, which would reject
+        // this owner's counter if the callable had been admitted successfully.
+        foreign.mutate<CounterState>(counter, callback);
+    } catch (const std::bad_alloc&) {
+        copyFailed = true;
+    }
+    assert(copyFailed && copies == 1 && moves == 0 && calls == 0 && destructions == 0);
+    assert(transaction.read<CounterState>(counter).value == 0);
+    refuseCopy = false;
+    copies = 0;
+    transaction.mutate<CounterState>(counter, callback);
+    assert(copies == 1 && moves == 0 && calls == 1 && destructions == 1);
+    transaction.mutate<CounterState>(counter, std::move(callback));
+    assert(copies == 1 && moves == 1 && calls == 2 && destructions == 2);
+    transaction.mutate<CounterState, CounterTag, Callback&>(counter, callback);
+    assert(copies == 1 && moves == 1 && calls == 3 && destructions == 2);
+    assert(transaction.read<CounterState>(counter).value == 3);
+
+    auto moveOnly = [owned = std::make_unique<int>(4)](CounterState& state) mutable {
+        state.value = *owned;
+        owned.reset();
+    };
+    transaction.mutate<CounterState>(counter, std::move(moveOnly));
+    assert(transaction.read<CounterState>(counter).value == 4);
+    transaction.commit();
+}
+
+void failedMutationRetainsPreparedState() {
+    ObjectOwner owner;
+    GraphTransaction transaction(owner.domain());
+    auto counter = transaction.create<CounterState>(CounterTag{});
+    transaction.commit();
+    transaction.mutate<CounterState>(counter, [](CounterState& state) {
+        state.value = 7;
+    });
+    transaction.prepareCommit();
+
+    int calls = 0;
+    CounterState::refuseClone = true;
+    bool cloneFailed = false;
+    try {
+        transaction.mutate<CounterState>(counter, [&](CounterState&) {
+            ++calls;
+        });
+    } catch (const std::bad_alloc&) {
+        cloneFailed = true;
+    }
+    CounterState::refuseClone = false;
+    assert(cloneFailed && calls == 0 && transaction.read<CounterState>(counter).value == 7);
+
+    bool cancelled = false;
+    std::weak_ptr<int> abandonedPayload;
+    try {
+        transaction.mutate<CounterState>(counter, [&](CounterState& state) {
+            ++calls;
+            state.value = 99;
+            state.lifetime = std::make_shared<int>(99);
+            abandonedPayload = state.lifetime;
+            throw OperationCancelled("mutation callback cancelled");
+        });
+    } catch (const OperationCancelled& failure) {
+        cancelled = true;
+        assert(std::string(failure.what()) == "mutation callback cancelled");
+    }
+    assert(cancelled && calls == 1 && transaction.read<CounterState>(counter).value == 7);
+    assert(abandonedPayload.expired());
+    // Both refusals occurred before publication, so the earlier preparation is
+    // still usable. This overload intentionally does not prepare a second time.
+    transaction.commit([]() noexcept {});
+    GraphTransaction inspection(owner.domain());
+    assert(inspection.read<CounterState>(counter).value == 7);
+
+    ObjectOwner foreignOwner;
+    GraphTransaction foreign(foreignOwner.domain());
+    expectFailure([&] {
+        foreign.mutate<CounterState>(counter, [&](CounterState&) {
+            ++calls;
+        });
+    });
+    assert(calls == 1);
+}
+
+struct ObservedCounterTag {
+    static constexpr std::uint64_t typeId = CounterTag::typeId;
+    static inline int calls = 0;
+    static inline bool allow = true;
+    static inline bool refuse = false;
+    static inline ObjectDomain* closeDuringCheck = nullptr;
+    static inline GraphTransaction* discardDuringCheck = nullptr;
+    static inline ObjectRef<ObservedCounterTag>* replaceDuringCheck = nullptr;
+    static inline const ObjectRef<ObservedCounterTag>* replacement = nullptr;
+    static inline std::optional<ObjectRef<ObservedCounterTag>>* destroyDuringCheck = nullptr;
+
+    static bool accepts(std::uint64_t value) {
+        ++calls;
+        if (auto* domain = std::exchange(closeDuringCheck, nullptr))
+            domain->close();
+        if (auto* transaction = std::exchange(discardDuringCheck, nullptr))
+            transaction->discard();
+        if (auto* target = std::exchange(replaceDuringCheck, nullptr)) {
+            if (auto* source = std::exchange(replacement, nullptr))
+                *target = *source;
+            else
+                *target = {};
+        }
+        if (auto* receiver = std::exchange(destroyDuringCheck, nullptr))
+            receiver->reset();
+        if (refuse)
+            throw 23;
+        return allow && value == typeId;
+    }
+};
+
+struct GeneratedCounterTag {
+    using PureObjectTagOwner = GeneratedCounterTag;
+    static constexpr std::uint64_t typeId = CounterTag::typeId;
+
+    static bool accepts(std::uint64_t value) noexcept {
+        return value == typeId;
+    }
+};
+
+struct DerivedCounterTag : GeneratedCounterTag {
+    static inline int calls = 0;
+    static inline std::optional<ObjectRef<DerivedCounterTag>>* destroyDuringCheck = nullptr;
+
+    static bool accepts(std::uint64_t value) {
+        ++calls;
+        if (auto* receiver = std::exchange(destroyDuringCheck, nullptr))
+            receiver->reset();
+        return value == typeId;
+    }
+};
+
+static_assert(std::is_same_v<GeneratedCounterTag::PureObjectTagOwner, GeneratedCounterTag>);
+static_assert(!std::is_same_v<DerivedCounterTag::PureObjectTagOwner, DerivedCounterTag>);
+
+template<class Function>
+void expectObjectFailureMessage(Function function, const char* expected) {
+    bool failed = false;
+    try {
+        function();
+    } catch (const ExecutionFailure& failure) {
+        failed = true;
+        assert(std::string(failure.what()) == expected);
+    }
+    assert(failed);
+}
+
+void existingRootValidationHasNoAllocations() {
+    ObjectOwner owner;
+    GraphTransaction transaction(owner.domain());
+    auto reference = transaction.create<CounterState>(ObservedCounterTag{});
+    transaction.commit();
+    const auto identity = reference.identity();
+    ObservedCounterTag::calls = 0;
+    objectAllocationCountdown = 0;
+    try {
+        for (int repetition = 0; repetition < 64; ++repetition) {
+            reference.requireValid();
+            assert(reference.identity() == identity);
+            assert(reference.typeId() == CounterTag::typeId);
+            assert(reference.ownerDomain() == owner.domain());
+            auto sameLease = owner.domain()->root<ObservedCounterTag>(identity);
+            assert(sameLease == reference);
+        }
+    } catch (...) {
+        objectAllocationCountdown = -1;
+        throw;
+    }
+    assert(objectAllocationCountdown == 0);
+    objectAllocationCountdown = -1;
+    assert(ObservedCounterTag::calls == 64 * 5);
+
+    ObservedCounterTag::calls = 0;
+    auto alias = reference.as<CounterInterface>();
+    assert(ObservedCounterTag::calls == 1 && alias == reference);
+    reference = {};
+    owner.domain()->collect();
+    assert(alias.identity() == identity && owner.domain()->liveCount() == 1);
+    alias = {};
+    owner.domain()->collect();
+    assert(owner.domain()->liveCount() == 0);
+}
+
+void rootValidationPreservesTagFailuresAndAdmissionOrder() {
+    ObjectOwner owner;
+    GraphTransaction transaction(owner.domain());
+    auto reference = transaction.create<CounterState>(ObservedCounterTag{});
+    transaction.commit();
+    const auto identity = reference.identity();
+
+    ObservedCounterTag::calls = 0;
+    ObservedCounterTag::allow = false;
+    expectObjectFailureMessage([&] { reference.requireValid(); },
+                               "object does not implement the requested type");
+    assert(ObservedCounterTag::calls == 1);
+    expectObjectFailureMessage([&] { owner.domain()->root<ObservedCounterTag>(identity); },
+                               "object does not implement the requested type");
+    assert(ObservedCounterTag::calls == 2);
+    ObservedCounterTag::allow = true;
+
+    ObservedCounterTag::calls = 0;
+    ObservedCounterTag::refuse = true;
+    bool refused = false;
+    try {
+        reference.requireValid();
+    } catch (int value) {
+        refused = true;
+        assert(value == 23);
+    }
+    ObservedCounterTag::refuse = false;
+    assert(refused && ObservedCounterTag::calls == 1);
+    assert(reference.identity() == identity);
+
+    ObservedCounterTag::calls = 0;
+    ObjectRef<ObservedCounterTag> empty;
+    expectObjectFailureMessage([&] { empty.requireValid(); }, "object reference is uninitialized");
+    assert(ObservedCounterTag::calls == 0);
+    expectObjectFailureMessage([&] { owner.domain()->root<ObservedCounterTag>({}); },
+                               "object reference is uninitialized");
+    assert(ObservedCounterTag::calls == 0);
+
+    std::jthread foreign([&] {
+        expectObjectFailureMessage([&] { reference.requireValid(); },
+                                   "object accessed from a different owner thread");
+    });
+    foreign.join();
+    assert(ObservedCounterTag::calls == 0);
+    owner.domain()->close();
+    expectObjectFailureMessage([&] { reference.requireValid(); }, "object domain is closed");
+    assert(ObservedCounterTag::calls == 0);
+    std::jthread foreignClosed([&] {
+        expectObjectFailureMessage([&] { reference.requireValid(); },
+                                   "object accessed from a different owner thread");
+    });
+    foreignClosed.join();
+    assert(ObservedCounterTag::calls == 0);
+}
+
+void rootValidationPreservesGenerationAndColdAllocation() {
+    ObjectOwner owner;
+    GraphTransaction transaction(owner.domain());
+    auto stale = transaction.create<CounterState>(ObservedCounterTag{});
+    const auto previous = stale.identity();
+    transaction.discard();
+    auto replacement = transaction.create<CounterState>(ObservedCounterTag{});
+    const auto current = replacement.identity();
+    assert(current.slot == previous.slot && current.generation == previous.generation + 1);
+    transaction.commit();
+
+    ObservedCounterTag::calls = 0;
+    expectObjectFailureMessage([&] { stale.requireValid(); }, "object identity is no longer valid");
+    expectObjectFailureMessage([&] { owner.domain()->root<ObservedCounterTag>(previous); },
+                               "object identity is no longer valid");
+    assert(ObservedCounterTag::calls == 0);
+    replacement.requireValid();
+    assert(ObservedCounterTag::calls == 1);
+
+    replacement = {};
+    ObservedCounterTag::calls = 0;
+    bool refused = false;
+    objectAllocationCountdown = 0;
+    try {
+        owner.domain()->root<ObservedCounterTag>(current);
+    } catch (const std::bad_alloc&) {
+        refused = true;
+    } catch (...) {
+        objectAllocationCountdown = -1;
+        throw;
+    }
+    objectAllocationCountdown = -1;
+    assert(refused && ObservedCounterTag::calls == 1);
+    auto recovered = owner.domain()->root<ObservedCounterTag>(current);
+    assert(ObservedCounterTag::calls == 2);
+    assert(recovered.identity() == current);
+    assert(transaction.read<CounterState>(recovered).value == 0);
+}
+
+void reentrantTagInvalidationPreservesLeaseFailure() {
+    for (bool close : {false, true}) {
+        ObjectOwner owner;
+        GraphTransaction transaction(owner.domain());
+        auto reference = transaction.create<CounterState>(ObservedCounterTag{});
+        if (close)
+            transaction.commit();
+        ObservedCounterTag::calls = 0;
+        if (close)
+            ObservedCounterTag::closeDuringCheck = owner.domain().get();
+        else
+            ObservedCounterTag::discardDuringCheck = &transaction;
+
+        // accepts() invalidates the cached lease after checked(id). The original
+        // root() path still attempts a lease allocation, without repeating either
+        // checked(id) or accepts(). Keep this observable failure boundary intact.
+        bool refused = false;
+        objectAllocationCountdown = 0;
+        try {
+            reference.requireValid();
+        } catch (const std::bad_alloc&) {
+            refused = true;
+        } catch (...) {
+            objectAllocationCountdown = -1;
+            throw;
+        }
+        objectAllocationCountdown = -1;
+        assert(refused && ObservedCounterTag::calls == 1);
+        if (close) {
+            expectObjectFailureMessage([&] { reference.requireValid(); }, "object domain is closed");
+        } else {
+            expectObjectFailureMessage([&] { reference.requireValid(); },
+                                       "object identity is no longer valid");
+        }
+        assert(ObservedCounterTag::calls == 1);
+    }
+}
+
+void reentrantTagReplacementPreservesCapturedIdentity() {
+    for (bool replace : {false, true}) {
+        ObjectOwner owner;
+        GraphTransaction transaction(owner.domain());
+        auto reference = transaction.create<CounterState>(ObservedCounterTag{});
+        auto other = transaction.create<CounterState>(ObservedCounterTag{});
+        transaction.commit();
+        const auto originalId = reference.identity();
+        const auto otherId = other.identity();
+        ObservedCounterTag::calls = 0;
+        ObservedCounterTag::replaceDuringCheck = &reference;
+        if (replace)
+            ObservedCounterTag::replacement = &other;
+
+        // The receiver object stays alive, but accepts() replaces its lease.
+        // Validation must retain the original id and reacquire that cell's lease,
+        // rather than validating or retaining the replacement reference's cell.
+        bool refused = false;
+        objectAllocationCountdown = 0;
+        try {
+            reference.requireValid();
+        } catch (const std::bad_alloc&) {
+            refused = true;
+        } catch (...) {
+            objectAllocationCountdown = -1;
+            throw;
+        }
+        objectAllocationCountdown = -1;
+        assert(refused && ObservedCounterTag::calls == 1);
+        if (replace)
+            assert(reference.identity() == otherId);
+        else
+            assert(reference.isNull());
+        auto recovered = owner.domain()->root<ObservedCounterTag>(originalId);
+        assert(recovered.identity() == originalId && recovered != other);
+        assert(owner.domain()->liveCount() == 2);
+    }
+}
+
+void generatedPredicateValidationPreservesChecks() {
+    ObjectOwner owner;
+    GraphTransaction transaction(owner.domain());
+    auto reference = transaction.create<CounterState>(GeneratedCounterTag{});
+    transaction.commit();
+    const auto identity = reference.identity();
+    objectAllocationCountdown = 0;
+    try {
+        for (int repetition = 0; repetition < 64; ++repetition) {
+            reference.requireValid();
+            assert(reference.identity() == identity);
+            assert(reference.typeId() == CounterTag::typeId);
+            assert(reference.ownerDomain() == owner.domain());
+        }
+    } catch (...) {
+        objectAllocationCountdown = -1;
+        throw;
+    }
+    assert(objectAllocationCountdown == 0);
+    objectAllocationCountdown = -1;
+
+    ObjectRef<GeneratedCounterTag> empty;
+    expectObjectFailureMessage([&] { empty.requireValid(); }, "object reference is uninitialized");
+    auto unrelated = transaction.create<CounterState>(UnrelatedTag{});
+    transaction.commit();
+    expectObjectFailureMessage([&] { unrelated.as<GeneratedCounterTag>(); },
+                               "object does not implement the requested type");
+    auto stale = transaction.create<CounterState>(GeneratedCounterTag{});
+    transaction.discard();
+    expectObjectFailureMessage([&] { stale.requireValid(); }, "object identity is no longer valid");
+    std::jthread foreign([&] {
+        expectObjectFailureMessage([&] { reference.requireValid(); },
+                                   "object accessed from a different owner thread");
+    });
+    foreign.join();
+    owner.domain()->close();
+    expectObjectFailureMessage([&] { reference.requireValid(); }, "object domain is closed");
+}
+
+template<class Tag>
+void customPredicateMayDestroyReceiver() {
+    for (int allocationBudget : {0, 1}) {
+        ObjectOwner owner;
+        GraphTransaction transaction(owner.domain());
+        std::optional<ObjectRef<Tag>> receiver(transaction.create<CounterState>(Tag{}));
+        transaction.commit();
+        const auto identity = receiver->identity();
+        Tag::calls = 0;
+        Tag::destroyDuringCheck = &receiver;
+
+        // Destroying the receiver is valid here: the original root() path has
+        // already captured its domain/id and never accesses that receiver again.
+        // The live cell has lost its last lease, so root() must reacquire it.
+        bool refused = false;
+        objectAllocationCountdown = allocationBudget;
+        try {
+            receiver->requireValid();
+        } catch (const std::bad_alloc&) {
+            refused = true;
+        } catch (...) {
+            objectAllocationCountdown = -1;
+            throw;
+        }
+        const auto remaining = objectAllocationCountdown;
+        objectAllocationCountdown = -1;
+        assert(refused == (allocationBudget == 0));
+        assert(remaining == 0 && !receiver.has_value() && Tag::calls == 1);
+        auto recovered = owner.domain()->root<Tag>(identity);
+        assert(recovered.identity() == identity);
+        assert(transaction.read<CounterState>(recovered).value == 0);
+    }
+}
+
 void collectEmptyWithoutAllocations(const std::shared_ptr<ObjectDomain>& domain) {
     assert(domain->liveCount() == 0);
     objectAllocationCountdown = 0;
@@ -538,11 +1024,21 @@ void retainedArgumentsAndOwners() {
 }
 
 int main() {
+    existingRootValidationHasNoAllocations();
+    rootValidationPreservesTagFailuresAndAdmissionOrder();
+    rootValidationPreservesGenerationAndColdAllocation();
+    reentrantTagInvalidationPreservesLeaseFailure();
+    reentrantTagReplacementPreservesCapturedIdentity();
+    generatedPredicateValidationPreservesChecks();
+    customPredicateMayDestroyReceiver<ObservedCounterTag>();
+    customPredicateMayDestroyReceiver<DerivedCounterTag>();
     emptyDomainCollection();
     capacityCollectionKeepsCandidateRoots();
     aliasingAndRollback();
     cyclesAndStorage();
     limitsAndTransientCollection();
     allocationFailures();
+    mutationCallableLifetimeAndCategory();
+    failedMutationRetainsPreparedState();
     retainedArgumentsAndOwners();
 }

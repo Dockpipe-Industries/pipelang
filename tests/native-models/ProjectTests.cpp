@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "ProjectTests.hpp"
+#include "BuildTimestamp.h"
 #include "ProjectFacetFixture.hpp"
 #include "PureHostProjectFixture.hpp"
 #include "../../src/native/sdk-tools/SourceProject.hpp"
@@ -148,7 +149,8 @@ void admission(const fs::path& prefix, const fs::path& root) {
     atomicWrite(entry, original + "import Domain.Counter;\n");
     expectRefusal([&] { SourceProject::load(root, "src", "Entry.pipe"); }, "duplicate project import");
     atomicWrite(entry, original + "import Unrelated; import Another;\n");
-    expectRefusal([&] { SourceProject::load(root, "src", "Entry.pipe"); }, "65536");
+    require(SourceProject::load(root, "src", "Entry.pipe").request("large_project").at("modules").size() > 2,
+            "project retained the obsolete 64KiB source closure ceiling");
     atomicWrite(entry, original);
     fs::rename(root / "src/Another.pipe", root / "Another.saved");
     expectRefusal([&] { project.verifyUnchanged(); }, "changed during compilation");
@@ -440,6 +442,7 @@ void installedConsumer(const fs::path& prefix, const fs::path& root) {
     invoke({nativeExecutable(build / "consumer").string()});
     const auto typesPath = build / "generated/Types.hpp";
     const auto typesHash = fileHash(typesPath);
+    pipelang::tests::waitForBuildTimestampTick(build);
     fs::remove(typesPath);
     invoke({nativeTool("cmake").string(), "--build", build.string(), "--target", "project_model_generate", "--parallel", "1"});
     require(fileHash(typesPath) == typesHash, "project Types.hpp was not regenerated as a declared output");
@@ -454,18 +457,23 @@ void installedConsumer(const fs::path& prefix, const fs::path& root) {
         require(current != previous, "project mutation did not trigger incremental generation");
         previous = current;
     };
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(root / "src/New.pipe", "public Record Added {}\n");
     regenerate();
     const auto entry = root / "src/Entry.pipe";
     const auto original = readFile(entry, 65536);
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(entry, original + "import New;\n");
     regenerate();
     auto receipt = parseJson(readFile(receiptPath, 1U << 20));
     require(receipt.at("project").at("closure").size() == 13, "new import did not change the compiler closure");
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(root / "src/New.pipe", "public Record Added { public int value; }\n");
     regenerate();
+    pipelang::tests::waitForBuildTimestampTick(build);
     atomicWrite(entry, original);
     regenerate();
+    pipelang::tests::waitForBuildTimestampTick(build);
     fs::remove(root / "src/New.pipe");
     regenerate();
 }

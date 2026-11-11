@@ -1,0 +1,44 @@
+module AssignmentOrder;
+
+public Class Probe {
+    private AssignmentPort port;
+    private Target target;
+
+    public Probe(AssignmentPort input) {
+        port = input;
+        target = new Target(input);
+    }
+
+    public int Run() {
+        Result<int,string> acquired = Result<int,string>.Failure("not acquired");
+        try {
+            acquired = port.Acquire();
+            return acquired.Value;
+        } finally {
+            if (acquired.IsSuccess) {
+                Result<void,string> released = port.Release(acquired.Value, CancellationToken.None);
+                if (!released.IsSuccess)
+                    throw Error(released.Error);
+            }
+        }
+    }
+
+    public int RunRecord() {
+        Slot slot = Slot(Result<int,string>.Failure("not acquired"));
+        try {
+            slot.acquired = port.Acquire();
+            return slot.acquired.Value;
+        } finally {
+            if (slot.acquired.IsSuccess) {
+                Result<void,string> released = port.Release(slot.acquired.Value, CancellationToken.None);
+                if (!released.IsSuccess)
+                    throw Error(released.Error);
+            }
+        }
+    }
+
+    public int Ordered() {
+        target.Select().value = port.Mark(2).Value;
+        return target.value;
+    }
+}

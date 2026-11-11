@@ -2,6 +2,8 @@
 #include "syntax.hpp"
 
 #include <cctype>
+#include <charconv>
+#include <pipelang/model/collection.hpp>
 #include <utility>
 
 namespace pipelang::models {
@@ -17,6 +19,8 @@ std::string Type::text() const {
                 result += ',';
             result += arguments[index].text();
         }
+        if (fixedExtent)
+            result += ',' + std::to_string(*fixedExtent);
         result += '>';
     }
     return result;
@@ -63,6 +67,8 @@ std::string Type::displayText() const {
                 result += ',';
             result += arguments[index].displayText();
         }
+        if (fixedExtent)
+            result += ',' + std::to_string(*fixedExtent);
         result += '>';
     }
     return result;
@@ -107,6 +113,15 @@ public:
         auto result = moduleHeader();
         while (!atEnd()) {
             expect("public");
+            if (is("composition")) {
+                if (!projectSyntax_)
+                    fail("composition declarations require the project source profile");
+                if (budgetExceeded(result.declarations.size(), result.compositions.size(),
+                                   resourceBudget().declarations - 1))
+                    fail("declaration resource budget exceeded; configure declarations");
+                result.compositions.push_back(composition(result.module));
+                continue;
+            }
             Declaration declaration;
             declaration.offset = current().start;
             declaration.modelDeclared = projectSyntax_ && take("model");
@@ -140,14 +155,69 @@ public:
                     member(declaration);
             }
             expect("}");
+            if (budgetExceeded(result.declarations.size(), result.compositions.size(),
+                               resourceBudget().declarations - 1))
+                fail("declaration resource budget exceeded; configure declarations");
             result.declarations.push_back(std::move(declaration));
-            if (result.declarations.size() > 128)
-                fail("declaration limit exceeded");
         }
         result.expressionCount = expressionCount_;
         return result;
     }
 private:
+    CompositionDeclaration composition(const std::string& module) {
+        CompositionDeclaration result;
+        result.offset = current().start;
+        result.module = module;
+        expect("composition");
+        result.name = identifier();
+        expect("{");
+        while (!take("}")) {
+            const auto offset = current().start;
+            if (take("include")) {
+                result.includes.push_back({qualifiedName(), offset});
+            } else if (take("export")) {
+                result.exportOffsets.push_back(offset);
+                result.exports.push_back(type());
+            } else if (take("cleanup")) {
+                result.cleanupContracts.push_back(compositionSelector(offset));
+            } else {
+                CompositionRegistration registration;
+                registration.offset = offset;
+                if (take("singleton")) {
+                    registration.lifetime = ServiceLifetime::Singleton;
+                } else if (take("scoped")) {
+                    registration.lifetime = ServiceLifetime::Scoped;
+                } else if (take("transient")) {
+                    registration.lifetime = ServiceLifetime::Transient;
+                } else {
+                    fail("expected singleton, scoped, transient, include, export or cleanup");
+                }
+                registration.borrowed = take("input");
+                if (registration.borrowed && registration.lifetime == ServiceLifetime::Transient)
+                    throw Diagnostic("composition inputs require singleton or scoped lifetime guarantees", offset);
+                registration.service = type();
+                if (!registration.borrowed) {
+                    expect("=");
+                    if (take("factory"))
+                        registration.factory = compositionSelector(offset);
+                    else
+                        registration.implementation = type();
+                }
+                result.registrations.push_back(std::move(registration));
+            }
+            expect(";");
+        }
+        return result;
+    }
+
+    CompositionMethodSelector compositionSelector(std::size_t offset) {
+        const auto name = qualifiedName();
+        const auto separator = name.rfind('.');
+        if (separator == std::string::npos)
+            throw Diagnostic("composition method selector requires Type.Method", offset);
+        return {Type{name.substr(0, separator), {}}, name.substr(separator + 1), offset};
+    }
+
     const native::Token& current() const { return tokens_.at(position_); }
     bool atEnd() const { return current().kind == "eof"; }
     bool is(const std::string& value) const {
@@ -233,12 +303,27 @@ private:
             fail("Optional<T> source syntax has been replaced by T?");
         Type result{current().literal, {}};
         advance();
-        while (result.name != "string" && result.name != "uint32" && result.name != "int" && result.name != "float" && result.name != "float32" && !isSynchronizationHandle(result.name) && take("."))
+        while (result.name != "string" && result.name != "ByteBuffer" && result.name != "CancellationToken" && result.name != "uint32" && result.name != "int" && result.name != "float" && result.name != "float32" && !isSynchronizationHandle(result.name) && take("."))
             result.name += "." + identifier();
         if (take("<")) {
-            do {
+            if (result.name == "FixedArray") {
                 result.arguments.push_back(type(depth + 1));
-            } while (take(","));
+                expect(",");
+                if (current().kind != "integer")
+                    fail("FixedArray extent requires an integer literal between 0 and 4096");
+                std::size_t extent = 0;
+                const auto& literal = current().literal;
+                const auto parsed = std::from_chars(literal.data(), literal.data() + literal.size(), extent);
+                if (parsed.ec != std::errc{} || parsed.ptr != literal.data() + literal.size() ||
+                    extent > pipelang::model::maximumListElements)
+                    fail("FixedArray extent requires an integer literal between 0 and 4096");
+                result.fixedExtent = extent;
+                advance();
+            } else {
+                do {
+                    result.arguments.push_back(type(depth + 1));
+                } while (take(","));
+            }
             expect(">");
         }
         unsigned nullableDepth = depth;
@@ -416,6 +501,18 @@ private:
             result.body = is("{") ? block() : std::vector<Statement>{statement()};
             return result;
         }
+        if (take("for")) {
+            result.kind = "for";
+            expect("(");
+            if (!take(";"))
+                result.initialization.push_back(simpleStatement(";", true));
+            result.expression = is(";") ? make("boolean", "true", current().start) : expression();
+            expect(";");
+            if (!take(")"))
+                result.iteration.push_back(simpleStatement(")", false));
+            result.body = is("{") ? block() : std::vector<Statement>{statement()};
+            return result;
+        }
         const bool parallel = take("parallel");
         if (parallel && !is("foreach"))
             fail("parallel requires foreach");
@@ -456,8 +553,13 @@ private:
             expect(";");
             return result;
         }
+        return simpleStatement(";", true);
+    }
+    Statement simpleStatement(const std::string& delimiter, bool allowLocal) {
+        Statement result;
+        result.offset = current().start;
         const auto savedPosition = position_;
-        if (current().kind == "identifier" && current().literal != "await") {
+        if (allowLocal && current().kind == "identifier" && current().literal != "await") {
             // Type declarations are syntactically distinguished by a following
             // identifier. A speculative read never changes the expression AST.
             try {
@@ -468,7 +570,7 @@ private:
                     result.name = identifier();
                     expect("=");
                     result.expression = expression();
-                    expect(";");
+                    expect(delimiter);
                     return result;
                 }
             } catch (const Diagnostic&) {
@@ -477,7 +579,7 @@ private:
             position_ = savedPosition;
         }
         result.target = expression();
-        if (take(";")) {
+        if (take(delimiter)) {
             result.kind = "expression";
             result.expression = result.target;
             result.target.reset();
@@ -486,7 +588,7 @@ private:
         expect("=");
         result.kind = "assign";
         result.expression = expression();
-        expect(";");
+        expect(delimiter);
         return result;
     }
     static int precedence(const std::string& value) {
@@ -503,8 +605,9 @@ private:
         return 0;
     }
     Expr make(std::string kind, std::string value, std::size_t offset, std::vector<Expr> children = {}) {
-        if (++expressionCount_ > 16384)
-            fail("expression node limit exceeded");
+        if (expressionCount_ == resourceBudget().expressions)
+            fail("expression node resource budget exceeded; configure expressions");
+        ++expressionCount_;
         return std::make_shared<Expression>(Expression{std::move(kind), std::move(value), offset,
                                                       std::move(children), {}, {}});
     }
@@ -598,9 +701,9 @@ private:
         } else if (token.kind == "text" || token.kind == "integer" || token.kind == "uint32" || token.kind == "float" || token.kind == "float32" || token.kind == "boolean") {
             advance();
             result = make(token.kind, token.literal, token.start);
-        } else if (is("Result") || is("Optional") || is("List") || is("Atomic") || is("Array") ||
+        } else if (is("Result") || is("Optional") || is("List") || is("Atomic") || is("Array") || is("FixedArray") ||
                    is("Dictionary") || is("HashSet") || is("Queue") || is("Stack") ||
-                   is("KeyValuePair") || is("string") || is("uint32") || is("int") || is("float") || is("float32") || is("Lock") || is("SemaphoreSlim") ||
+                   is("KeyValuePair") || is("string") || is("ByteBuffer") || is("CancellationToken") || is("uint32") || is("int") || is("float") || is("float32") || is("Lock") || is("SemaphoreSlim") ||
                    isConcurrentCollection(token.literal)) {
             const auto resultType = type();
             result = make("type", resultType.text(), token.start);
@@ -662,13 +765,13 @@ private:
 Program parse(const std::string& source, bool objectSyntax, std::size_t parameterLimit, bool projectSyntax) {
     if (parameterLimit != 32 && parameterLimit != 64)
         throw Diagnostic("unrecognized parser parameter bound", 0);
-    if (source.size() > sourceLimit)
-        throw Diagnostic("source byte limit exceeded", 0);
-    auto lexed = native::lex(source, native::NumericSyntax::Binary64);
+    if (source.size() > resourceBudget().inputBytes)
+        throw Diagnostic("input_bytes resource budget exceeded; configure input_bytes", 0);
+    auto lexed = native::lex(source, native::NumericSyntax::Binary64, resourceBudget().tokens);
     if (lexed.failure)
         throw Diagnostic(lexed.failure->message, lexed.failure->start);
-    if (lexed.tokens.size() > 32768)
-        throw Diagnostic("token limit exceeded", 0);
+    if (lexed.tokens.size() > resourceBudget().tokens)
+        throw Diagnostic("token resource budget exceeded; configure tokens", 0);
     return Parser(std::move(lexed.tokens), objectSyntax, parameterLimit, projectSyntax).program();
 }
 
@@ -688,13 +791,13 @@ std::string moduleIdentityFromStem(const std::string& stem) {
 }
 
 Program parseModuleHeader(const std::string& source) {
-    if (source.size() > sourceLimit)
-        throw Diagnostic("source byte limit exceeded while indexing project", 0);
-    auto lexed = native::lex(source, native::NumericSyntax::Binary64);
+    if (source.size() > resourceBudget().inputBytes)
+        throw Diagnostic("indexed source input_bytes resource budget exceeded; configure input_bytes", 0);
+    auto lexed = native::lex(source, native::NumericSyntax::Binary64, resourceBudget().tokens);
     if (lexed.failure)
         throw Diagnostic(lexed.failure->message, lexed.failure->start);
-    if (lexed.tokens.size() > 32768)
-        throw Diagnostic("token limit exceeded while indexing project", 0);
+    if (lexed.tokens.size() > resourceBudget().tokens)
+        throw Diagnostic("token resource budget exceeded while indexing project; configure tokens", 0);
     return Parser(std::move(lexed.tokens), true, 32, true).moduleHeader();
 }
 

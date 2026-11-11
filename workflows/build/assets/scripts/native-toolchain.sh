@@ -72,6 +72,18 @@ if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ -f "$PIPELANG_NATIVE_TOOLCHAIN_P
 fi
 unit inventory "$proof/sdk/bin/pipelang-sdk-tool" inventory --source-root "$PWD" --output "$proof/inventory.json"
 unit sdk-tests "$build/sdk-tools/pipelang-sdk-tool-tests" "$PWD" "$proof/sdk" "$proof/sdk-tests"
+unit resource-budget-tests "$build/sdk-tools/pipelang-resource-budget-tests" "$proof/resource-budget-tests"
+unit resource-budget-sdk-tests "$build/sdk-tools/pipelang-resource-budget-tests" --sdk "$proof/sdk" "$proof/resource-budget-sdk-tests"
+unit composition-planner-tests "$build/sdk-tools/pipelang-composition-planner-tests"
+unit composition-lifecycle-tests "$build/sdk-tools/pipelang-composition-lifecycle-tests"
+unit composition-sdk-tests "$build/sdk-tools/pipelang-composition-sdk-tests" "$proof/sdk" "$proof/composition-sdk-tests"
+unit composition-factory-profile-tests "$build/sdk-tools/pipelang-composition-factory-profile-tests"
+unit di-scope-tests "$build/sdk-tools/pipelang-di-scope-tests"
+unit di-execution-tests "$build/sdk-tools/pipelang-di-execution-tests"
+for lifecycle_test in ResourceJournal AsyncScopeExecution TaskGroupRuntime OrdinaryExecutionAllocation; do
+    unit "di-$lifecycle_test-tests" "$build/sdk-tools/pipelang-di-$lifecycle_test-tests"
+done
+unit object-root-set-tests "$build/sdk-tools/pipelang-object-root-set-tests"
 unit package-tests "$build/sdk-tools/pipelang-package-tests" "$proof/package-tests"
 unit legacy-compiler-tests "$build/legacy-compiler/pipelang-legacy-compiler-tests" "$PWD" "$proof/legacy-compiler-tests" "$proof/sdk/bin/pipelang-native"
 unit materialize-tests "$build/legacy-compiler/pipelang-materialize-tests" "$proof/materialize-tests" "$proof/sdk/bin/pipelang-native"

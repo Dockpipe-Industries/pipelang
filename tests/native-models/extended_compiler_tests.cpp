@@ -27,6 +27,8 @@ public:
         require(response == invoke(request, view), "nondeterministic generation: " + name);
         atomicWrite(output_ / (name + ".hpp"), response.at("header").get<std::string>());
         atomicWrite(output_ / (name + ".manifest.json"), canonical(response.at("manifest")));
+        if (response.contains("types_header"))
+            atomicWrite(output_ / "Types.hpp", response.at("types_header").get<std::string>());
         if (response.contains("constants_header"))
             atomicWrite(output_ / (name + ".constants.hpp"), response.at("constants_header").get<std::string>());
         record(name, request, "admitted");
@@ -72,6 +74,86 @@ std::string replace(std::string source, const std::string& old, const std::strin
     return source;
 }
 void run(Oracle& oracle) {
+    const std::string statelessWorker = R"pipe(
+public Class Numeric {
+    public Numeric() {}
+    private pure int Add(int first, int second) => first + second;
+    public pure int Twice(int value) => Add(value, value);
+    public void Calculate(List<int> inputs) {
+        ConcurrentDictionary<int, int> completed = ConcurrentDictionary<int, int>.Empty();
+        parallel foreach (int input in inputs) {
+            completed.Set(input, Twice(input));
+        }
+    }
+}
+public Class App {
+    private Numeric numeric = new Numeric();
+    public void Calculate(List<int> inputs) { numeric.Calculate(inputs); }
+}
+)pipe";
+    const auto stateless = oracle.admitted("StatelessObjectWorker",
+        sourceRequest(statelessWorker, "stateless_object_worker", true));
+    const auto statelessHeader = stateless.at("header").get<std::string>();
+    require(statelessHeader.find("_value_worker(pipelang::model::EvaluationBudget& pl_budget, std::int64_t value)") != std::string::npos,
+            "stateless object helper did not lower to a receiver-free worker function");
+    const auto refuseWorker = [&](const std::string& name, const std::string& source,
+                                  const std::string& expected) {
+        oracle.refused("stateless-worker-" + name,
+            sourceRequest(source, "stateless_worker_refusal", true), false, expected);
+    };
+    refuseWorker("direct-state", replace(replace(statelessWorker,
+        "public Numeric() {}", "private int bias = 1; public Numeric() {}"),
+        "=> Add(value, value);", "=> value + bias;"), "cannot access state");
+    refuseWorker("transitive-state", replace(replace(statelessWorker,
+        "public Numeric() {}", "private int bias = 1; public Numeric() {}"),
+        "=> first + second;", "=> first + second + bias;"), "cannot access state");
+    refuseWorker("effect", replace(statelessWorker, "public pure int Twice", "public int Twice"),
+        "nonvirtual nongeneric pure method");
+    refuseWorker("virtual", replace(statelessWorker, "public pure int Twice", "public virtual pure int Twice"),
+        "nonvirtual nongeneric pure method");
+    refuseWorker("explicit-receiver", replace(statelessWorker, "Twice(input)", "this.Twice(input)"),
+        "owner-confined objects cannot enter parallel workers");
+    refuseWorker("captured-object", replace(replace(statelessWorker,
+        "parallel foreach", "Numeric other = new Numeric(); parallel foreach"),
+        "Twice(input)", "other.Twice(input)"), "owner-confined object references");
+    refuseWorker("constructor", replace(statelessWorker,
+        "public pure int Twice(int value) => Add(value, value);",
+        "public pure int Twice(int value) { Numeric other = new Numeric(); return value; }"),
+        "object construction requires owner-confined effect code");
+    refuseWorker("generic", replace(replace(statelessWorker,
+        "public pure int Twice(int value) => Add(value, value);",
+        "public pure T Twice<T>(T value) => value;"), "Twice(input)", "Twice<int>(input)"),
+        "nonvirtual nongeneric pure method");
+    const auto inheritedWorker = replace(replace(statelessWorker,
+        "public Class Numeric {",
+        "public Class Base { public pure int Twice(int value) => value + value; } public Class Numeric : Base {"),
+        "public pure int Twice(int value) => Add(value, value);", "");
+    refuseWorker("inheritance", inheritedWorker, "nonvirtual nongeneric pure method");
+    const auto statefulHostWorker = R"pipe(
+public Interface Host { pure int Read(int value); }
+public Class Numeric {
+    private Host host;
+    public Numeric(Host supplied) { host = supplied; }
+    public pure int Twice(int value) => host.Read(value);
+    public void Calculate(List<int> inputs) {
+        ConcurrentDictionary<int, int> completed = ConcurrentDictionary<int, int>.Empty();
+        parallel foreach (int input in inputs) {
+            completed.Set(input, Twice(input));
+        }
+    }
+}
+public Class App {
+    private Numeric numeric;
+    public App(Host supplied) { numeric = new Numeric(supplied); }
+    public void Calculate(List<int> inputs) { numeric.Calculate(inputs); }
+}
+)pipe";
+    refuseWorker("host", statefulHostWorker, "cannot access state");
+    refuseWorker("shared-handle", replace(statelessWorker,
+        "public pure int Twice(int value) => Add(value, value);",
+        "public pure int Twice(int value) { Atomic<int> cell = Atomic<int>.Create(0); return cell.Load(); }"),
+        "pure methods cannot");
+
     const auto pureHostValues = oracle.admitted("PureHostValues", sourceRequest(
         "public Interface Math { pure float32 Support(float32 compression, float32 speed); } "
         "public Class App { private Math math; public App(Math service) { math = service; } "
@@ -164,6 +246,34 @@ void run(Oracle& oracle) {
         "public Record MyOptional<T> { public T Value; } "
         "public Class App { public MyOptional<int?> Value = 0; }", "nullable_nominal_nested"),
         false, "expected MyOptional<int?>, got int");
+    const auto byteBufferSource = oracle.source("tests/native-models/ByteBufferPacket.pipe") + "\n" +
+        oracle.source("tests/native-models/ByteBufferHost.pipe") + "\n" +
+        oracle.source("tests/native-models/ByteBuffers.pipe");
+    oracle.admitted("ByteBuffers", sourceRequest(byteBufferSource, "byte_buffers"));
+    const auto byteBufferObjects = oracle.source("tests/native-models/ByteBufferPacket.pipe") + "\n" +
+        oracle.source("tests/native-models/ByteBufferBox.pipe") + "\n" +
+        oracle.source("tests/native-models/ByteBufferOwner.pipe");
+    oracle.admitted("ByteBufferObjects", sourceRequest(byteBufferObjects, "byte_buffer_objects", true));
+    const auto byteBufferProjectSource = "module Binary;\n" + replace(byteBufferObjects,
+        "public Class App", "public model Class App");
+    oracle.admitted("ByteBufferProject", Json{
+        {"protocol", "pipelang.native-model-project.v1"}, {"entry", "Binary"},
+        {"namespace", "byte_buffer_project"}, {"modules", Json::array({
+            Json{{"name", "Binary"}, {"path", "Binary.pipe"}, {"source", byteBufferProjectSource}}
+        })}
+    });
+    oracle.refused("bytebuffer-implicit-text", sourceRequest(
+        "public Class App { public pure ByteBuffer Read() => \"bytes\"; }", "buffer_text"));
+    oracle.refused("bytebuffer-add-wrong-type", sourceRequest(
+        "public Class App { public void Read() { ByteBuffer value; value.Add(1); } }", "buffer_add"));
+    oracle.refused("bytebuffer-slice-wrong-type", sourceRequest(
+        "public Class App { public pure ByteBuffer Read(ByteBuffer value) => value.Slice(0u, 1); }", "buffer_slice"));
+    oracle.refused("bytebuffer-pure-field-mutation", sourceRequest(
+        "public Class App { public ByteBuffer value; public pure void Read() { value.Add(1u); } }", "buffer_pure"));
+    oracle.refused("bytebuffer-unknown-constructor", sourceRequest(
+        "public Class App { public pure ByteBuffer Read() => ByteBuffer.FromBytes(\"x\"); }", "buffer_constructor"));
+    oracle.refused("bytebuffer-generic", sourceRequest(
+        "public Class App { public ByteBuffer<int> value; }", "buffer_generic"));
     const auto foundation = oracle.admitted("Foundation", sourceRequest(
         oracle.source("tests/native-models/Foundation.pipe"), "foundation"));
     require(foundation.at("constants_header").get<std::string>().find("pipelang/model") == std::string::npos &&
@@ -244,6 +354,24 @@ void run(Oracle& oracle) {
         "public Class App { public pure bool Read() => string.StartsWith(1, \"x\"); }", "prefix_type"));
     oracle.refused("prefix-wrong-arity", sourceRequest(
         "public Class App { public pure bool Read() => string.StartsWith(\"x\"); }", "prefix_arity"));
+    oracle.refused("utf8-length-wrong-type", sourceRequest(
+        "public Class App { public pure int Read() => string.Utf8Length(1); }", "utf8_length_type"));
+    oracle.refused("utf8-length-wrong-arity", sourceRequest(
+        "public Class App { public pure int Read() => string.Utf8Length(); }", "utf8_length_arity"));
+    oracle.refused("utf8-slice-wrong-type", sourceRequest(
+        "public Class App { public pure string Read() => string.Utf8Slice(\"x\", 0u, 1); }", "utf8_slice_type"));
+    oracle.refused("utf8-slice-wrong-arity", sourceRequest(
+        "public Class App { public pure string Read() => string.Utf8Slice(\"x\", 0); }", "utf8_slice_arity"));
+    oracle.refused("utf8-search-wrong-pattern", sourceRequest(
+        "public Class App { public pure int Read() => string.Utf8IndexOf(\"x\", 1, 0); }", "utf8_search_type"));
+    oracle.refused("utf8-search-wrong-start", sourceRequest(
+        "public Class App { public pure int Read() => string.Utf8IndexOf(\"x\", \"x\", false); }", "utf8_search_start"));
+    oracle.refused("utf8-search-wrong-arity", sourceRequest(
+        "public Class App { public pure int Read() => string.Utf8IndexOf(\"x\", \"x\"); }", "utf8_search_arity"));
+    oracle.refused("integer-text-wrong-type", sourceRequest(
+        "public Class App { public pure string Read() => string.FromInt(1u); }", "integer_text_type"));
+    oracle.refused("integer-text-wrong-arity", sourceRequest(
+        "public Class App { public pure string Read() => string.FromInt(1, 2); }", "integer_text_arity"));
     oracle.refused("ieee-unknown-name", sourceRequest(
         "public Class App { public pure float32 Read() => float32.Infinity; }", "ieee_name"), false, "unknown typed IEEE constant");
     const auto data = [&](const std::string& name) { return oracle.source("tests/native-models/data/" + name + ".pipe"); };

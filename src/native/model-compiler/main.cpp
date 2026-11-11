@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "compiler.hpp"
+#include "ScopedResourceBudget.hpp"
 
 #include <array>
 #include <iostream>
@@ -25,15 +26,23 @@ void requireFields(const json& value, const std::set<std::string>& required,
 
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        pipelang::models::ResourceBudget configured;
+        if (argc != 1) {
+            if (argc != 3 || std::string(argv[1]) != "--resource-budget-json")
+                throw std::runtime_error("usage: pipelang-modelc [--resource-budget-json object]");
+            configured = pipelang::models::ResourceBudget::fromText(argv[2]);
+        }
+        const pipelang::models::ScopedResourceBudget budgetScope(configured);
+        const auto& budget = pipelang::models::resourceBudget();
         std::string input;
         std::array<char, 8192> buffer{};
         while (std::cin) {
             std::cin.read(buffer.data(), buffer.size());
             const auto count = static_cast<std::size_t>(std::cin.gcount());
-            if (count > pipelang::models::messageLimit - input.size())
-                throw std::runtime_error("request byte limit exceeded");
+            if (pipelang::models::budgetExceeded(input.size(), count, budget.inputBytes))
+                throw std::runtime_error("request input_bytes resource budget exceeded; configure input_bytes");
             input.append(buffer.data(), count);
         }
         if (!std::cin.eof())
@@ -65,13 +74,24 @@ int main() {
             required.insert("models");
         if (compiled)
             required.insert("emit");
-        requireFields(request, required, {"namespace"});
+        auto optional = std::set<std::string>{"namespace"};
+        if (project) {
+            optional.insert("native_numeric_environment");
+            optional.insert("composition_emission");
+        }
+        requireFields(request, required, optional);
+        const bool emitCompositionFactory = request.contains("composition_emission");
+        if (emitCompositionFactory && request.at("composition_emission") != "factory")
+            throw std::runtime_error("composition_emission must be factory");
+        const bool activeHostNumericEnvironment = request.contains("native_numeric_environment");
+        if (activeHostNumericEnvironment && request.at("native_numeric_environment") != "active-host")
+            throw std::runtime_error("native_numeric_environment must be active-host");
         if (compiled && (!request.at("emit").is_string() ||
             (request.at("emit") != "plan" && request.at("emit") != "sources")))
             throw std::runtime_error("compiled project emit must be plan or sources");
         std::vector<std::string> models;
         if (objects) {
-            if (!request["models"].is_array() || request["models"].empty() || request["models"].size() > 128)
+            if (!request["models"].is_array() || request["models"].empty() || request["models"].size() > budget.declarations)
                 throw std::runtime_error("v3 requires 1..128 explicit model exports");
             std::set<std::string> names;
             for (const auto& model : request["models"]) {
@@ -88,16 +108,16 @@ int main() {
         std::vector<pipelang::models::ModuleSource> modules;
         if (modular) {
             if (!request["entry"].is_string() || !request["modules"].is_array() ||
-                request["modules"].empty() || request["modules"].size() > (project ? 4096U : 128U))
+                request["modules"].empty() || request["modules"].size() > (project ? budget.sourceFragments : budget.modules))
                 throw std::runtime_error(project ? "project requires an entry and 1..4096 source fragments"
                                                  : "v2 requires an entry and 1..128 closed source modules");
-            for (const auto& module : request["modules"]) {
+            for (auto& module : request["modules"]) {
                 requireFields(module, {"name", "source"}, project ? std::set<std::string>{"path"} : std::set<std::string>{});
                 if (!module["name"].is_string() || !module["source"].is_string())
                     throw std::runtime_error("module name and source must be strings");
                 if (module.contains("path") && !module["path"].is_string())
                     throw std::runtime_error("project fragment path must be a string");
-                modules.push_back({module["name"].get<std::string>(), module["source"].get<std::string>(),
+                modules.push_back({module["name"].get<std::string>(), std::move(module["source"].get_ref<std::string&>()),
                                    project ? module.value("path", std::string{}) : std::string{}});
             }
         } else if (!request["source"].is_string()) {
@@ -106,11 +126,15 @@ int main() {
         json response;
         try {
             const auto nameSpace = request.value("namespace", "pipelang_models");
-            if (compiled) {
+            if (emitCompositionFactory) {
+                response = pipelang::models::compileProjectCompositionFactory(modules,
+                    request["entry"].get<std::string>(), nameSpace,
+                    compiled ? request.at("emit").get<std::string>() : std::string{}, activeHostNumericEnvironment);
+            } else if (compiled) {
                 response = pipelang::models::compileProjectImplementation(modules,
-                    request["entry"].get<std::string>(), nameSpace, request.at("emit").get<std::string>());
+                    request["entry"].get<std::string>(), nameSpace, request.at("emit").get<std::string>(), activeHostNumericEnvironment);
             } else if (project) {
-                response = pipelang::models::compileProjectModules(modules, request["entry"].get<std::string>(), nameSpace);
+                response = pipelang::models::compileProjectModules(modules, request["entry"].get<std::string>(), nameSpace, activeHostNumericEnvironment);
             } else if (objects) {
                 response = modular
                     ? pipelang::models::compileModuleObjects(modules, request["entry"].get<std::string>(), models, nameSpace)
@@ -128,8 +152,8 @@ int main() {
             response = {{"protocol", protocol}, {"ok", false}, {"diagnostics", json::array({detail})}};
         }
         const auto output = response.dump();
-        if (output.size() + 1 > pipelang::models::messageLimit)
-            throw std::runtime_error("response byte limit exceeded");
+        if (pipelang::models::budgetExceeded(output.size(), 1, budget.outputBytes))
+            throw std::runtime_error("response output_bytes resource budget exceeded; configure output_bytes");
         std::cout << output << '\n';
         if (!std::cout)
             throw std::runtime_error("failed to write response");

@@ -15,6 +15,14 @@ public Interface Provider {
 )pipe");
     atomicWrite(root / "src/facets/Policy.pipe", R"pipe(module Facets.Policy;
 import Facets.Provider;
+public Record NormalPoint { public float32 x; public float32 y; public float32 z; }
+public Record NormalInput {
+    public int index;
+    public int fault;
+    public NormalPoint first;
+    public NormalPoint second;
+    public NormalPoint third;
+}
 public model Class Policy {
     private const int PrivateOffset = 3;
     public const int Offset = Policy.PrivateOffset;
@@ -57,6 +65,59 @@ public model Class Policy {
     public pure float32 Composite(float32 first, float32 second, float32 third) => first * second + third;
     public float32 Observe() => provider.Scalar(1).Value + provider.Scalar(2).Value;
 
+
+    private pure NormalPoint SubtractPoints(NormalPoint first, NormalPoint second)
+        => new NormalPoint { x = first.x - second.x, y = first.y - second.y, z = first.z - second.z };
+
+    private pure NormalPoint CrossPoints(NormalPoint first, NormalPoint second)
+        => new NormalPoint {
+            x = first.y * second.z - first.z * second.y,
+            y = first.z * second.x - first.x * second.z,
+            z = first.x * second.y - first.y * second.x
+        };
+
+    private pure NormalPoint NormalizePoint(NormalPoint value) {
+        float32 length = float32.Hypot(value.x, value.y, value.z);
+        if (length <= 0.000001f)
+            return new NormalPoint {};
+        return new NormalPoint { x = value.x / length, y = value.y / length, z = value.z / length };
+    }
+
+    private pure NormalPoint FaceNormal(NormalInput input) {
+        if (input.fault == 1) {
+            int delay = 0;
+            while (delay < 200)
+                delay = delay + 1;
+            throw Error("first indexed normal fault");
+        }
+        if (input.fault == 2)
+            throw Error("later indexed normal fault");
+        return NormalizePoint(CrossPoints(SubtractPoints(input.second, input.first),
+            SubtractPoints(input.third, input.first)));
+    }
+
+    public List<NormalPoint> SerialNormals(List<NormalInput> inputs) {
+        List<NormalPoint> values = List<NormalPoint>.Empty();
+        foreach (NormalInput input in inputs)
+            values.Add(FaceNormal(input));
+        return values;
+    }
+
+    public List<NormalPoint> ParallelNormals(List<NormalInput> inputs, CancellationToken cancellation) {
+        accepted = 99;
+        ConcurrentDictionary<int, NormalPoint> completed = ConcurrentDictionary<int, NormalPoint>.Empty();
+        parallel foreach (NormalInput input in inputs) {
+            completed.Set(input.index, FaceNormal(input));
+        }
+        List<NormalPoint> values = List<NormalPoint>.Empty();
+        int index = 0;
+        while (index < inputs.Count) {
+            values.Add(completed.At(index));
+            index = index + 1;
+        }
+        accepted = 100;
+        return values;
+    }
 
     public Result<int, string> Change(int input) {
         Result<int, string> outcome = provider.Resolve(Shift(input));
@@ -119,6 +180,9 @@ public model Class Group {
     public pure float32 Quotient(float32 first, float32 second) => policy.Quotient(first, second);
     public pure float32 Composite(float32 first, float32 second, float32 third) => policy.Composite(first, second, third);
     public float32 Observe() => policy.Observe();
+
+    public List<NormalPoint> ParallelNormals(List<NormalInput> inputs, CancellationToken cancellation)
+        => policy.ParallelNormals(inputs, cancellation);
 
     public void SetCounter(int next) { counter.Set(next); }
     public Result<int, string> Change(int input) => policy.Change(input);
@@ -284,7 +348,77 @@ inline void verifyBinary32(Policy& native, Group& group, NativeProvider& provide
     }
 }
 
+inline void verifyParallelFacetNormals() {
+    using project_fixture::source::Facets::Policy::NormalInput;
+    using project_fixture::source::Facets::Policy::NormalPoint;
+    using pipelang::model::List;
+    auto inputs = List<NormalInput>::Empty();
+    for (std::int64_t index = 0; index < 64; ++index) {
+        const float scale = static_cast<float>(index % 7 + 1);
+        inputs.add(NormalInput{index, 0,
+            NormalPoint{0.f, 0.f, 0.f}, NormalPoint{scale, 0.f, 0.f},
+            NormalPoint{0.f, index % 2 == 0 ? scale : -scale, 0.f}});
+    }
+    // Degenerate normals and signed zero use the same canonical value helpers.
+    inputs.add(NormalInput{64, 0, NormalPoint{-0.f, 0.f, -0.f},
+        NormalPoint{0.f, 0.f, 0.f}, NormalPoint{0.f, 0.f, 0.f}});
+    for (std::size_t degree : {1U, 4U}) {
+        auto host = std::make_shared<NativeProvider>();
+        Policy native(host, true, {}, {degree});
+        Group group(host, {}, {degree});
+        const auto serial = native.SerialNormals(inputs);
+        const auto direct = native.ParallelNormals(inputs, {});
+        const auto nested = group.ParallelNormals(inputs, {});
+        require(serial.is_success() && direct.is_success() && nested.is_success(),
+                "stateless project facet parallel normal calculation failed");
+        const auto& expected = serial.value().values();
+        require(expected.size() == 65 && direct.value().values().size() == expected.size() &&
+                nested.value().values().size() == expected.size(), "parallel normal publication lost source order/count");
+        for (std::size_t index = 0; index < expected.size(); ++index) {
+            const auto& first = direct.value().values()[index];
+            const auto& second = nested.value().values()[index];
+            for (auto pair : {std::pair{first.x, expected[index].x}, std::pair{first.y, expected[index].y},
+                              std::pair{first.z, expected[index].z}, std::pair{second.x, expected[index].x},
+                              std::pair{second.y, expected[index].y}, std::pair{second.z, expected[index].z}})
+                require(std::bit_cast<std::uint32_t>(pair.first) == std::bit_cast<std::uint32_t>(pair.second),
+                        "parallel native/source helper changed exact normal bits");
+            if (index < 64)
+                require(first.x == 0.f && first.y == 0.f && first.z == (index % 2 == 0 ? 1.f : -1.f),
+                        "parallel normal independent axis oracle failed");
+            else
+                require(first.x == 0.f && first.y == 0.f && first.z == 0.f,
+                        "parallel normal independent degenerate oracle failed");
+        }
+        pipelang::model::CancellationSource cancellation;
+        cancellation.cancel();
+        require(native.ParallelNormals(inputs, cancellation.token()).is_cancelled() &&
+                group.ParallelNormals(inputs, cancellation.token()).is_cancelled() &&
+                native.Read() == 100 && group.Read() == 100,
+                "parallel helper cancellation lost outcome or committed owner mutation");
+        auto faults = List<NormalInput>::Empty();
+        auto firstFault = inputs.values()[0];
+        firstFault.fault = 1;
+        auto laterFault = inputs.values()[1];
+        laterFault.fault = 2;
+        faults.add(firstFault);
+        faults.add(laterFault);
+        for (int repeat = 0; repeat < 4; ++repeat) {
+            const auto directFault = native.ParallelNormals(faults, {});
+            const auto nestedFault = group.ParallelNormals(faults, {});
+            require(directFault.is_failure() && nestedFault.is_failure() &&
+                    directFault.error() == "first indexed normal fault" &&
+                    nestedFault.error() == directFault.error() && native.Read() == 100 && group.Read() == 100,
+                    "parallel helper fault changed first-index selection or rollback");
+        }
+        require(native.ParallelNormals(inputs, {}).is_success() && group.ParallelNormals(inputs, {}).is_success(),
+                "parallel helper failure/cancellation poisoned later owner execution");
+        require(host->calls.load() == 0 && host->scalarCalls.empty(),
+                "stateless worker helper reached a host service");
+    }
+}
+
 inline void verify() {
+    verifyParallelFacetNormals();
     static_assert(std::is_same_v<decltype(std::declval<const Group&>().ExportReference()), Item::Reference>);
     static_assert(!std::is_same_v<Item, Item::Reference>);
     auto provider = std::make_shared<NativeProvider>();

@@ -25,6 +25,7 @@ public Class Numbers {
 public Class App {
     private MathQueries math;
     public int calls = 0;
+    public int sequence = 0;
     public const float32 Length = Numbers.Length;
     public const float32 GateSpacing = Numbers.GateSpacing;
     public const int Gates = Numbers.Gates;
@@ -45,6 +46,35 @@ public Class App {
     public pure float HighWide() => float.PositiveInfinity;
     public pure float NotANumberWide() => float.NaN;
     public pure bool Prefix(string value, string prefix) => string.StartsWith(value, prefix);
+    public pure int ByteLength(string value) => string.Utf8Length(value);
+    public pure string ByteSlice(string value, int start, int count) => string.Utf8Slice(value, start, count);
+    public pure int ByteIndexOf(string value, string pattern, int start) => string.Utf8IndexOf(value, pattern, start);
+    public pure string IntegerText(int value) => string.FromInt(value);
+
+    private string RecordText(string value, int ordinal) {
+        sequence = sequence * 10 + ordinal;
+        return value;
+    }
+    private int RecordOffset(int value, int ordinal) {
+        sequence = sequence * 10 + ordinal;
+        return value;
+    }
+    public string OrderedSlice() {
+        sequence = 0;
+        return string.Utf8Slice(RecordText("abcd", 1), RecordOffset(1, 2), RecordOffset(2, 3));
+    }
+    public int OrderedSearch() {
+        sequence = 0;
+        return string.Utf8IndexOf(RecordText("abcd", 1), RecordText("bc", 2), RecordOffset(0, 3));
+    }
+    public string OrderedInteger() {
+        sequence = 0;
+        return string.FromInt(RecordOffset(-42, 1));
+    }
+    public string InvalidSlice() {
+        calls = calls + 1;
+        return string.Utf8Slice("é", 1, 1);
+    }
     public pure int SumConstant(int repetitions) {
         int total = 0;
         int index = 0;

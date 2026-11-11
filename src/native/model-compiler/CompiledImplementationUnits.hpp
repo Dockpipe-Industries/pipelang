@@ -14,7 +14,6 @@ namespace pipelang::models {
 // owner groups them without parsing, changing, or splitting their contents.
 class CompiledImplementationUnits {
 public:
-    static constexpr std::size_t maximumUnits = 256;
     static constexpr std::size_t preferredBodyBytes = 64 * 1024;
     static constexpr std::size_t preferredDefinitions = 16;
 
@@ -41,6 +40,8 @@ public:
             index = addUnit();
         }
         auto& destination = units_[index];
+        if (budgetExceeded(destination.body.size(), definition.size(), resourceBudget().outputBytes))
+            throw Diagnostic("compiled implementation output_bytes resource budget exceeded; configure output_bytes", 0);
         destination.body += definition;
         ++destination.definitions;
     }
@@ -63,8 +64,8 @@ private:
     };
 
     std::size_t addUnit() {
-        if (units_.size() == maximumUnits)
-            throw Diagnostic("compiled project implementation unit limit exceeded", 0);
+        if (units_.size() >= resourceBudget().implementationUnits)
+            throw Diagnostic("compiled project implementation_units resource budget exceeded; configure implementation_units", 0);
         const auto index = units_.size();
         units_.emplace_back();
         return index;

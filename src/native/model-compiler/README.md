@@ -13,6 +13,18 @@ transactional root; ordinary public types retain object/value semantics and rece
 stable module-qualified native names. The SDK exposes PROJECT_ROOT/SOURCE_ROOT/ENTRY
 and retains old protocols for explicit compatibility fixtures.
 
+Project source may declare `public composition Startup { ... }` with explicit
+singleton/scoped/transient registrations, inputs, includes and exports. Fallible
+source acquisition uses `scoped IService = factory ResourceFactory.Create;` with
+an explicitly registered instance receiver. `cleanup IResourceCleanup.Close;`
+selects an exact source interface method taking one `CancellationToken` and returning
+`Result<void,string>`. `CancellationToken.None` supplies an empty token expression
+for source partial-acquisition finally blocks. Selected factory/cleanup metadata
+uses graph v2; old graphs preserve v1. The optional `CompositionFactory.hpp` facade
+also admits scoped `async Task<Result<T,string>>` service methods. See the canonical
+[dependency composition contract](../../../docs/concepts/dependency-injection.md)
+for checked factory effects, resource adoption/unwind, task draining and limitations.
+
 Single-source input is exactly one JSON object on stdin. Closed multi-source
 modules use the explicitly selected v2 request described in the
 [composition and parallel contract](../../../docs/concepts/pipelang-native-model-composition.md),
@@ -181,6 +193,50 @@ uses the normal rollback/typed-failure boundary. Pure reads report ExecutionFail
 Actual host suspension begins a fresh segment; immediate closing/refused awaits
 and local-await completion do not reset the budget.
 
+`FixedArray<T,N>` is an owned inline value whose literal extent `N` is part of
+its type, from 0 through 4096. Elements must be deeply owned values. `Create(fill)`
+evaluates the fill once and copies it into each element without first running
+element defaults. `At(index)` returns a checked owned copy; `Set(index, value)`
+checks the index and ownership limits before mutation. `Count` and `Length`
+return the fixed extent. Default construction validates each actual element and
+accumulates ownership costs in element order, stopping on the first failure.
+These checks also run during constant evaluation. Empty arrays construct no
+element but still require a valid, nonrecursive element type. Copies and
+`foreach` retain owned snapshot semantics. Nested fixed storage and logical
+element counts remain bounded by 4096, with the existing 1 MiB ownership limit
+and record layout/depth limits unchanged.
+
+Conventional `for` loops have one optional initializer, a boolean condition and
+one optional synchronous iteration statement:
+
+```pipelang
+FixedArray<int,4> values = FixedArray<int,4>.Create(0);
+for (int index = 0; index < values.Length; index = index + 1)
+    values.Set(index, index);
+```
+
+The initializer may declare a local, assign a value or call a discardable method;
+the iteration clause may assign or call a discardable method. An omitted
+condition means true. Initializer locals are available to the condition, body
+and iteration clause, then leave scope. Body locals are unavailable in the
+iteration clause. `continue` runs body cleanup before the iteration statement;
+`break`, return and faults skip that statement. Async initialization and bodies
+retain their existing rules; the iteration clause cannot await. Steps use
+explicit assignments; `++` is not implemented. Ordinary loops use the existing
+evaluation budget, including loops whose termination is unknown.
+
+The additive native numeric projection accepts closed fixed arrays in public
+parameters, records, optional values and outer Result payloads when its complete
+closure proves bounds, ownership costs and safe access. Dynamic `Array<T>`
+remains limited to the existing proved local/private channels. Native `for`
+eligibility currently requires a finite ascending integer counter; unproved
+loops, counter interference and loop-local break/continue retain ordinary
+execution. Optional/Result extraction still requires its corresponding outcome
+proof. The active-host floating profile admits `Sin` and `Cos` for both widths;
+the separate caller-host header retains its narrower operation set. These
+contracts concern the selected native projection, rather than a universal
+allocation-free guarantee for ordinary model methods.
+
 [Source synchronization](../../../docs/concepts/pipelang-synchronization.md) adds
 reentrant `Lock` handles and scoped `lock`, plus explicit `SemaphoreSlim` permits.
 Its directly awaited WaitAsync intrinsic unwraps to void or bool; this does not
@@ -252,8 +308,24 @@ all authored effects after a fault or exhaustion. Native owned values/frames sti
 release deterministically. These semantics qualify source control flow, not
 external-resource handles, disposal protocols or asynchronous cleanup.
 
-Bounds are part of admission: 64 KiB source, 4 MiB transport, 32,768 tokens,
-16,384 expression nodes, 128 declarations, 256 members, 32 parameters, bounded
+Metered synchronous assignments evaluate and bind the checked target before the
+right-hand expression. Assignment performs no additional source evaluation or
+cancellation step after an authoritative host result returns and before storing
+that result. This lets a protected local or owned-record slot expose an acquired
+capability to its finally block even when the host cancels the request as it returns.
+Ordinary source-object field assignment already snapshots its receiver before the
+right-hand side. Indexed/call-result lvalues are not admitted; collection update
+methods retain their ordinary argument and validation semantics.
+
+Awaited assignment remains a separate existing boundary: its target is evaluated
+when the awaited value is stored after resumption. The compiler does not retain a
+raw target reference across a potentially refreshed transaction. This checkpoint
+does not add pre-suspension target binding or asynchronous factory acquisition.
+
+Admission uses an explicit [compiler resource profile](../../../docs/concepts/compiler-resource-budgets.md)
+for input/indexed bytes, transport, tokens, expressions, declarations, module
+identities and implementation units. There is no independent 64 KiB ordinary
+source ceiling. Existing language-profile checks still include 256 members, 32 parameters, bounded
 syntax/type nesting (including depth48 statements), depth32 acyclic local call
 graphs, at most 65,536 statically expanded source evaluation operations per method, and depth32/256 expanded nodes per
 record or model value layout. Loop bodies count once in static admission; dynamic
@@ -266,6 +338,38 @@ Focused fixtures live in `tests/native-models`. Compiler execution, generated
 compilation and native test execution must use the existing `containedexec`
 `job.py` and `run.py`; these files are not permission to run outside containment.
 
+
+## UTF-8 byte text operations
+
+`ByteBuffer` is a separate owned binary value with a default empty value and a
+1 MiB payload limit. `Empty()` and checked `FromUtf8(string)` construct buffers.
+`Length`, checked `At(int)` returning `uint32`, binary-safe `Slice(start,count)`
+and ordinal `IndexOf(ByteBuffer,start)` operate on byte positions. Empty patterns
+match the start, including the end. Negative/out-of-range positions or counts fail.
+`Add(uint32)` requires 0..255; `Append(ByteBuffer)` appends an owned copy, including
+self-append. Mutations follow existing assignment, purity and transaction rules.
+`DecodeUtf8()` explicitly validates text and fails for invalid or incomplete UTF-8;
+binary slicing and transport never decode implicitly. Buffers compose with records,
+Results, model snapshots and synchronous/asynchronous owned host payloads. Payload
+bytes count toward recursive ownership bytes, without charging a collection element
+per byte. Nested collections retain their existing aggregate budgets. Native code
+uses `pipelang::model::ByteBuffer`, an explicit owning `vector<uint8_t>` constructor
+and read-only `values()`; no borrowed native pointers enter source values.
+
+`string.Utf8Length(value)` returns the signed integer UTF-8 byte length.
+`string.Utf8Slice(value, start, count)` returns an owned byte slice. Negative or
+out-of-range bounds, including an overflow-sized count, fail through the existing
+execution/transaction boundary. Both slice endpoints must lie between complete
+Unicode scalars; empty slices are valid at scalar boundaries, including the end.
+`string.Utf8IndexOf(value, pattern, start)` performs an ordinal byte search and
+returns its byte offset or `-1`. The start must be a valid scalar boundary within
+the string; an empty pattern matches the start, including the end. Strings retain
+existing UTF-8 validation, embedded-NUL support and their 1 MiB value ceiling.
+
+`string.FromInt(value)` formats signed64 as invariant ASCII decimal without a
+locale, grouping or leading plus, including the minimum signed64 value. All four
+operations are pure, evaluate arguments once from left to right, and introduce no
+I/O, host-service calls or implicit numeric conversions.
 
 ## Synchronous injected host calls
 

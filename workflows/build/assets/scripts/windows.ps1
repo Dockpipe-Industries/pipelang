@@ -70,6 +70,18 @@ Invoke-Unit 'install' $tools.cmake @('--install', $build, '--prefix', $sdk)
 $tool = Join-Path $sdk 'bin/pipelang-sdk-tool.exe'
 Invoke-Unit 'inventory' $tool @('inventory', '--source-root', $script:SourceRoot, '--output', (Join-Path $proof 'inventory.json'))
 Invoke-Unit 'sdk-tests' (Join-Path $build 'sdk-tools/pipelang-sdk-tool-tests.exe') @($script:SourceRoot, $sdk, (Join-Path $proof 'sdk-tests'))
+Invoke-Unit 'resource-budget-tests' (Join-Path $build 'sdk-tools/pipelang-resource-budget-tests.exe') @((Join-Path $proof 'resource-budget-tests'))
+Invoke-Unit 'resource-budget-sdk-tests' (Join-Path $build 'sdk-tools/pipelang-resource-budget-tests.exe') @('--sdk', $sdk, (Join-Path $proof 'resource-budget-sdk-tests'))
+Invoke-Unit 'composition-planner-tests' (Join-Path $build 'sdk-tools/pipelang-composition-planner-tests.exe') @()
+Invoke-Unit 'composition-lifecycle-tests' (Join-Path $build 'sdk-tools/pipelang-composition-lifecycle-tests.exe') @()
+Invoke-Unit 'composition-sdk-tests' (Join-Path $build 'sdk-tools/pipelang-composition-sdk-tests.exe') @($sdk, (Join-Path $proof 'composition-sdk-tests'))
+Invoke-Unit 'composition-factory-profile-tests' (Join-Path $build 'sdk-tools/pipelang-composition-factory-profile-tests.exe') @()
+Invoke-Unit 'di-scope-tests' (Join-Path $build 'sdk-tools/pipelang-di-scope-tests.exe') @()
+Invoke-Unit 'di-execution-tests' (Join-Path $build 'sdk-tools/pipelang-di-execution-tests.exe') @()
+foreach ($lifecycleTest in @('ResourceJournal', 'AsyncScopeExecution', 'TaskGroupRuntime', 'OrdinaryExecutionAllocation')) {
+    Invoke-Unit "di-$lifecycleTest-tests" (Join-Path $build "sdk-tools/pipelang-di-$lifecycleTest-tests.exe") @()
+}
+Invoke-Unit 'object-root-set-tests' (Join-Path $build 'sdk-tools/pipelang-object-root-set-tests.exe') @()
 Invoke-Unit 'package-tests' (Join-Path $build 'sdk-tools/pipelang-package-tests.exe') @((Join-Path $proof 'package-tests'))
 $legacy = Join-Path $sdk 'bin/pipelang-native.exe'
 Invoke-Unit 'legacy-compiler-tests' (Join-Path $build 'legacy-compiler/pipelang-legacy-compiler-tests.exe') @($script:SourceRoot, (Join-Path $proof 'legacy-compiler-tests'), $legacy)

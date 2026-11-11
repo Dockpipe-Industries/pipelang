@@ -7,6 +7,20 @@
 
 namespace {
 using namespace pipelang::tools;
+
+bool retiredLanguageCommand(const std::string& command) {
+    static const std::regex pattern(R"((^|[ \t/;])(python[0-9.]*|gofmt)([ \t]|$)|\bgo (build|test|run|install|mod|generate) )");
+    return std::regex_search(command, pattern);
+}
+
+void verifyCommandDetection() {
+    require(!retiredLanguageCommand("/usr/bin/cargo test --locked"), "Cargo test misidentified as Go");
+    require(!retiredLanguageCommand("/usr/bin/cargo build --locked"), "Cargo build misidentified as Go");
+    require(retiredLanguageCommand("go test ./..."), "Go test command was admitted");
+    require(retiredLanguageCommand("/usr/bin/go build ./..."), "Go build command was admitted");
+    require(retiredLanguageCommand("python3 script.py"), "Python command was admitted");
+    require(retiredLanguageCommand("gofmt source.go"), "Go formatting command was admitted");
+}
 void successful(const std::vector<std::string>& command) {
     const auto result = process(command, {}, std::chrono::seconds(90), 4U << 20);
     require(result.exit == 0, "repository check command failed: " + result.output + result.diagnostic);
@@ -72,7 +86,7 @@ void nativeOnly(const fs::path& root) {
             "retired language file returned: " + entry.path().string());
         if (entry.is_regular_file() && (extension == ".sh" || extension == ".ps1" || extension == ".yml" || extension == ".cmake" || name == "CMakeLists.txt")) {
             const auto bytes = readFile(entry.path(), 1U << 20);
-            require(!std::regex_search(bytes, std::regex(R"((^|[ \t/;])(python[0-9.]*|gofmt)([ \t]|$)|go (build|test|run|install|mod|generate) )")),
+            require(!retiredLanguageCommand(bytes),
                 "retired language command returned: " + entry.path().string());
         }
     }
@@ -82,6 +96,7 @@ void nativeOnly(const fs::path& root) {
 int main(int argc, char** argv) {
     using namespace pipelang::tools;
     try {
+        verifyCommandDetection();
         Arguments arguments(argc, argv);
         const fs::path root = arguments.take("--source-root");
         const fs::path dockpipe = arguments.take("--dockpipe");

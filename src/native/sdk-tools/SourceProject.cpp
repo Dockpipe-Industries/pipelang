@@ -2,15 +2,14 @@
 #include "SourceProject.hpp"
 #include "SourceProjectFragment.hpp"
 #include "../model-compiler/syntax.hpp"
+#include "../model-compiler/ScopedResourceBudget.hpp"
+#include "ResourceBudgetReceipt.hpp"
 
 #include <algorithm>
+#include <limits>
 
 namespace pipelang::tools {
 namespace {
-constexpr std::size_t maximumIndexedFiles = 4096;
-constexpr std::size_t maximumIndexedBytes = 16U << 20;
-constexpr std::size_t maximumDirectoryEntries = 32768;
-constexpr std::size_t maximumDirectoryDepth = 32;
 
 void admitPath(const fs::path& path, bool directory) {
     require(path.is_absolute() && path == path.lexically_normal(),
@@ -38,16 +37,20 @@ std::vector<fs::path> discover(const fs::path& sourceRoot) {
     std::vector<fs::path> paths;
     std::size_t entryCount = 0;
     for (fs::recursive_directory_iterator iterator(sourceRoot), end; iterator != end; ++iterator) {
-        require(++entryCount <= maximumDirectoryEntries, "project directory entry limit exceeded");
-        require(iterator.depth() <= static_cast<int>(maximumDirectoryDepth), "project directory depth limit exceeded");
+        require(entryCount < models::resourceBudget().directoryEntries,
+                "project directory_entries resource budget exceeded; configure directory_entries");
+        ++entryCount;
+        require(static_cast<std::size_t>(iterator.depth()) <= models::resourceBudget().directoryDepth,
+                "project directory_depth resource budget exceeded; configure directory_depth");
         const auto path = iterator->path();
         require(!symbolicPath(path), "project discovery refuses symbolic or reparse entries");
         if (path.extension() != ".pipe")
             continue;
         admitPath(path, false);
         portablePath(path.lexically_relative(sourceRoot).generic_string());
+        require(paths.size() < models::resourceBudget().indexedFiles,
+                "project indexed_files resource budget exceeded; configure indexed_files");
         paths.push_back(path);
-        require(paths.size() <= maximumIndexedFiles, "project index file limit exceeded");
     }
     std::sort(paths.begin(), paths.end());
     return paths;
@@ -61,6 +64,7 @@ SourceProject SourceProject::load(const fs::path& projectRoot, const fs::path& s
     portablePath(entry.generic_string());
     require(entry.extension() == ".pipe", "project entry must be a .pipe source file");
     SourceProject result;
+    result.budget_ = models::resourceBudget();
     result.projectRoot_ = projectRoot;
     result.sourceRoot_ = sourceRoot;
     result.entryPath_ = entry;
@@ -74,9 +78,14 @@ SourceProject SourceProject::load(const fs::path& projectRoot, const fs::path& s
     std::map<std::string, std::vector<SourceProjectFragment>> fragments;
     std::size_t indexedBytes = 0;
     for (const auto& path : result.dependencies_) {
-        const auto bytes = readFile(path, models::sourceLimit);
+        const auto fileBytes = fs::file_size(path);
+        require(fileBytes <= std::numeric_limits<std::size_t>::max() &&
+                !models::budgetExceeded(indexedBytes, static_cast<std::size_t>(fileBytes), result.budget_.indexedBytes),
+                "project indexed_bytes resource budget exceeded; configure indexed_bytes");
+        auto bytes = readFile(path, result.budget_.indexedBytes - indexedBytes);
         require(!bytes.empty(), "project source cannot be empty: " + path.generic_string());
-        require(bytes.size() <= maximumIndexedBytes - indexedBytes, "project index byte limit exceeded");
+        require(!models::budgetExceeded(indexedBytes, bytes.size(), result.budget_.indexedBytes),
+                "project indexed_bytes resource budget exceeded; configure indexed_bytes");
         indexedBytes += bytes.size();
         models::Program header;
         bool explicitModule = false;
@@ -96,29 +105,29 @@ SourceProject SourceProject::load(const fs::path& projectRoot, const fs::path& s
                                      parts.front().path.generic_string() + " and " + path.generic_string() +
                                      "; multiple files require explicit module declarations");
         }
-        parts.push_back({path, bytes, std::move(header), explicitModule});
         if (path == entryPath)
             result.entryModule_ = module;
         result.index_.push_back({{"path", path.lexically_relative(directory).generic_string()},
                                  {"module", module}, {"explicit_module", explicitModule},
                                  {"bytes", bytes.size()}, {"sha256", sha256(bytes)}});
+        parts.push_back({path, std::move(bytes), std::move(header), explicitModule});
     }
     std::set<std::string> visiting;
     std::set<std::string> reachable;
-    std::size_t closureBytes = 0;
-    std::function<void(const std::string&)> visit = [&](const std::string& module) {
-        require(!visiting.contains(module), "project module import cycle: " + module);
-        if (reachable.contains(module))
-            return;
+    using Dependency = std::pair<std::string, std::pair<fs::path, std::size_t>>;
+    struct ImportFrame {
+        std::string module;
+        std::vector<Dependency> dependencies;
+        std::size_t next = 0;
+    };
+    auto enter = [&](const std::string& module) {
         require(fragments.contains(module), "missing imported project module: " + module);
-        require(reachable.size() < 128, "project import closure exceeds 128 modules");
+        require(reachable.size() < result.budget_.modules,
+                "project modules resource budget exceeded; configure modules");
         reachable.insert(module);
         visiting.insert(module);
         std::map<std::string, std::pair<fs::path, std::size_t>> dependencies;
         for (const auto& fragment : fragments.at(module)) {
-            require(fragment.source.size() <= models::sourceLimit - closureBytes,
-                    "project import closure exceeds 65536 source bytes");
-            closureBytes += fragment.source.size();
             std::set<std::string> imports;
             for (std::size_t index = 0; index < fragment.header.imports.size(); ++index) {
                 const auto& dependency = fragment.header.imports[index];
@@ -131,20 +140,35 @@ SourceProject SourceProject::load(const fs::path& projectRoot, const fs::path& s
                 dependencies.emplace(dependency, std::make_pair(fragment.path, fragment.header.importOffsets.at(index)));
             }
         }
-        for (const auto& [dependency, origin] : dependencies) {
-            const auto location = origin.first.generic_string() + " at offset " + std::to_string(origin.second);
-            require(!visiting.contains(dependency), "project module import cycle: " + dependency + " from " + location);
-            require(fragments.contains(dependency), "missing imported project module: " + dependency + " from " + location);
-            visit(dependency);
-        }
-        visiting.erase(module);
+        return ImportFrame{module, {dependencies.begin(), dependencies.end()}, 0};
     };
-    require(result.index_.dump().size() <= (4U << 20), "project index receipt byte limit exceeded");
-    visit(result.entryModule_);
+    require(result.index_.dump().size() <= result.budget_.outputBytes,
+            "project index receipt output_bytes resource budget exceeded; configure output_bytes");
+    std::vector<ImportFrame> pending;
+    pending.push_back(enter(result.entryModule_));
+    while (!pending.empty()) {
+        auto& frame = pending.back();
+        if (frame.next == frame.dependencies.size()) {
+            visiting.erase(frame.module);
+            pending.pop_back();
+            continue;
+        }
+        const auto [dependency, origin] = frame.dependencies[frame.next++];
+        const auto location = origin.first.generic_string() + " at offset " + std::to_string(origin.second);
+        require(!visiting.contains(dependency), "project module import cycle: " + dependency + " from " + location);
+        require(fragments.contains(dependency), "missing imported project module: " + dependency + " from " + location);
+        if (!reachable.contains(dependency))
+            pending.push_back(enter(dependency));
+    }
+    std::size_t closureBytes = 0;
     for (const auto& module : reachable) {
-        for (const auto& fragment : fragments.at(module)) {
-            result.modules_.push_back({{"name", module}, {"source", fragment.source},
-                {"path", fragment.path.lexically_relative(directory).generic_string()}});
+        for (auto& fragment : fragments.at(module)) {
+            require(!models::budgetExceeded(closureBytes, fragment.source.size(), result.budget_.inputBytes),
+                    "project closure input_bytes resource budget exceeded; configure input_bytes");
+            closureBytes += fragment.source.size();
+            Json unit{{"name", module}, {"path", fragment.path.lexically_relative(directory).generic_string()}};
+            unit["source"] = std::move(fragment.source);
+            result.modules_.push_back(std::move(unit));
         }
     }
     return result;
@@ -173,7 +197,8 @@ Json SourceProject::receipt() const {
                    {"source_root", sourceRoot_.generic_string()}, {"entry_path", entryPath_.generic_string()},
                    {"entry", entryModule_}, {"index", index_}, {"closure", closure},
                    {"closure_sources", closureSources}};
-    require(result.dump().size() <= (4U << 20), "project input receipt byte limit exceeded");
+    require(result.dump().size() <= budget_.outputBytes,
+            "project receipt output_bytes resource budget exceeded; configure output_bytes");
     return result;
 }
 
@@ -183,11 +208,14 @@ Json SourceProject::information() const {
         dependencies.push_back(dependency.generic_string());
     Json result = {{"protocol", "pipelang.native-model-project-info.v1"},
                    {"project", receipt()}, {"dependencies", dependencies}};
-    require(result.dump().size() <= (4U << 20), "project information receipt byte limit exceeded");
+    result["resource_budget"] = resourceBudgetReceipt(budget_);
+    require(result.dump().size() <= budget_.outputBytes,
+            "project information output_bytes resource budget exceeded; configure output_bytes");
     return result;
 }
 
 void SourceProject::verifyUnchanged() const {
+    const models::ScopedResourceBudget scope(budget_);
     const auto current = load(projectRoot_, sourceRoot_, entryPath_);
     require(current.dependencies_ == dependencies_ && current.receipt() == receipt(),
             "project index or source inputs changed during compilation");

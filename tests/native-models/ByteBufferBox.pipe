@@ -1,0 +1,20 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class ByteBufferBox {
+    public ByteBuffer value;
+    public ByteBufferPacket packet;
+
+    public void Set(ByteBuffer input) {
+        value = input;
+        packet.bytes = input;
+    }
+
+    public void Append(ByteBuffer input) {
+        value.Append(input);
+        packet.bytes.Append(input);
+    }
+
+    public void Fail(uint32 octet) {
+        value.Add(1u);
+        packet.bytes.Add(octet);
+    }
+}

@@ -3,6 +3,7 @@
 #include "package.hpp"
 #include "source_set.hpp"
 #include "SourceProject.hpp"
+#include "../model-compiler/ScopedResourceBudget.hpp"
 #include <iostream>
 
 int main(int argc, char** argv) {
@@ -11,6 +12,16 @@ int main(int argc, char** argv) {
         require(argc >= 2, "usage: pipelang-sdk-tool manifest|verify|bindings|model-bindings|source-set-info [arguments]");
         const std::string command = argv[1];
         Arguments arguments(argc, argv, 2);
+        const fs::path budgetPath = arguments.optional("--resource-budget");
+        pipelang::models::ResourceBudget selectedBudget;
+        std::string budgetHash;
+        if (!budgetPath.empty()) {
+            require(budgetPath.is_absolute(), "resource budget profile path must be absolute");
+            const auto bytes = readFile(budgetPath, 65536);
+            selectedBudget = pipelang::models::ResourceBudget::fromText(bytes);
+            budgetHash = sha256(bytes);
+        }
+        const pipelang::models::ScopedResourceBudget budgetScope(selectedBudget, budgetPath.generic_string(), budgetHash);
         if (command == "sdk-package") {
             const fs::path prefix = arguments.take("--prefix");
             const fs::path manifest = arguments.take("--manifest");
@@ -58,9 +69,11 @@ int main(int argc, char** argv) {
             const fs::path sourceRoot = arguments.optional("--source-root", "src");
             const fs::path entry = arguments.take("--entry");
             const auto nameSpace = arguments.take("--namespace");
+            const auto numericEnvironment = arguments.optional("--native-numeric-environment");
+            const bool emitCompositionFactory = arguments.flag("--composition-factory");
             arguments.finish();
             std::cout << canonical(compiledProjectInformation(prefix, manifest, expected, modelTool,
-                projectRoot, sourceRoot, entry, nameSpace));
+                projectRoot, sourceRoot, entry, nameSpace, numericEnvironment, emitCompositionFactory));
         } else if (command == "project-info") {
             const fs::path prefix = arguments.take("--sdk-prefix");
             const fs::path manifest = arguments.take("--sdk-manifest");
@@ -102,15 +115,26 @@ int main(int argc, char** argv) {
             require(compilation == "header-only" || compilation == "compiled", "unknown model compilation mode");
             const bool compiled = compilation == "compiled";
             require(!compiled || (!withView && !projectRoot.empty()), "compiled mode requires a headless project");
+            const auto numericEnvironment = arguments.optional("--native-numeric-environment");
+            require(numericEnvironment.empty() || (!withView && !projectRoot.empty()),
+                    "native numeric environment requires a headless project");
             const auto expectedPlan = compiled ? arguments.take("--plan-sha256") : std::string{};
+            const bool requireCompositionPlan = arguments.flag("--require-composition-plan");
+            const bool emitCompositionFactory = arguments.flag("--composition-factory");
+            require(!requireCompositionPlan || (!withView && !projectRoot.empty()),
+                    "composition plans require a headless project");
+            require(!emitCompositionFactory || (!withView && !projectRoot.empty()),
+                    "composition factories require a headless project");
             arguments.finish();
             if (withView)
                 generateBindings(prefix, manifest, expected, modelTool, viewTool, model, view, nameSpace, output, inspection);
             else if (compiled)
                 generateCompiledProjectBindings(prefix, manifest, expected, modelTool, projectRoot, sourceRoot,
-                    entry, nameSpace, output, expectedPlan);
+                    entry, nameSpace, output, expectedPlan, numericEnvironment,
+                    requireCompositionPlan || emitCompositionFactory, emitCompositionFactory);
             else if (!projectRoot.empty())
-                generateProjectBindings(prefix, manifest, expected, modelTool, projectRoot, sourceRoot, entry, nameSpace, output);
+                generateProjectBindings(prefix, manifest, expected, modelTool, projectRoot, sourceRoot, entry, nameSpace, output,
+                    numericEnvironment, requireCompositionPlan || emitCompositionFactory, emitCompositionFactory);
             else if (!descriptor.empty())
                 generateSourceSetBindings(prefix, manifest, expected, modelTool, descriptor, nameSpace, output);
             else

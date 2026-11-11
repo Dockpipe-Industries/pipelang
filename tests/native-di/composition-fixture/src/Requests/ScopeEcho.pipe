@@ -1,0 +1,14 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Requests;
+import DiFixture.Contracts;
+
+public Class ScopeEcho {
+    private ScopeStamp stamp;
+
+    public ScopeEcho(ScopeStamp context) {
+        stamp = context;
+    }
+
+    public pure int ScopeIdentity() => stamp.identity;
+    public pure string Tenant() => stamp.tenant;
+}

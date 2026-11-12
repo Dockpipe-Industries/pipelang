@@ -25,7 +25,7 @@ if ($null -eq $selectionText) {
     $selectionText = 'all'
 }
 $fixtureSelection = @($selectionText.Split([char[]]" `t`r`n", [StringSplitOptions]::RemoveEmptyEntries))
-$knownFixtures = 'semantics synchronous-host initialization-budget list-reads fundamentals uint32 uint32-integer-only iteration async-composition failure-cleanup composition parallel_source collections_source mixed concurrent_source synchronization_source objects_source objects_composition interfaces_source synchronous_host_objects initialization_budget_objects list_read_objects uint32_objects foundation foundation_objects byte_buffers byte_buffer_objects native-numeric project compiled-project class-inheritance extended_collections parallel_runtime concurrent_runtime synchronization_runtime lazy_task_scope synchronous_host_scope initialization_budget_runtime object_runtime object_transaction'.Split(' ')
+$knownFixtures = 'semantics synchronous-host initialization-budget list-reads fundamentals uint32 uint32-integer-only iteration async-composition failure-cleanup composition parallel_source collections_source mixed concurrent_source synchronization_source objects_source objects_composition interfaces_source synchronous_host_objects initialization_budget_objects list_read_objects uint32_objects foundation foundation_objects byte_buffers byte_buffer_objects result_interface result_propagation_worker result_propagation typed_host_errors byte_buffer_iteration native-numeric project compiled-project class-inheritance extended_collections parallel_runtime concurrent_runtime synchronization_runtime lazy_task_scope synchronous_host_scope initialization_budget_runtime object_runtime object_transaction'.Split(' ')
 if ($fixtureSelection.Count -eq 0) {
     throw 'Native fixture selection must not be empty'
 }
@@ -101,7 +101,7 @@ if ($suites -contains 'fundamentals') {
 $extended = Join-Path $proof 'extended'
 Invoke-Unit 'extended-generate' (Join-Path $build 'sdk-tools/pipelang-extended-tests.exe') @($script:SourceRoot, $sdk, $extended)
 foreach ($fixture in @('composition', 'parallel_source', 'collections_source', 'mixed', 'concurrent_source',
-    'synchronization_source', 'objects_source', 'objects_composition', 'interfaces_source', 'synchronous_host_objects', 'initialization_budget_objects', 'list_read_objects', 'uint32_objects', 'foundation', 'foundation_objects', 'byte_buffers', 'byte_buffer_objects')) {
+    'synchronization_source', 'objects_source', 'objects_composition', 'interfaces_source', 'synchronous_host_objects', 'initialization_budget_objects', 'list_read_objects', 'uint32_objects', 'foundation', 'foundation_objects', 'byte_buffers', 'byte_buffer_objects', 'result_interface', 'result_propagation_worker', 'result_propagation', 'typed_host_errors', 'byte_buffer_iteration')) {
     Compile-SelectedFixture $fixture (Join-Path $script:SourceRoot "tests/native-models/$fixture.cpp") $extended $sdk $tools
 }
 $numericProof = Join-Path $proof 'native-numeric'

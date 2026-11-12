@@ -462,7 +462,8 @@ private:
             result.body = is("{") ? block() : std::vector<Statement>{statement()};
             return result;
         }
-        if (take("try")) {
+        if (is("try") && position_ + 1 < tokens_.size() && tokens_[position_ + 1].literal == "{") {
+            advance();
             result.kind = "try";
             result.body = block();
             if (take("catch")) {
@@ -565,13 +566,15 @@ private:
             try {
                 Type possibleType = type();
                 if (current().kind == "identifier") {
-                    result.kind = "local";
-                    result.type = std::move(possibleType);
-                    result.name = identifier();
+                    Statement local;
+                    local.offset = result.offset;
+                    local.kind = "local";
+                    local.type = std::move(possibleType);
+                    local.name = identifier();
                     expect("=");
-                    result.expression = expression();
+                    local.expression = expression();
                     expect(delimiter);
-                    return result;
+                    return local;
                 }
             } catch (const Diagnostic&) {
                 // Reparse as an expression for the owning diagnostic.
@@ -652,6 +655,11 @@ private:
         return left;
     }
     Expr unary() {
+        if (is("try")) {
+            const auto operation = current();
+            advance();
+            return make("propagate", "try", operation.start, {expression(precedence("*") + 1)});
+        }
         if (is("!") || is("~") || is("-") || is("await")) {
             const auto operation = current();
             advance();

@@ -1,0 +1,10 @@
+name: pipelang-result-propagation-project-check
+description: Verify general Result propagation through installed SDK source services on native, sanitizer and WASM targets.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: propagation-project
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/foundation.check/assets/scripts/propagation-project.sh

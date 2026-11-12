@@ -206,6 +206,17 @@ failure. Borrowed host ports remain externally owned and are not disposed by DI.
 Factories and selected cleanup methods are synchronous. Async acquisition and
 async disposal are not inferred from the scoped service-method support below.
 
+## Synchronous typed domain errors
+
+Exported synchronous methods may return `Result<T,E>` with enum or deeply owned
+record errors as well as string. A native handle for nonstring E returns
+`Result<Result<T,E>,std::string>`: the outer outcome owns scope admission,
+execution cancellation and unexpected faults; the inner outcome is the exact
+source/domain Result. Domain Failure and Cancelled retain their error payloads,
+and follow normal source-return transaction semantics. An invocation fault rolls
+back transactional state. The string-error facade remains flattened for API
+compatibility. See the [typed invocation contract](../../src/native/model-compiler/README.md#typed-errors-at-invocation-boundaries).
+
 ## Scoped asynchronous methods
 
 Exported methods can use synchronous owned-value signatures or the existing source

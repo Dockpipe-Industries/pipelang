@@ -371,15 +371,139 @@ locale, grouping or leading plus, including the minimum signed64 value. All four
 operations are pure, evaluate arguments once from left to right, and introduce no
 I/O, host-service calls or implicit numeric conversions.
 
+## Common result interface
+
+`IResult<E>` is the read-only common contract for `Result<T,E>` values with
+different successful payload types and the same exact error type. It exposes
+`IsSuccess`, `IsFailure`, `IsCancelled` and `Error`. E remains string, a declared
+enum or an owned error record, including its readable message and domain details.
+
+```csharp
+public pure string Message(IResult<ReadError> outcome) {
+    if (outcome.IsSuccess)
+        return "";
+    return outcome.Error.message;
+}
+```
+
+A checked implicit conversion accepts a deeply owned `Result<T,E>` wherever
+`IResult<E>` is expected: local initialization, assignment, return, argument or a
+collection element. The error types must match exactly. Interfaces can be copied
+and returned from source services. The interface owns an immutable boxed copy of
+the complete typed result, so it remains valid after the original variable/model/
+service scope ends. Invalid successful payloads remain subject to validation even
+though Value is erased. It never turns Failure or Cancelled into a success record.
+
+Conversion allocates one immutable result object and applies the existing owned
+byte/element bounds to its full retained payload/error plus interface overhead.
+Copies share that object. Equality compares interface object identity, rather than
+pretending that equal status/error implies equal typed payloads. This is a bounded
+owning interface conversion, not an allocation-free cast or borrowed view.
+
+Existing `Result<T,E>` layout, constexpr behavior, typed Value/Error and equality
+are unchanged. Keep that typed value when its payload is needed: `IResult<E>` has
+no Value, no downcast and cannot be consumed with `try`. Its Error is meaningful on
+Failure/Cancelled, as with the typed result. String errors use `IResult<string>`;
+record errors retain their declared message/code/detail fields rather than being
+flattened to a string. No universal error-message formatter is inferred.
+
+Scope-bound object references, services, synchronization handles and other opaque
+payloads cannot be boxed by source code. IResult is not an implicit DTO field or
+host-serialization format; records/model snapshots and host signatures refuse it.
+Typed Result host/JS/TS contracts remain unchanged. Native SDK service facades can
+accept and return the owning interface through their existing invocation Result.
+An empty native interface is invalid and raises an execution fault at validation;
+it does not fabricate an ordinary read Failure/Cancelled. Native SDK creators use
+`pipelang::model::IResult<E>::From(typedResult)` under the owned-value contract.
+
+## Result propagation expressions
+
+`try expression` consumes a `Result<T,E>` in a Result-returning method. Success
+produces T. Failure or Cancelled returns the same outcome and exact E payload
+from the enclosing method, even when its successful payload type differs.
+There is no implicit error conversion and no exception-based propagation.
+
+```csharp
+public Result<string,ReadError> Describe() {
+    int value = try reader.Read();
+    return Result<string,ReadError>.Success(string.FromInt(value));
+}
+```
+
+The prefix binds at unary precedence. Parenthesize a larger operand, as in
+`try (choose ? first : second)`, or a propagated receiver before member access,
+as in `(try reader.Read()).Name`. Existing ternary `? :` and nullable `T?` syntax
+are unchanged. A `try { ... } catch ... finally ...` block retains its existing
+exception/cleanup semantics. Domain propagation does not enter an Error catch;
+normal finally cleanup still runs before the method returns.
+
+The operand runs once. Calls and arithmetic retain left-to-right evaluation and
+stop at the first unsuccessful propagated outcome. Conditional arms and &&/||
+remain lazy. Conditions, foreach inputs, loop initializers/conditions/iterations,
+assignments and nested expressions return from their owning callable. A for-loop
+continue runs its iteration clause; a break does not. Source object receiver
+identity is captured before an effectful RHS. Transactional field locations are
+reacquired after await refresh rather than retained as borrowed storage.
+
+`try Result<void,E>` is a void expression and may be used as a statement. A nonvoid
+successful payload must be consumed. Propagation requires a Result-returning method
+(or the Result inside its async Task), the exact same error type, and a Result
+operand. It cannot return from a constructor, field/base initializer, finally body
+or parallel worker body. A helper called from cleanup or a worker may propagate
+within its own Result-returning callable.
+
+`try await operation` uses the existing task/host await boundary. It may also appear
+inside a larger expression. Propagation inside await arguments stops before task
+admission if an argument fails. Task lifetime, cancellation, commit segments and
+finally order remain runtime-owned; async errors remain string-only. The existing
+ban on suspension in for iteration clauses, lock and finally bodies still applies.
+
+The compiler emits explicit branches and owning-method returns before ordinary
+expression emission. It does not throw an internal sentinel or return from an
+expression lambda. Generated temporaries use statement/branch lifetimes; successful
+values retain ordinary owned-value copy/move semantics. This is not an allocation-
+free pipeline guarantee. Evaluation and memory limits remain unchanged.
+
+Propagation is a normal domain return and follows the existing transaction contract:
+a returned Failure or Cancelled commits prior source effects, while a thrown
+execution fault rolls back its current transaction segment. The native typed-error
+invocation envelope described below remains distinct from the domain Result.
+
+## Typed errors at invocation boundaries
+
+A source method and its injected synchronous host use their declared `Result<T,E>`
+directly. Enum and owned-record errors preserve all fields and distinguish Failure
+from Cancelled. Runtime faults cannot be converted into an arbitrary domain E.
+
+For a public model action with nonstring E, the generated C++ entrypoint returns
+`Result<Result<T,E>,std::string>`. An outer Success means invocation completed;
+inspect the inner Result for the domain outcome. An outer Failure or Cancelled
+reports an invocation fault or execution cancellation without inventing a domain
+error. Exported synchronous composition handles use the same boundary, including
+pure typed-Result methods because the handle owns admission and scope lifetime.
+Ordinary pure model queries retain their declared C++ return type. Existing
+string-error actions and handles keep their established flattened Result API.
+
+A returned domain Failure or Cancelled is a normal source return and commits its
+transaction, as with existing string Results. A thrown execution fault rolls back
+transactional state; finally cleanup still runs. External host effects are not
+rolled back. Host errors with invalid enum values or invalid nested owned fields
+are invocation faults, never successful domain defaults. Source catch/finally rules,
+resource budgets, owner-thread checks and callback reentry guards are unchanged.
+The optional view manifest profile still requires its existing string error types.
+
 ## Synchronous injected host calls
 
 An injected `public Interface` may declare effectful synchronous
-`Result<T,string>` methods alongside existing `Task<Result<T,string>>` methods.
+`Result<T,E>` methods, where E is string, a declared enum or a deeply owned record,
+alongside existing `Task<Result<T,string>>` methods. Typed async errors remain
+unsupported. Both successful payloads and unsuccessful error payloads are validated.
 The synchronous method is called normally; the async method still requires a
 source `await` and retains its bounded FIFO host-worker behavior. A synchronous
 host call executes directly on the model owner thread, without a task, worker,
-suspension or implicit transaction commit. Pure model methods, parallel bodies
-and helpers reachable from parallel workers cannot call host services.
+suspension or implicit transaction commit. Pure model methods cannot call effectful
+host methods. Parallel bodies and helpers reachable from parallel workers cannot
+call host services.
 
 Host parameters and Result payloads remain recursively owned values; existing
 explicit cancellation-token parameters remain available. Source object

@@ -81,7 +81,7 @@ for selected_fixture in "$@"; do
                 exit 1
             fi
             ;;
-        semantics|synchronous-host|initialization-budget|list-reads|fundamentals|uint32|uint32-integer-only|iteration|async-composition|failure-cleanup|composition|parallel_source|collections_source|mixed|concurrent_source|synchronization_source|objects_source|objects_composition|interfaces_source|synchronous_host_objects|initialization_budget_objects|list_read_objects|uint32_objects|foundation|foundation_objects|byte_buffers|byte_buffer_objects|native-numeric|project|compiled-project|class-inheritance|extended_collections|parallel_runtime|concurrent_runtime|synchronization_runtime|lazy_task_scope|synchronous_host_scope|initialization_budget_runtime|object_runtime|object_transaction) ;;
+        semantics|synchronous-host|initialization-budget|list-reads|fundamentals|uint32|uint32-integer-only|iteration|async-composition|failure-cleanup|composition|parallel_source|collections_source|mixed|concurrent_source|synchronization_source|objects_source|objects_composition|interfaces_source|synchronous_host_objects|initialization_budget_objects|list_read_objects|uint32_objects|foundation|foundation_objects|byte_buffers|byte_buffer_objects|result_interface|result_propagation_worker|result_propagation|typed_host_errors|byte_buffer_iteration|native-numeric|project|compiled-project|class-inheritance|extended_collections|parallel_runtime|concurrent_runtime|synchronization_runtime|lazy_task_scope|synchronous_host_scope|initialization_budget_runtime|object_runtime|object_transaction) ;;
         *) echo "Unknown native fixture selection: $selected_fixture" >&2; exit 1 ;;
     esac
 done
@@ -143,7 +143,7 @@ case " $PIPELANG_NATIVE_COMPAT_SUITES " in
     *" fundamentals "*) unit numeric-guards "$build/sdk-tools/pipelang-extended-tests" --numeric-guard "$sdk" "$proof/fundamentals/NumericDefaults.hpp" ;;
 esac
 unit extended-generate "$build/sdk-tools/pipelang-extended-tests" "$PWD" "$sdk" "$proof/extended"
-for fixture in composition parallel_source collections_source mixed concurrent_source synchronization_source objects_source objects_composition interfaces_source synchronous_host_objects initialization_budget_objects list_read_objects uint32_objects foundation foundation_objects byte_buffers byte_buffer_objects; do
+for fixture in composition parallel_source collections_source mixed concurrent_source synchronization_source objects_source objects_composition interfaces_source synchronous_host_objects initialization_budget_objects list_read_objects uint32_objects foundation foundation_objects byte_buffers byte_buffer_objects result_interface result_propagation_worker result_propagation typed_host_errors byte_buffer_iteration; do
     compile_fixture "$fixture" "tests/native-models/$fixture.cpp" "$proof/extended"
 done
 unit native-numeric-generate "$build/sdk-tools/pipelang-sdk-tool-tests" --native-numeric-fixture "$sdk" "$proof/native-numeric"

@@ -89,6 +89,21 @@ Terminal root compatibility checks passed; the consumer audit is closed at the
 recorded focused Linux/headless/installed-SDK scope. This does not claim broad
 language, graphics, platform or full-suite acceptance.
 
+## Developer foundation cleanup — selected priority, 2026-11-11
+
+The owner prioritised language/framework foundations before more Cloud porting:
+byte iteration, callable/LINQ semantics, lossless Result propagation, typed request/
+concurrency contexts, generated codecs and SDK-based persistence/migrations. We are
+integrating existing persistence tooling, not building an ORM. Required dependencies
+must support commercial/proprietary applications without royalties, revenue caps or
+application-source publication requirements; existing notice obligations remain.
+
+[Developer foundations](tasks/developer-foundations-20261112.md) owns the ordered
+scope, current capability audit, licensing/provider boundaries and qualification.
+Sequential ByteBuffer iteration is locally qualified on native and WASM. General lambdas,
+LINQ/query-provider translation, typed host-error transport and request contexts
+remain planned; this entry does not claim them implemented or lift any SDK budgets.
+
 ## Deferred: compiler-enforced real-time-safe execution
 
 The [real-time execution feature request](tasks/realtime-safe-execution.md) is

@@ -2,5 +2,6 @@
 #pragma once
 
 #include "result.hpp"
+#include "iresult.hpp"
 #include "byte_buffer.hpp"
 #include "task.hpp"

@@ -250,6 +250,115 @@ public Class App {
         oracle.source("tests/native-models/ByteBufferHost.pipe") + "\n" +
         oracle.source("tests/native-models/ByteBuffers.pipe");
     oracle.admitted("ByteBuffers", sourceRequest(byteBufferSource, "byte_buffers"));
+    oracle.admitted("ResultInterface", sourceRequest(
+        oracle.source("tests/native-models/ResultInterface.pipe"), "result_interface"));
+    auto interfaceProject = replace(oracle.source("tests/native-models/ResultInterface.pipe"),
+        "public Class ResultInterfaceModel {", "public model Class ResultInterfaceModel { public ResultInterfaceModel() {}");
+    oracle.admitted("ResultInterfaceProject", Json{
+        {"protocol", "pipelang.native-model-project.v1"}, {"entry", "Results"},
+        {"namespace", "project_result_interface"}, {"modules", Json::array({
+            Json{{"name", "Results"}, {"path", "Results.pipe"}, {"source", "module Results;\n" + interfaceProject}}
+        })}
+    });
+    oracle.refused("interface-no-value", sourceRequest(
+        "public Class App { public pure int Read(IResult<string> value) => value.Value; }", "interface_no_value"),
+        false, "IResult exposes status and Error");
+    oracle.refused("interface-error-mismatch", sourceRequest(
+        "public Enum Code { Bad } public Class App { public pure IResult<Code> Read(Result<int,string> value) => value; }",
+        "interface_error_mismatch"), false, "expected IResult<Code>");
+    oracle.refused("interface-no-propagation", sourceRequest(
+        "public Class App { public Result<int,string> Read(IResult<string> value) => Result<int,string>.Success(try value); }",
+        "interface_no_propagation"), false, "try expression requires a Result operand");
+    oracle.refused("interface-record-field", sourceRequest(
+        "public Record Data { public IResult<string> value; } public Class App { public int value = 0; }",
+        "interface_record_field"), false, "records contain owned value fields only");
+    oracle.refused("interface-host-transport", sourceRequest(
+        "public Interface Port { Result<int,string> Read(IResult<string> value); } public Class App { public int value = 0; }",
+        "interface_host_transport"), false, "host interfaces transport typed Results");
+    oracle.refused("interface-arity", sourceRequest(
+        "public Class App { public pure IResult Read() => Result<int,string>.Success(1); }", "interface_arity"),
+        false, "IResult requires exactly one error type");
+    oracle.refused("interface-reference-payload", sourceRequest(
+        "public Class Item { public Item() {} } public Class App { public App() {} public IResult<string> Read(Result<Item,string> value) => value; }",
+        "interface_reference_payload", true), false, "expected IResult<string>");
+    oracle.admitted("ResultPropagation", sourceRequest(
+        oracle.source("tests/native-models/ResultPropagation.pipe"), "result_propagation"));
+    auto propagationProject = oracle.source("tests/native-models/ResultPropagation.pipe");
+    propagationProject = replace(propagationProject, "public Class ResultPropagation {",
+        "public model Class ResultPropagation { public ResultPropagation() {}");
+    propagationProject = replace(propagationProject, "public Class AsyncPropagation {",
+        "public Class AsyncPropagation { public AsyncPropagation() {}");
+    oracle.admitted("ResultPropagationProject", Json{
+        {"protocol", "pipelang.native-model-project.v1"}, {"entry", "Propagation"},
+        {"namespace", "project_result_propagation"}, {"modules", Json::array({
+            Json{{"name", "Propagation"}, {"path", "Propagation.pipe"},
+                {"source", "module Propagation;\n" + propagationProject}}
+        })}
+    });
+    oracle.admitted("ResultPropagationWorker", sourceRequest(
+        oracle.source("tests/native-models/ResultPropagationWorker.pipe"), "result_propagation_worker", true));
+    const auto refusePropagation = [&](const std::string& name, const std::string& source, const std::string& diagnostic) {
+        oracle.refused(name, sourceRequest(source, "refused_propagation"), false, diagnostic);
+    };
+    refusePropagation("propagation-plain-return",
+        "public Class App { public int Read(Result<int,string> value) => try value; }",
+        "Result propagation requires a Result-returning method");
+    refusePropagation("propagation-plain-operand",
+        "public Class App { public Result<int,string> Read() => Result<int,string>.Success(try 1); }",
+        "try expression requires a Result operand");
+    refusePropagation("propagation-error-mismatch",
+        "public Enum Failure { Broken } public Class App { public Result<int,string> Read(Result<int,Failure> value) => Result<int,string>.Success(try value); }",
+        "Result propagation requires the exact enclosing error type");
+    refusePropagation("propagation-finally",
+        "public Class App { public Result<int,string> Read(Result<void,string> value) { try { return Result<int,string>.Success(1); } finally { try value; } } }",
+        "finally cannot propagate a Result");
+    refusePropagation("propagation-parallel",
+        "public Class App { public Result<int,string> Read(List<int> values) { parallel foreach (int value in values) { int result = try Result<int,string>.Success(value); } return Result<int,string>.Success(1); } }",
+        "parallel iteration cannot propagate");
+    refusePropagation("propagation-void-value",
+        "public Class App { public Result<int,string> Read(Result<void,string> value) { int number = try value; return Result<int,string>.Success(number); } }",
+        "expected int, got void");
+    refusePropagation("propagation-constructor",
+        "public Class App { public App(Result<int,string> input) { int value = try input; } }",
+        "Result propagation requires a Result-returning method");
+    refusePropagation("propagation-discarded-value",
+        "public Class App { public Result<int,string> Read(Result<int,string> input) { try input; return input; } }",
+        "non-void call result must be consumed");
+    refusePropagation("propagation-iteration-suspension",
+        "public Class App { private async Task<Result<int,string>> Next() { return Result<int,string>.Success(1); } "
+        "public async Task<Result<int,string>> Read() { for (int index = 0; index < 2; index = try await Next()) {} return Result<int,string>.Success(1); } }",
+        "for iteration cannot suspend");
+    const std::string propagationOffsetSource =
+        "public Class App { public int Read(Result<int,string> value) => try value; }";
+    const auto propagationOffset = oracle.invoke(sourceRequest(propagationOffsetSource, "propagation_offset"));
+    require(propagationOffset.at("ok") == false &&
+        propagationOffset.at("diagnostics").at(0).at("offset") == propagationOffsetSource.find("try value"),
+        "Result propagation diagnostic lost its authored operator offset");
+    oracle.admitted("TypedHostErrors", sourceRequest(
+        oracle.source("tests/native-models/TypedHostErrors.pipe"), "typed_host_errors"));
+    oracle.refused("typed-host-async-error", sourceRequest(
+        "public Enum Failure { Broken } public Interface Host { Task<Result<int,Failure>> Read(); } "
+        "public Class App { public int value = 0; }", "typed_host_async"), false, "Task requires string Result errors");
+    oracle.refused("typed-host-invalid-error", sourceRequest(
+        "public Interface Host { Result<int,int> Read(); } public Class App { public int value = 0; }",
+        "typed_host_invalid"), false, "Result errors require string, a declared enum or an owned record");
+    oracle.refused("typed-host-reference-error", sourceRequest(
+        "public Class Ref { public Ref() {} } public Record Failure { public Ref value; } "
+        "public Interface Host { Result<int,Failure> Read(); } public Class App { public App() {} }",
+        "typed_host_reference", true), false, "records contain owned value fields only");
+    const auto byteIteration = oracle.admitted("ByteBufferIteration", sourceRequest(
+        oracle.source("tests/native-models/ByteBufferIteration.pipe"), "byte_buffer_iteration"));
+    require(byteIteration.at("header").get<std::string>().find("for (std::uint32_t item") != std::string::npos,
+        "ByteBuffer iteration did not widen the storage byte to language uint32");
+    oracle.refused("byte-iteration-wrong-item", sourceRequest(
+        "public Class App { public void Run(ByteBuffer bytes) { foreach (int item in bytes) {} } }",
+        "byte_iteration_wrong_item"), false, "expected int, got uint32");
+    oracle.refused("byte-iteration-shadow", sourceRequest(
+        "public Class App { public int item = 0; public void Run(ByteBuffer bytes) { foreach (uint32 item in bytes) {} } }",
+        "byte_iteration_shadow"), false, "unique unshadowed");
+    oracle.refused("byte-iteration-parallel", sourceRequest(
+        "public Class App { public void Run(ByteBuffer bytes) { parallel foreach (uint32 item in bytes) {} } }",
+        "byte_iteration_parallel"), false, "parallel foreach does not support ByteBuffer");
     const auto byteBufferObjects = oracle.source("tests/native-models/ByteBufferPacket.pipe") + "\n" +
         oracle.source("tests/native-models/ByteBufferBox.pipe") + "\n" +
         oracle.source("tests/native-models/ByteBufferOwner.pipe");

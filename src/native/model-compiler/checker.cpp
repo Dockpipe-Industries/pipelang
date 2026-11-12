@@ -32,7 +32,7 @@ public:
         for (auto& declaration : program_.declarations) {
             owner_ = &declaration;
             if (types_.contains(declaration.name) || primitive(declaration.name) ||
-                declaration.name == "Result" || declaration.name == "Task" ||
+                declaration.name == "Result" || declaration.name == "IResult" || declaration.name == "Task" ||
                 declaration.name == "Optional" || declaration.name == "List" || declaration.name == "CancellationToken" ||
                 declaration.name == "FixedArray" ||
                 declaration.name == "Atomic" || extended(declaration.name) || isConcurrentCollection(declaration.name) ||
@@ -215,6 +215,10 @@ private:
         return std::any_of(value.arguments.begin(), value.arguments.end(),
             [&](const Type& argument) { return referenceBearing(argument); });
     }
+    bool containsResultInterface(const Type& value) const {
+        return value.name == "IResult" || std::any_of(value.arguments.begin(), value.arguments.end(),
+            [&](const Type& argument) { return containsResultInterface(argument); });
+    }
     bool sourceValue(const Type& value) const {
         if (objectReference(value))
             return true;
@@ -227,7 +231,7 @@ private:
     }
     bool pureHostValue(const Type& value, std::set<std::string>& records,
                        std::set<std::string>& completed) const {
-        if (!sourceValue(value) || referenceBearing(value))
+        if (!sourceValue(value) || referenceBearing(value) || value.name == "IResult")
             return false;
         for (std::size_t index = 0; index < value.arguments.size(); ++index) {
             const auto& argument = value.arguments[index];
@@ -259,6 +263,9 @@ private:
     bool assignable(const Type& actual, const Type& expected) const {
         if (actual == expected)
             return true;
+        if (actual.name == "Result" && expected.name == "IResult" &&
+            actual.arguments[1] == expected.arguments[0])
+            return pureHostValue(actual);
         if (expected.name == "Optional" && expected.arguments.size() == 1) {
             if (actual.name == "$null")
                 return true;
@@ -273,6 +280,8 @@ private:
                 [&](const Type& implemented) { return implemented == expected; });
     }
     Type sequenceItem(const Type& sequence, std::size_t offset) const {
+        if (sequence.name == "ByteBuffer")
+            return Type{"uint32", {}};
         if (isConcurrentCollection(sequence.name) && method_->pure)
             fail("pure methods cannot observe concurrent collection state", offset);
         if (sequence.name == "Dictionary" || sequence.name == "ConcurrentDictionary")
@@ -375,6 +384,12 @@ private:
                 fail("nullable suffix requires an owned value payload", offset);
             return;
         }
+        if (value.name == "IResult") {
+            if (value.arguments.size() != 1)
+                fail("IResult requires exactly one error type", offset);
+            type(Type{"Result", {voidType, value.arguments[0]}}, offset);
+            return;
+        }
         if (value.name == "Result") {
             if (value.arguments.size() != 2)
                 fail("Result requires value and error types", offset);
@@ -468,7 +483,8 @@ private:
         return found && found->kind == "Interface" && !found->sourceInterface;
     }
     bool plainValue(const Type& value) const {
-        if (objectReference(value) || service(value) || isSharedHandle(value) || value.name == "Task" || value.name == "CancellationToken" || value.name == "void")
+        if (objectReference(value) || service(value) || isSharedHandle(value) || value.name == "IResult" ||
+            value.name == "Task" || value.name == "CancellationToken" || value.name == "void")
             return false;
         for (const auto& argument : value.arguments) {
             if (argument.name != "void" && !plainValue(argument))
@@ -666,9 +682,6 @@ private:
                     fail("async method requires Task<Result<T,string>>", method.offset);
                 if (method.pure && (method.asynchronous || method.result == voidType))
                     fail("pure method requires a synchronous value return", method.offset);
-                if (method.result.name == "Result" && method.result.arguments[1] != stringType &&
-                    ((!method.pure && !objectClass(owner)) || (owner.kind == "Interface" && !owner.sourceInterface)))
-                    fail("model actions and host methods require string Result errors", method.offset);
                 if (isConcurrentCollection(method.result.name))
                     fail("methods cannot return concurrent collection handles", method.offset);
                 if (isSynchronizationHandle(method.result.name))
@@ -678,10 +691,12 @@ private:
                 if (owner.kind == "Interface" && !owner.sourceInterface &&
                     !method.asynchronous && method.result.name != "Result") {
                     if (!method.pure)
-                        fail("host interfaces declare synchronous Result<T,string> or Task<Result<T,string>> methods", method.offset);
+                        fail("host interfaces declare synchronous Result<T,E> or Task<Result<T,string>> methods", method.offset);
                     if (!pureHostValue(method.result))
                         fail("pure host returns require deeply owned values without object references or handles", method.offset);
                 }
+                if (owner.kind == "Interface" && !owner.sourceInterface && containsResultInterface(method.result))
+                    fail("host interfaces transport typed Results, not opaque IResult values", method.offset);
                 if (owner.kind == "Interface" && !owner.sourceInterface && referenceBearing(method.result))
                     fail("host interfaces cannot return owner-confined object references", method.offset);
             }
@@ -690,6 +705,8 @@ private:
                 type(parameter.type, parameter.offset);
                 if (!parameters.insert(parameter.name).second)
                     fail("duplicate parameter", parameter.offset);
+                if (owner.kind == "Interface" && !owner.sourceInterface && containsResultInterface(parameter.type))
+                    fail("host interfaces transport typed Results, not opaque IResult values", parameter.offset);
                 if (owner.kind == "Interface" && !owner.sourceInterface && isSharedHandle(parameter.type))
                     fail("host interfaces cannot transport shared handles", parameter.offset);
                 if (owner.kind == "Interface" && !owner.sourceInterface && referenceBearing(parameter.type))
@@ -974,7 +991,23 @@ private:
     }
     Type expression(const Expr& node, bool allowAwait = false, bool allowServiceCall = false) {
         Type result;
-        if (node->kind == "null") {
+        if (node->kind == "propagate") {
+            if (!method_ || method_->constructor)
+                fail("Result propagation requires a Result-returning method", node->offset);
+            if (finallyDepth_ != 0)
+                fail("finally cannot propagate a Result from its enclosing method", node->offset);
+            if (parallelDepth_ != 0)
+                fail("parallel iteration cannot propagate from its enclosing method", node->offset);
+            const auto& returned = method_->asynchronous ? method_->result.arguments[0] : method_->result;
+            if (returned.name != "Result")
+                fail("Result propagation requires a Result-returning method", node->offset);
+            const auto operand = expression(node->children[0], true);
+            if (operand.name != "Result")
+                fail("try expression requires a Result operand", node->offset);
+            if (operand.arguments[1] != returned.arguments[1])
+                fail("Result propagation requires the exact enclosing error type", node->offset);
+            result = operand.arguments[0];
+        } else if (node->kind == "null") {
             result = {"$null", {}};
         } else if (node->kind == "integer") {
             std::int64_t parsed = 0;
@@ -1238,6 +1271,14 @@ private:
                     else
                         fail("unknown nullable property", node->offset);
                     node->resolution = "optional";
+                } else if (receiverType.name == "IResult") {
+                    if (node->text == "IsSuccess" || node->text == "IsFailure" || node->text == "IsCancelled")
+                        result = booleanType;
+                    else if (node->text == "Error")
+                        result = receiverType.arguments[0];
+                    else
+                        fail("IResult exposes status and Error; retain Result<T,E> for Value", node->offset);
+                    node->resolution = "result";
                 } else if (receiverType.name == "Result") {
                     if (node->text == "IsSuccess" || node->text == "IsFailure" || node->text == "IsCancelled")
                         result = booleanType;
@@ -2254,6 +2295,11 @@ private:
         if (root->resolution == "service" && !method_->constructor)
             fail("service identity is fixed by the constructor", root->offset);
     }
+    bool containsAwait(const Expr& expression) const {
+        return expression && (expression->kind == "await" ||
+            std::any_of(expression->children.begin(), expression->children.end(),
+                [&](const Expr& child) { return containsAwait(child); }));
+    }
     enum Flow : unsigned {
         Fallthrough = 1,
         Returned = 2,
@@ -2276,7 +2322,7 @@ private:
                 locals_[statement.name] = statement.type;
             } else if (statement.kind == "expression") {
                 const bool awaited = statement.expression->kind == "await";
-                if (statement.expression->kind != "call" && !awaited)
+                if (statement.expression->kind != "call" && statement.expression->kind != "propagate" && !awaited)
                     fail("expression statements require a method call", statement.offset);
                 const auto result = expression(statement.expression, awaited);
                 if (awaited && (result != voidType || statement.expression->children[0]->kind != "call" ||
@@ -2317,7 +2363,10 @@ private:
                 if (method_->pure || parallelDepth_ != 0 || finallyDepth_ != 0 || lockDepth_ != 0)
                     fail("parallel foreach requires an effect method outside workers, cleanup and lock bodies", statement.offset);
                 type(statement.type, statement.offset);
-                same(sequenceItem(expression(statement.expression), statement.offset), statement.type, statement.offset);
+                const auto sequence = expression(statement.expression);
+                if (sequence.name == "ByteBuffer")
+                    fail("parallel foreach does not support ByteBuffer inputs", statement.offset);
+                same(sequenceItem(sequence, statement.offset), statement.type, statement.offset);
                 if (referenceBearing(statement.type) || referenceBearing(statement.expression->type))
                     fail("parallel inputs cannot contain owner-confined object references", statement.offset);
                 if (locals_.contains(statement.name) || field(*owner_, statement.name))
@@ -2348,7 +2397,7 @@ private:
                 for (const auto& iteration : statement.iteration) {
                     if (iteration.kind != "assign" && iteration.kind != "expression")
                         fail("for iteration requires an assignment or method call", iteration.offset);
-                    if (iteration.expression && iteration.expression->kind == "await")
+                    if (containsAwait(iteration.expression))
                         fail("for iteration cannot suspend", iteration.offset);
                 }
                 auto outer = locals_;

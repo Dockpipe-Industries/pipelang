@@ -1,0 +1,10 @@
+name: pipelang-typed-result-project-check
+description: Verify typed host errors and invocation ownership through installed native and WASM SDK project facades.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: typed-project
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/foundation.check/assets/scripts/typed-project.sh

@@ -10,7 +10,7 @@ public Interface Suspension {
 
 The generated native override is `float Support(float, float) const`. The
 compiler trusts the host's purity declaration; C++ constness does not prove that
-it avoids external effects. Use `Result<T,string>` for expected refusals or
+it avoids external effects. Use `Result<T,E>` for expected refusals or
 fallible callbacks. Effectful synchronous host methods still require Result;
 asynchronous host methods still require `Task<Result<T,string>>`.
 

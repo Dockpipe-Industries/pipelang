@@ -1765,6 +1765,8 @@ private:
     std::string convertedExpression(std::string emitted, const Type& actual, const Type& expected) {
         if (actual == expected)
             return emitted;
+        if (expected.name == "IResult" && actual.name == "Result")
+            return cpp(expected) + "::From(" + emitted + ")";
         if (expected.name == "Optional") {
             if (actual.name == "$null")
                 return "((void)(" + emitted + "), " + cpp(expected) + "::None())";
@@ -1774,12 +1776,16 @@ private:
         return "(" + emitted + ").template as<" + objectTag(expected.name) + ">()";
     }
     std::string expression(const Expr& value) {
+        if (const auto found = propagationValues_.find(value.get()); found != propagationValues_.end())
+            return found->second;
         auto emitted = expressionValue(value);
         if (!value->convertTo.name.empty())
             emitted = convertedExpression(std::move(emitted), value->type, value->convertTo);
         return usesBudget_ ? "(pl_budget.step(), " + emitted + ")" : emitted;
     }
     std::string expressionValue(const Expr& value) {
+        if (value->kind == "propagate")
+            throw Diagnostic("Result propagation must be lowered in its owning callable", value->offset);
         if (value->resolution == "cancellation_none")
             return "pipelang::model::CancellationToken{}";
         if (value->resolution == "floating_environment_observe")
@@ -2262,14 +2268,264 @@ private:
         }
     }
     Type actionResult(const Method& method) const {
-        if (method.result.name == "Result")
+        // String errors share the established invocation boundary. A typed domain
+        // error cannot represent runtime faults, so preserve it inside that boundary.
+        if (method.result.name == "Result" && method.result.arguments[1].name == "string")
             return method.result;
         return {"Result", {method.result, {"string", {}}}};
     }
+    void emitReturnValue(const std::string& value, bool hasValue, unsigned indentation) {
+        if (method_->pure || internalEffect_ || observationEmission_) {
+            line("return" + (hasValue ? " " + value : "") + ";", indentation);
+            return;
+        }
+        if (hasValue)
+            line("auto pl_return = " + value + ";", indentation);
+        if (method_->asynchronous && hasFinally(method_->body))
+            line("pl_returnCommit.arm();", indentation);
+        else
+            line(commitStatement(), indentation);
+        if (method_->constructor)
+            line("return;", indentation);
+        else if (method_->asynchronous)
+            line("co_return pl_return;", indentation);
+        else if (actionResult(*method_) == method_->result)
+            line("return pl_return;", indentation);
+        else
+            line("return " + cpp(actionResult(*method_)) + "::Success(" +
+                (hasValue ? "std::move(pl_return)" : "") + ");", indentation);
+    }
+
+    bool hasPropagation(const Expr& value) const {
+        return value && (value->kind == "propagate" ||
+            std::any_of(value->children.begin(), value->children.end(),
+                [&](const Expr& child) { return hasPropagation(child); }));
+    }
+
+    // Each statement owns its substitutions. Nested branch/loop scopes restore
+    // their parent's values, so no generated local can escape its lexical scope.
+    struct PropagationBindings {
+        std::map<const Expression*, std::string>& values;
+        std::map<const Expression*, std::string> previous;
+        explicit PropagationBindings(std::map<const Expression*, std::string>& bindings)
+            : values(bindings), previous(bindings) {}
+        ~PropagationBindings() { values = std::move(previous); }
+    };
+
+    std::string propagationTemporary() {
+        return "pl_propagated" + std::to_string(propagationSequence_++);
+    }
+
+    void prepareExpression(const Expr& value, unsigned indentation) {
+        if (hasPropagation(value))
+            materializeExpression(value, indentation);
+    }
+
+    std::optional<std::string> modelFieldLocation(const Expr& value) {
+        if (value->resolution == "field")
+            return state() + "." + value->text;
+        if (value->kind == "member" && value->resolution == "record") {
+            if (const auto owner = modelFieldLocation(value->children[0]))
+                return *owner + "." + value->text;
+        }
+        return std::nullopt;
+    }
+
+    void materializeExpression(const Expr& value, unsigned indentation, bool borrow = false) {
+        if (propagationValues_.contains(value.get()))
+            return;
+        const auto temporary = propagationTemporary();
+        if (!hasPropagation(value)) {
+            if (borrow) {
+                if (const auto location = modelFieldLocation(value)) {
+                    // Charge/evaluate the source location before its RHS, but
+                    // reacquire transactional storage after any await/refresh.
+                    line("(void)(" + expression(value) + ");", indentation);
+                    propagationValues_[value.get()] = *location;
+                    return;
+                }
+            }
+            line(std::string(borrow ? "auto& " : "auto ") + temporary + " = " + expression(value) + ";", indentation);
+            propagationValues_[value.get()] = temporary;
+            return;
+        }
+        if (usesBudget_)
+            line("pl_budget.step();", indentation);
+        if (value->kind == "await") {
+            Statement awaited;
+            awaited.kind = value->type.name == "void" ? "expression" : "local";
+            awaited.name = temporary;
+            awaited.type = value->type;
+            awaited.expression = value;
+            prepareCallOperands(value->children[0], indentation);
+            emitAwait(awaited, indentation);
+            auto awaitedValue = value->type.name == "void" ? "(void)0" : temporary;
+            if (!value->convertTo.name.empty())
+                awaitedValue = convertedExpression(std::move(awaitedValue), value->type, value->convertTo);
+            propagationValues_[value.get()] = std::move(awaitedValue);
+            return;
+        }
+        if (value->kind == "propagate") {
+            const auto& operand = value->children[0];
+            if (operand->kind == "await") {
+                Statement awaited;
+                awaited.kind = "local";
+                awaited.name = temporary;
+                awaited.type = operand->type;
+                awaited.expression = operand;
+                // Preserve receiver/argument evaluation before suspension. The
+                // established await emitter owns task lifetime and transaction segments.
+                prepareCallOperands(operand->children[0], indentation);
+                emitAwait(awaited, indentation);
+            } else {
+                prepareExpression(operand, indentation);
+                line("auto " + temporary + " = " + expression(operand) + ";", indentation);
+            }
+            line("if (!" + temporary + ".is_success()) {", indentation);
+            const auto& returned = method_->asynchronous ? method_->result.arguments[0] : method_->result;
+            emitReturnValue("(" + temporary + ".is_cancelled() ? " + cpp(returned) +
+                "::Cancelled(" + temporary + ".error()) : " + cpp(returned) +
+                "::Failure(" + temporary + ".error()))", true, indentation + 1);
+            line("}", indentation);
+            auto payload = value->type.name == "void" ? "(void)0" : temporary + ".value()";
+            if (!value->convertTo.name.empty())
+                payload = convertedExpression(std::move(payload), value->type, value->convertTo);
+            propagationValues_[value.get()] = std::move(payload);
+            return;
+        }
+        if (value->kind == "conditional" || (value->kind == "binary" &&
+            (value->text == "&&" || value->text == "||"))) {
+            materializeExpression(value->children[0], indentation);
+            const auto condition = expression(value->children[0]);
+            const auto targetType = value->convertTo.name.empty() ? value->type : value->convertTo;
+            line("std::optional<" + cpp(targetType) + "> " + temporary + ";", indentation);
+            line("if (" + condition + ") {", indentation);
+            const auto common = propagationValues_;
+            const auto branch = [&](const Expr& arm, unsigned depth) {
+                materializeExpression(arm, depth);
+                auto emitted = expression(arm);
+                const auto actual = arm->convertTo.name.empty() ? arm->type : arm->convertTo;
+                emitted = convertedExpression(std::move(emitted), actual, targetType);
+                line(temporary + ".emplace(" + emitted + ");", depth);
+            };
+            if (value->kind == "conditional")
+                branch(value->children[1], indentation + 1);
+            else if (value->text == "&&")
+                branch(value->children[1], indentation + 1);
+            else
+                line(temporary + ".emplace(" + convertedExpression("true", Type{"bool", {}}, targetType) + ");", indentation + 1);
+            propagationValues_ = common;
+            line("} else {", indentation);
+            if (value->kind == "conditional")
+                branch(value->children[2], indentation + 1);
+            else if (value->text == "||")
+                branch(value->children[1], indentation + 1);
+            else
+                line(temporary + ".emplace(" + convertedExpression("false", Type{"bool", {}}, targetType) + ");", indentation + 1);
+            propagationValues_ = common;
+            line("}", indentation);
+            propagationValues_[value.get()] = "(*" + temporary + ")";
+            return;
+        }
+        if (value->kind == "call" || value->kind == "new_construct") {
+            prepareCallOperands(value, indentation);
+        } else if (value->kind == "named_construct") {
+            for (const auto& field : value->children)
+                materializeExpression(field->children[0], indentation);
+        } else {
+            for (const auto& child : value->children)
+                materializeExpression(child, indentation, borrow);
+        }
+        auto emitted = expressionValue(value);
+        if (!value->convertTo.name.empty())
+            emitted = convertedExpression(std::move(emitted), value->type, value->convertTo);
+        const auto type = value->convertTo.name.empty() ? value->type : value->convertTo;
+        if (type.name == "void") {
+            line(emitted + ";", indentation);
+            propagationValues_[value.get()] = "(void)0";
+        } else {
+            line(std::string(borrow ? "auto& " : "auto ") + temporary + " = " + emitted + ";", indentation);
+            propagationValues_[value.get()] = temporary;
+        }
+    }
+
+    void prepareCallOperands(const Expr& call, unsigned indentation) {
+        const auto& target = call->children[0];
+        if ((target->kind == "member" || target->kind == "generic_member") &&
+            !(workerEmission_ && call->statelessWorkerCall)) {
+            const auto& receiver = target->children[0];
+            if (receiver->kind != "type" && !receiver->type.name.empty()) {
+                const bool mutating = call->resolution == "list_add" || call->resolution.starts_with("collection_mutate_");
+                const auto objectField = mutating ? objectFieldRoot(receiver) : Expr{};
+                if (objectField) {
+                    if (objectField->kind == "member")
+                        materializeExpression(objectField->children[0], indentation);
+                } else {
+                    materializeExpression(receiver, indentation, mutating);
+                }
+            }
+        }
+        for (std::size_t index = 1; index < call->children.size(); ++index) {
+            materializeExpression(call->children[index], indentation);
+            if (call->resolution == "host_sync" || call->resolution == "host_sync_value" || call->resolution == "host") {
+                line("{", indentation);
+                line("using pipelang::model::validate;", indentation + 1);
+                line("validate(" + expression(call->children[index]) + ");", indentation + 1);
+                line("}", indentation);
+            }
+        }
+    }
+
+    bool continuesCurrentLoop(const std::vector<Statement>& body) const {
+        for (const auto& statement : body) {
+            if (statement.kind == "continue")
+                return true;
+            if (statement.kind == "while" || statement.kind == "for" ||
+                statement.kind == "foreach" || statement.kind == "parallel_foreach")
+                continue;
+            if (continuesCurrentLoop(statement.body) || continuesCurrentLoop(statement.alternative))
+                return true;
+        }
+        return false;
+    }
+
     void statements(const std::vector<Statement>& body, unsigned indentation) {
         for (const auto& statement : body) {
+            PropagationBindings bindings(propagationValues_);
             if (usesBudget_)
                 line("pl_budget.step();", indentation);
+            const bool propagating = hasPropagation(statement.expression) || hasPropagation(statement.target);
+            if (propagating && statement.kind == "local") {
+                // Keep expression temporaries at full-expression lifetime. A
+                // staging slot admits non-default-constructible Result values;
+                // the authored local owns the moved value after the slot resets.
+                const auto staging = propagationTemporary();
+                line("std::optional<" + cpp(statement.type) + "> " + staging + ";", indentation);
+                line("{", indentation);
+                prepareExpression(statement.expression, indentation + 1);
+                line(staging + ".emplace(" + expression(statement.expression) + ");", indentation + 1);
+                line("}", indentation);
+                line("[[maybe_unused]] " + cpp(statement.type) + " " + statement.name +
+                    " = std::move(*" + staging + ");", indentation);
+                line(staging + ".reset();", indentation);
+                continue;
+            }
+            if (propagating) {
+                line("{", indentation);
+                ++indentation;
+            }
+            if (statement.kind != "while" && statement.kind != "for" && statement.kind != "assign")
+                prepareExpression(statement.expression, indentation);
+            if (statement.kind == "assign" && propagating) {
+                const auto field = objectFieldRoot(statement.target);
+                if (field) {
+                    if (field->kind == "member")
+                        materializeExpression(field->children[0], indentation);
+                } else {
+                    materializeExpression(statement.target, indentation, true);
+                }
+                prepareExpression(statement.expression, indentation);
+            }
             if (statement.kind == "lock") {
                 emitLock(statement, indentation);
             } else if (statement.kind == "parallel_foreach") {
@@ -2280,23 +2536,59 @@ private:
                 const auto error = statement.expression ? expression(statement.expression) : statement.name;
                 line("pipelang::model::raiseError(" + error + ");", indentation);
             } else if (statement.kind == "break" || statement.kind == "continue") {
-                line(statement.kind + ";", indentation);
+                if (statement.kind == "continue" && !propagationContinueLabels_.empty() &&
+                    !propagationContinueLabels_.back().empty())
+                    line("goto " + propagationContinueLabels_.back() + ";", indentation);
+                else
+                    line(statement.kind + ";", indentation);
             } else if (statement.kind == "for") {
                 if (numericEmission_ && !nativeProjection_.countedLoops.contains(&statement))
                     throw Diagnostic("numeric for lacks a bounded counter proof", statement.offset);
                 line("{", indentation);
                 statements(statement.initialization, indentation + 1);
-                line("for (; " + expression(statement.expression) + "; [&]() {", indentation + 1);
-                statements(statement.iteration, indentation + 2);
-                line("}()) {", indentation + 1);
-                statements(statement.body, indentation + 2);
-                line("}", indentation + 1);
+                const bool propagationHeader = hasPropagation(statement.expression) ||
+                    std::any_of(statement.iteration.begin(), statement.iteration.end(),
+                        [&](const Statement& iteration) {
+                            return hasPropagation(iteration.expression) || hasPropagation(iteration.target);
+                        });
+                if (propagationHeader) {
+                    const auto label = "pl_iteration" + std::to_string(propagationSequence_++);
+                    line("while (true) {", indentation + 1);
+                    prepareExpression(statement.expression, indentation + 2);
+                    line("if (!(" + expression(statement.expression) + ")) break;", indentation + 2);
+                    line("{", indentation + 2);
+                    const bool needsContinueLabel = continuesCurrentLoop(statement.body);
+                    propagationContinueLabels_.push_back(needsContinueLabel ? label : "");
+                    statements(statement.body, indentation + 3);
+                    propagationContinueLabels_.pop_back();
+                    line("}", indentation + 2);
+                    if (needsContinueLabel)
+                        line(label + ":;", indentation + 2);
+                    statements(statement.iteration, indentation + 2);
+                    line("}", indentation + 1);
+                } else {
+                    line("for (; " + expression(statement.expression) + "; [&]() {", indentation + 1);
+                    statements(statement.iteration, indentation + 2);
+                    line("}()) {", indentation + 1);
+                    propagationContinueLabels_.push_back("");
+                    statements(statement.body, indentation + 2);
+                    propagationContinueLabels_.pop_back();
+                    line("}", indentation + 1);
+                }
                 line("}", indentation);
             } else if (statement.kind == "while") {
                 if (numericEmission_ && !nativeProjection_.countedLoops.contains(&statement))
                     throw Diagnostic("numeric while lacks a bounded counter proof", statement.offset);
-                line("while (" + expression(statement.expression) + ") {", indentation);
+                if (hasPropagation(statement.expression)) {
+                    line("while (true) {", indentation);
+                    prepareExpression(statement.expression, indentation + 1);
+                    line("if (!(" + expression(statement.expression) + ")) break;", indentation + 1);
+                } else {
+                    line("while (" + expression(statement.expression) + ") {", indentation);
+                }
+                propagationContinueLabels_.push_back("");
                 statements(statement.body, indentation + 1);
+                propagationContinueLabels_.pop_back();
                 line("}", indentation);
             } else if (statement.kind == "foreach") {
                 const auto suffix = std::to_string(loopSequence_++);
@@ -2307,6 +2599,10 @@ private:
                     if (!nativeProjection_.arrayLoops.contains(&statement))
                         throw Diagnostic("numeric foreach lacks a fixed-length proof", statement.offset);
                     line("for (auto " + statement.name + " : " + snapshot + ") {", indentation + 1);
+                } else if (statement.expression->type.name == "ByteBuffer") {
+                    // Storage bytes are uint8_t; the language element is uint32.
+                    // Keep that widening explicit for overloads and bitwise operations.
+                    line("for (std::uint32_t " + statement.name + " : " + snapshot + ".values()) {", indentation + 1);
                 } else if (statement.itemConvertTo.name.empty()) {
                     line("for (auto " + statement.name + " : " + snapshot + ".values()) {", indentation + 1);
                 } else {
@@ -2315,7 +2611,9 @@ private:
                 }
                 if (usesBudget_)
                     line("pl_budget.step();", indentation + 2);
+                propagationContinueLabels_.push_back("");
                 statements(statement.body, indentation + 2);
+                propagationContinueLabels_.pop_back();
                 line("}", indentation + 1);
                 line("}", indentation);
             } else if (statement.kind == "block") {
@@ -2331,30 +2629,15 @@ private:
                 }
                 line("}", indentation);
             } else if (statement.kind == "return") {
-                if (method_->pure || internalEffect_ || observationEmission_) {
-                    line("return" + (statement.expression ? " " + expression(statement.expression) : "") + ";", indentation);
-                } else {
-                    if (statement.expression)
-                        line("auto pl_return = " + expression(statement.expression) + ";", indentation);
-                    if (method_->asynchronous && hasFinally(method_->body))
-                        line("pl_returnCommit.arm();", indentation);
-                    else
-                        line(commitStatement(), indentation);
-                    if (method_->constructor) {
-                        line("return;", indentation);
-                    } else if (method_->asynchronous) {
-                        line("co_return pl_return;", indentation);
-                    } else if (method_->result.name == "Result") {
-                        line("return pl_return;", indentation);
-                    } else {
-                        line("return " + cpp(actionResult(*method_)) + "::Success(" +
-                             (statement.expression ? "std::move(pl_return)" : "") + ");", indentation);
-                    }
-                }
+                emitReturnValue(statement.expression ? expression(statement.expression) : "",
+                    static_cast<bool>(statement.expression), indentation);
             } else if (statement.kind == "expression" && statement.expression->kind != "await") {
                 line(expression(statement.expression) + ";", indentation);
             } else if (statement.expression->kind == "await") {
-                emitAwait(statement, indentation);
+                if (propagationValues_.contains(statement.expression.get()))
+                    storeAwaited(statement, expression(statement.expression), indentation);
+                else
+                    emitAwait(statement, indentation);
             } else if (statement.kind == "assign" && objectFieldRoot(statement.target)) {
                 emitObjectAssignment(statement.target, expression(statement.expression), indentation);
             } else if (statement.kind == "local") {
@@ -2369,6 +2652,10 @@ private:
                 }
             } else {
                 emitValueAssignment(statement.target, expression(statement.expression), indentation);
+            }
+            if (propagating) {
+                --indentation;
+                line("}", indentation);
             }
         }
     }
@@ -2929,7 +3216,7 @@ private:
         else
             line("auto pl_return = " + invocation + ";", 3);
         line(commitStatement(), 3);
-        if (method.result.name == "Result")
+        if (actionResult(method) == method.result)
             line("return pl_return;", 3);
         else
             line("return " + result + "::Success(" + (method.result.name == "void" ? "" : "std::move(pl_return)") + ");", 3);
@@ -2967,6 +3254,9 @@ private:
         line("});", 3);
         endMember();
     }
+    std::map<const Expression*, std::string> propagationValues_;
+    std::vector<std::string> propagationContinueLabels_;
+    std::size_t propagationSequence_ = 0;
     const Program& program_;
     mutable std::map<std::string, bool> typeUsage_;
     bool numericEmission_ = false;
@@ -3062,7 +3352,7 @@ std::string cppType(const Type& type, const Program& program) {
     if (type.name == "FixedArray")
         return "pipelang::model::FixedArray<" + cppType(type.arguments.front(), program) + ", " +
             std::to_string(type.fixedExtent.value()) + ">";
-    if (type.name == "Task" || type.name == "Result" || type.name == "Optional" || type.name == "List" ||
+    if (type.name == "Task" || type.name == "Result" || type.name == "IResult" || type.name == "Optional" || type.name == "List" ||
         type.name == "Atomic" || type.name == "Array" || type.name == "Dictionary" || type.name == "HashSet" ||
         type.name == "Queue" || type.name == "Stack" || type.name == "KeyValuePair" ||
         isConcurrentCollection(type.name)) {

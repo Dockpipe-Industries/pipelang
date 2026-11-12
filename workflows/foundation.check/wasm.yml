@@ -1,0 +1,10 @@
+name: pipelang-foundation-wasm-check
+description: Verify qualified foundation output under a checksum-admitted WASM runtime SDK.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: wasm
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/foundation.check/assets/scripts/wasm.sh

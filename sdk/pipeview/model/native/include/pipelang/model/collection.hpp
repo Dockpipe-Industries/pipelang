@@ -22,6 +22,8 @@ inline constexpr std::size_t boundedOwnedSum(std::size_t left, std::size_t right
     return left + right;
 }
 
+template<class E> std::size_t ownedBytes(const IResult<E>& value);
+template<class E> std::size_t ownedElements(const IResult<E>& value);
 template<class T> class List;
 template<class T, std::size_t N> class FixedArray;
 // These declarations must precede every wrapper's dependent recursive calls in

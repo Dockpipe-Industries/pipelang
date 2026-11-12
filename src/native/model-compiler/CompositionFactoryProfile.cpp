@@ -161,7 +161,7 @@ bool CompositionFactoryProfile::ownedValue(const Type& type) const {
     if (owner)
         return (owner->kind == "Record" || owner->kind == "Enum") && type.arguments.empty();
     static const std::set<std::string> values{
-        "Optional", "Result", "List", "Array", "Dictionary", "Queue", "Stack", "KeyValuePair"};
+        "Optional", "Result", "IResult", "List", "Array", "Dictionary", "Queue", "Stack", "KeyValuePair"};
     return values.contains(type.name) && !type.arguments.empty() &&
         std::all_of(type.arguments.begin(), type.arguments.end(),
             [&](const Type& argument) { return ownedValue(argument); });
@@ -366,8 +366,6 @@ void CompositionFactoryProfile::admit() {
                                 (parameter.type.name == "CancellationToken" && parameter.type.arguments.empty());
                         }))
                     refuse(origin, "exported facade methods require nongeneric owned-value signatures");
-                if (returned.name == "Result" && returned.arguments.at(1).name != "string")
-                    refuse(origin, "typed nonstring Result errors require a later facade profile");
             }
         }
     }

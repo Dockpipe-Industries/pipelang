@@ -422,7 +422,9 @@ private:
     std::string facadeResult(const Method& method) const {
         if (method.asynchronous)
             return result(cpp(method.result));
-        return method.result.name == "Result" ? cpp(method.result) : result(cpp(method.result));
+        if (method.result.name == "Result" && method.result.arguments.at(1).name == "string")
+            return cpp(method.result);
+        return result(cpp(method.result));
     }
     void bootstrap(const CompositionGraph& graph, const std::string& name) {
         const auto rootResult = result("std::shared_ptr<" + name + "::Root>");
@@ -634,7 +636,7 @@ private:
                     "(pl_execution, pl_receiver" + arguments(method) + ", pl_taskCancellation);", 4);
                 line("});", 3);
                 catches(returned);
-            } else if (method.result.name != "Result")
+            } else if (method.result.name != "Result" || method.result.arguments.at(1).name != "string")
                 line("return pl_context->invoke<" + cpp(method.result) + ">(pl_cancellation, [&](pipelang::model::ObjectExecution& pl_execution) { return " + call + "; });", 1);
             else {
                 line("auto pl_outcome = pl_context->invoke<" + cpp(method.result) + ">(pl_cancellation, [&](pipelang::model::ObjectExecution& pl_execution) { return " + call + "; });", 1);

@@ -108,6 +108,10 @@ private:
     std::optional<T> value_;
 };
 
+template<class E>
+class IResult;
+template<class E>
+void validate(const IResult<E>& value);
 template<class T>
 class List;
 template<class T, std::size_t N>

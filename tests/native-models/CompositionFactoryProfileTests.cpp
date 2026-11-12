@@ -104,14 +104,19 @@ public composition Startup { singleton Service = Service; export Service; }
 public Class Service { public Service() { } public int Read() => 1; }
 public composition Startup { singleton input Service; export Service; }
 )pipe", "borrowed source references");
-    refused(R"pipe(
+    const auto typed = factory(R"pipe(
 public Enum Failure { Broken }
 public Class Service {
     public Service() { }
     public Result<int,Failure> Read() { return Result<int,Failure>.Failure(Failure.Broken); }
 }
 public composition Startup { singleton Service = Service; export Service; }
-)pipe", "typed nonstring Result errors");
+)pipe");
+    const auto header = typed.at("composition_factory_header").get<std::string>();
+    require(header.find("Result<pipelang::model::Result<") != std::string::npos,
+            "typed domain errors lost the separate invocation Result boundary");
+    require(header.find("return pl_context->invoke<pipelang::model::Result<") != std::string::npos,
+            "typed domain errors were flattened into invocation strings");
 }
 
 void constructorEffects() {

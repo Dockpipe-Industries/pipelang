@@ -76,7 +76,7 @@ compares identity across concrete and source-interface views.
 public parameter/return types and pure/async contracts exactly. Source interfaces
 admit pure queries, synchronous effects and existing async `Task<Result<...>>`
 methods. Host interfaces retain constructor-injected native services: synchronous
-`Result<T,string>` methods and [pure owned-value returns](pipelang-pure-host-values.md)
+`Result<T,E>` methods with string, enum or owned-record errors and [pure owned-value returns](pipelang-pure-host-values.md)
 execute on the owner thread, while asynchronous `Task<Result<T,string>>` methods
 retain host-worker awaits. Source classes cannot
 implement that external boundary. See the [synchronous host-call contract](../../src/native/model-compiler/README.md#synchronous-injected-host-calls)

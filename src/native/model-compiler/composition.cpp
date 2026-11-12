@@ -28,7 +28,7 @@ using Substitutions = std::map<std::string, Type>;
 bool builtin(const std::string& name) {
     static const std::set<std::string> names = {
         "void", "bool", "int", "uint32", "float", "float32", "string", "ByteBuffer", "Error", "CancellationToken",
-        "Result", "Task", "Optional", "List", "Atomic", "Array", "FixedArray", "Dictionary",
+        "Result", "IResult", "Task", "Optional", "List", "Atomic", "Array", "FixedArray", "Dictionary",
         "HashSet", "Queue", "Stack", "KeyValuePair",
         "ConcurrentDictionary", "ConcurrentQueue", "ConcurrentStack", "Lock", "SemaphoreSlim"
     };

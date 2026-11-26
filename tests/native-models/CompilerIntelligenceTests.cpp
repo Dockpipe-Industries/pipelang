@@ -8,6 +8,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -104,8 +105,8 @@ std::vector<ModuleSource> modules() {
     return {{"Library", library, "lib/Library.pipe"}, {"Consumer", entry, "app/App.pipe"}};
 }
 
-const Json& methodNamed(const Json& analysis, const std::string& owner, const std::string& name,
-                        const std::string& parameterType = {}) {
+const Json& methodNamed(const Json& analysis, std::string_view owner, std::string_view name,
+                        std::string_view parameterType = {}) {
     const Json* result = nullptr;
     for (const auto& method : analysis.at("methods")) {
         if (method.at("owner") != owner || method.at("name") != name)
@@ -115,19 +116,19 @@ const Json& methodNamed(const Json& analysis, const std::string& owner, const st
             method.at("parameters").at(0).at("type") != parameterType))
             continue;
 
-        require(result == nullptr, "method lookup is ambiguous: " + owner + '.' + name);
+        require(result == nullptr, "method lookup is ambiguous: " + std::string(owner) + '.' + std::string(name));
         result = &method;
     }
-    require(result != nullptr, "missing checked method: " + owner + '.' + name);
+    require(result != nullptr, "missing checked method: " + std::string(owner) + '.' + std::string(name));
     return *result;
 }
 
-const Json& typeNamed(const Json& analysis, const std::string& identity) {
+const Json& typeNamed(const Json& analysis, std::string_view identity) {
     const auto& types = analysis.at("types");
     const auto found = std::find_if(types.begin(), types.end(), [&](const Json& type) {
         return type.at("id") == identity;
     });
-    require(found != types.end(), "missing authored type: " + identity);
+    require(found != types.end(), "missing authored type: " + std::string(identity));
     return *found;
 }
 

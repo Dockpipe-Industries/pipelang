@@ -1,6 +1,7 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "NativeFixedArrayFixture.hpp"
 #include "../../src/native/sdk-tools/SourceProject.hpp"
+#include <chrono>
 #include <set>
 #include <utility>
 #include <vector>
@@ -8,9 +9,10 @@
 namespace {
 using namespace pipelang::tools;
 
-void invoke(const std::vector<std::string>& command)
+void invoke(const std::vector<std::string>& command,
+            std::chrono::seconds timeout = std::chrono::seconds(90))
 {
-    const auto result = process(command, {}, std::chrono::seconds(90), 4U << 20);
+    const auto result = process(command, {}, timeout, 4U << 20);
     require(result.exit == 0, "fixed array fixture failed (" + std::to_string(result.exit) + "): " + result.output + result.diagnostic);
 }
 }
@@ -726,16 +728,19 @@ target_compile_options(fixed_arrays PRIVATE -frounding-math)
         "-G", "Ninja", "-DCMAKE_EXE_LINKER_FLAGS=-static",
 #endif
         "-DCMAKE_BUILD_TYPE=Release"});
-    // Separate the generated library from the consumers so each build keeps
-    // its own existing deadline while Ninja reuses the completed dependencies.
-    for (const auto* target : {"fixed_compiled_implementation", "fixed_arrays", "fixed_array_headers"}) {
+    const auto buildTarget = [&](const char* target, std::chrono::seconds timeout) {
         try {
             invoke({nativeTool("cmake").string(), "--build", (output / "initial-normal").string(),
-                "--target", target, "--parallel", "1"});
+                "--target", target, "--parallel", "1"}, timeout);
         } catch (const std::exception& error) {
             throw std::runtime_error("fixed array build target " + std::string(target) + ": " + error.what());
         }
-    }
+    };
+    // A clean hosted Windows build compiles all generated units serially.
+    // Allow that library build more time within the enclosing 900-second unit.
+    buildTarget("fixed_compiled_implementation", std::chrono::minutes(4));
+    buildTarget("fixed_arrays", std::chrono::seconds(90));
+    buildTarget("fixed_array_headers", std::chrono::seconds(90));
     invoke({nativeExecutable(output / "initial-normal/fixed_arrays").string()});
     invoke({nativeExecutable(output / "initial-normal/fixed_array_headers").string()});
 #if defined(__SSE2__)

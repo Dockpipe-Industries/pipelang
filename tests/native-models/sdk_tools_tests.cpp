@@ -712,6 +712,7 @@ int main() {
 
 int main(int argc, char** argv) {
     using namespace pipelang::tools;
+    const char* sdkCheck = nullptr;
     try {
         const auto name = fs::path(argv[0]).stem().string();
         if (name == "fake-model" || name == "fake-view")
@@ -785,20 +786,32 @@ int main(int argc, char** argv) {
         require(!fs::exists(output), "test output must be fresh");
         fs::create_directories(output);
         const auto self = fs::canonical(argv[0]);
+        sdkCheck = "static method manifests";
         staticMethodManifestContracts();
+        sdkCheck = "process and filesystem primitives";
         primitiveContracts(output, self);
+        sdkCheck = "SDK admission and publication";
         admissionAndPublication(output, self);
+        sdkCheck = "source-set admission";
         sourceSetAdmission(output, self);
+        sdkCheck = "installed SDK consumer";
         installedSdk(argv[1], argv[2], output);
+        sdkCheck = "installed source-set consumer";
         installedSourceSet(argv[1], argv[2], output);
+        sdkCheck = "native numeric exports";
         nativeNumericExportContracts(argv[2], output / "native-numeric");
+        sdkCheck = "SDK projects";
         projectContracts(argv[2], output / "projects");
+        sdkCheck = "SDK project modules";
         projectModuleContracts(argv[2], output / "module-parts");
+        sdkCheck = "SDK test receipt";
         atomicWrite(output / "acceptance.json", canonical({{"status", "passed"}, {"refusals", refusals},
             {"native_sdk_install_and_consume", true}, {"python_discovery_disabled", true}}));
         std::cout << refusals << " native SDK/tooling refusals; installed consumer passed\n";
         return 0;
     } catch (const std::exception& error) {
+        if (sdkCheck != nullptr)
+            std::cerr << sdkCheck << ": ";
         std::cerr << error.what() << '\n';
         return 1;
     }

@@ -736,11 +736,12 @@ target_compile_options(fixed_arrays PRIVATE -frounding-math)
             throw std::runtime_error("fixed array build target " + std::string(target) + ": " + error.what());
         }
     };
-    // A clean hosted Windows build compiles all generated units serially.
-    // Allow that library build more time within the enclosing 900-second unit.
-    buildTarget("fixed_compiled_implementation", std::chrono::minutes(4));
-    buildTarget("fixed_arrays", std::chrono::seconds(90));
-    buildTarget("fixed_array_headers", std::chrono::seconds(90));
+    // Hosted Windows compiles the generated library and its consumers serially.
+    // Keep each build bounded by the enclosing SDK unit's original deadline.
+    constexpr auto generatedBuildTimeout = std::chrono::minutes(4);
+    buildTarget("fixed_compiled_implementation", generatedBuildTimeout);
+    buildTarget("fixed_arrays", generatedBuildTimeout);
+    buildTarget("fixed_array_headers", generatedBuildTimeout);
     invoke({nativeExecutable(output / "initial-normal/fixed_arrays").string()});
     invoke({nativeExecutable(output / "initial-normal/fixed_array_headers").string()});
 #if defined(__SSE2__)

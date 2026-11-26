@@ -16,7 +16,15 @@ thread_local bool countAllocations = false;
 std::atomic<std::size_t> allocationCount{0};
 }
 
-void* operator new(std::size_t bytes) {
+#if defined(_MSC_VER)
+#define PIPELANG_TEST_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define PIPELANG_TEST_NOINLINE __attribute__((noinline))
+#else
+#define PIPELANG_TEST_NOINLINE
+#endif
+
+PIPELANG_TEST_NOINLINE void* operator new(std::size_t bytes) {
     if (countAllocations)
         allocationCount.fetch_add(1, std::memory_order_relaxed);
     if (void* memory = std::malloc(bytes == 0 ? 1 : bytes))
@@ -24,11 +32,13 @@ void* operator new(std::size_t bytes) {
     throw std::bad_alloc();
 }
 
-void* operator new[](std::size_t bytes) { return ::operator new(bytes); }
-void operator delete(void* memory) noexcept { std::free(memory); }
-void operator delete[](void* memory) noexcept { std::free(memory); }
-void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
-void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
+PIPELANG_TEST_NOINLINE void* operator new[](std::size_t bytes) { return ::operator new(bytes); }
+PIPELANG_TEST_NOINLINE void operator delete(void* memory) noexcept { std::free(memory); }
+PIPELANG_TEST_NOINLINE void operator delete[](void* memory) noexcept { std::free(memory); }
+PIPELANG_TEST_NOINLINE void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+PIPELANG_TEST_NOINLINE void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
+
+#undef PIPELANG_TEST_NOINLINE
 
 using namespace pipelang::model;
 using namespace pipelang_list_reads;

@@ -1,5 +1,7 @@
 schema: 1
 routes:
+  - task: source-testing-framework
+    read: [docs/agents/tasks/source-testing-framework-20261114.md, sdk/libraries/testing/README.md, docs/agents/core/validation.md]
   - task: compiler-or-sdk
     read: [docs/agents/core/architecture.md, docs/agents/core/validation.md]
   - task: workflows

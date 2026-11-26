@@ -185,10 +185,13 @@ void verifyProducerPolicy(const fs::path& build, bool sanitizer) {
     const auto commands = parseJson(readFile(build / "compile_commands.json", 4U << 20));
     std::size_t implementations = 0;
     std::size_t owners = 0;
+    std::size_t precompiledHeaders = 0;
     for (const auto& entry : commands) {
         const auto file = fs::path(entry.at("file").get<std::string>()).filename().string();
         if (file.starts_with("Implementation_"))
             ++implementations;
+        else if (file == "cmake_pch.hxx.cxx")
+            ++precompiledHeaders;
         else if (file == "NativeCounter.cpp")
             ++owners;
         else
@@ -204,7 +207,8 @@ void verifyProducerPolicy(const fs::path& build, bool sanitizer) {
                         "compiled owner lost sanitizer policy: " + std::string(required));
         }
     }
-    require(implementations != 0 && owners == 1, "compiled owner policy coverage is incomplete");
+    require(implementations != 0 && owners == 1 && precompiledHeaders == 1,
+            "compiled owner policy coverage is incomplete");
 }
 
 }

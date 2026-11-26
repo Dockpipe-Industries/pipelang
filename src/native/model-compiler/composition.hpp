@@ -13,6 +13,10 @@ Program linkModules(const std::vector<ModuleSource>& sources, const std::string&
 // The ordinary checker remains responsible for all concrete expression semantics.
 void normalizeComposition(Program& program);
 
+// Specialize generic instance calls on demand from the ordinary typed checker.
+// Failed discovery trials never retain partially checked semantic metadata.
+void normalizeAndCheckComposition(Program& program);
+
 // Clone all mutable expression trees before independent semantic checking.
 Declaration cloneDeclaration(const Declaration& declaration);
 

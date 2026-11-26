@@ -27,6 +27,15 @@ struct ModuleSource {
     std::string path = {};
 };
 
+// Compile-time semantic queries use the same closed project linker and checker.
+// Ranges are UTF-8 byte offsets in each caller-supplied source fragment.
+nlohmann::json formatSource(const std::string& source, unsigned tabSize, bool insertSpaces,
+                            std::size_t rangeStart, std::size_t rangeEnd);
+
+nlohmann::json indexProjectSources(const std::vector<ModuleSource>& sources);
+
+nlohmann::json analyzeProjectModules(const std::vector<ModuleSource>& modules, const std::string& entry);
+
 nlohmann::json compile(const std::string& source, const std::string& nameSpace);
 nlohmann::json compileModules(const std::vector<ModuleSource>& modules, const std::string& entry,
                               const std::string& nameSpace);

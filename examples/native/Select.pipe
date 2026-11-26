@@ -1,0 +1,11 @@
+public Class Selection {
+    public static pure int Select(int input) {
+        var result = 7;
+        var accepted = input >= 39;
+        if (accepted) {
+            result = 42;
+        }
+
+        return result;
+    }
+}

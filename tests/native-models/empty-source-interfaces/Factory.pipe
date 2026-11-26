@@ -1,0 +1,43 @@
+module EmptyFactory;
+
+public source Interface IEmpty {
+    int Read();
+}
+
+public Class Service {
+    public Service() {
+        int count = Count(List<IEmpty>.Empty(), 2);
+    }
+
+    private int Count(List<IEmpty> entries, int depth) {
+        if (depth == 0)
+            return 0;
+        foreach (IEmpty entry in entries) {
+            int ignored = entry.Read();
+        }
+        return Count(entries, depth - 1);
+    }
+
+    public int Read() => 23;
+}
+
+public Class ServiceFactory {
+    public Result<Service,string> Create() {
+        List<IEmpty> entries = List<IEmpty>.Empty();
+        foreach (IEmpty entry in entries) {
+            int ignored = entry.Read();
+        }
+        return Result<Service,string>.Success(new Service());
+    }
+}
+
+public composition Startup {
+    singleton ServiceFactory = ServiceFactory;
+    scoped Service = factory ServiceFactory.Create;
+    export Service;
+}
+
+public composition ConstructorStartup {
+    singleton Service = Service;
+    export Service;
+}

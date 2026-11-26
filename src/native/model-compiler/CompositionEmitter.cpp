@@ -163,16 +163,8 @@ private:
                     validateArgument(type, "pl_receiver", 2);
                     for (std::size_t index = 0; index < method.parameters.size(); ++index)
                         validateArgument(method.parameters[index].type, "pl_argument_" + std::to_string(index), 2);
-                    if (method.asynchronous) {
-                        for (std::size_t index = 0; index < method.parameters.size(); ++index) {
-                            if (method.parameters[index].type.name == "CancellationToken")
-                                line("pl_taskCancellation = pipelang::model::CancellationToken::combine(pl_taskCancellation, pl_argument_" + std::to_string(index) + ");", 2);
-                        }
-                        for (std::size_t index = 0; index < method.parameters.size(); ++index) {
-                            if (method.parameters[index].type.name == "CancellationToken")
-                                line("pl_argument_" + std::to_string(index) + " = pl_taskCancellation;", 2);
-                        }
-                    }
+                    // Authored tokens remain independent of the native task
+                    // boundary. Concrete operations choose which token to use.
                     const Type owner{entry.owner->name, {}, entry.owner->sourceName};
                     auto function = bindings_.callable(method.identity);
                     if (entry.owner->kind == "Class" && method.virtualMethod)
@@ -621,10 +613,7 @@ private:
                 "(pl_execution, pl_reference_" + arguments(method) + ")";
             if (method.asynchronous) {
                 line("try {", 1);
-                for (std::size_t index = 0; index < method.parameters.size(); ++index) {
-                    if (method.parameters[index].type.name == "CancellationToken")
-                        line("pl_cancellation = pipelang::model::CancellationToken::combine(pl_cancellation, pl_argument_" + std::to_string(index) + ");", 2);
-                }
+                // Only the separate boundary token controls task admission.
                 std::string captures = "pl_receiver = pl_reference_";
                 for (std::size_t index = 0; index < method.parameters.size(); ++index) {
                     const auto argument = "pl_argument_" + std::to_string(index);

@@ -26,6 +26,7 @@ public:
     bool ownedValue(const Type& type) const;
 
 private:
+    bool closedSourceInterfaceCall(const Expr& expression, const CompositionOrigin& origin) const;
     void work(const CompositionOrigin& origin);
     void inspectMethod(const Method& method, const CompositionOrigin& origin);
     void inspectExpression(const Expr& expression, const CompositionOrigin& origin);

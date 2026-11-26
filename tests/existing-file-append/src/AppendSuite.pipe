@@ -1,0 +1,40 @@
+module PipeLang.IO.AppendTests;
+import PipeLang.IO;
+import PipeLang.Testing;
+
+public Record AppendResults {
+    public bool allPassed = false;
+    public List<TestResult> results;
+}
+
+public model Class AppendSuite {
+    private ExistingFileAppend output;
+    private FileStreams input;
+    private AppendFixture fixture;
+
+    public AppendSuite(ExistingFileAppend output, FileStreams input, AppendFixture fixture) {
+        this.output = output;
+        this.input = input;
+        this.fixture = fixture;
+    }
+
+    public AppendResults Run(CancellationToken token, CancellationToken preCancelled, CancellationToken postWrite) {
+        TestRunner runner = new TestRunner();
+        List<TestResult> results = List<TestResult>.Empty();
+        for (int scenario = 0; scenario < 9; scenario = scenario + 1) {
+            AppendCase selected = new AppendCase(output, input, fixture, scenario);
+            if (scenario == 5)
+                results.Add(runner.RunProbe(selected, token, postWrite));
+            else
+                results.Add(runner.RunProbe(selected, token, preCancelled));
+        }
+
+        bool allPassed = results.Count == 9;
+        foreach (TestResult result in results) {
+            if (result.outcome != TestOutcome.Passed || !result.bodyRan || !result.cleanupRan)
+                allPassed = false;
+        }
+
+        return AppendResults(allPassed, results);
+    }
+}

@@ -406,6 +406,18 @@ public:
         return result;
     }
 
+    template<class Visitor>
+    void visitKeys(const Visitor& visit) const {
+        for (const auto& entry : entries_)
+            visit(entry->key);
+    }
+
+    template<class Visitor>
+    void visitEntry(std::int64_t index, const Visitor& visit) const {
+        const auto& entry = entries_[collections_detail::indexOf(index, entries_.size())];
+        visit(entry->key, entry->value);
+    }
+
     List<V> mappedValues() const {
         auto result = List<V>::Empty();
         for (const auto& entry : entries_)
@@ -481,16 +493,19 @@ public:
     std::vector<T> values() const {
         std::vector<T> result;
         result.reserve(static_cast<std::size_t>(count()));
-        for (const auto& entry : items_.values())
-            result.push_back(entry.key);
+        visitValues([&](const T& value) { result.push_back(value); });
         return result;
     }
 
     List<T> items() const {
         auto result = List<T>::Empty();
-        for (const auto& value : values())
-            result.add(value);
+        visitValues([&](const T& value) { result.add(value); });
         return result;
+    }
+
+    template<class Visitor>
+    void visitValues(const Visitor& visit) const {
+        items_.visitKeys(visit);
     }
 
     std::size_t ownedByteCost() const {

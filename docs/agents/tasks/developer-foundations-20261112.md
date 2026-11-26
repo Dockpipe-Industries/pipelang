@@ -282,3 +282,65 @@ provenance. They are local composite candidates, not default installs or release
 No callable/lambda, LINQ, ORM, consumer rewrite, pin/default SDK switch, deployment
 or migration is implied by this interface checkpoint. Custom JS/TS Result interop
 stays typed and unchanged; opaque interface serialization is explicitly refused.
+
+## Context ownership and publication — locally qualified
+
+2026-11-13: owner priority changed from further Billing porting to removing manual
+presentation epochs/revisions/request matching. Source `ContextOwner` is an opaque,
+private, scope-owned resource. Creation and replacement produce new immutable
+invocation authority; invalidation, model shutdown and owner destruction revoke it.
+A pure zero-argument getter exposes identity to the optional binding framework,
+not a serializable value or numeric concurrency token. Source admission rejects
+resource DTOs, containers, export parameters and worker capture.
+
+The headless runtime captures authority at task admission and each owner resumption.
+Owned-value and graph transactions validate the captured permit before publication.
+Independent operation lanes select latest-wins or reject-busy admission, and retired
+operations cannot acquire new authority from a later context. No context allocation
+is added to ordinary scopes that never create one. Revocation observers, operation
+receivers and captured target slots have explicit bounds and owner-thread rules.
+
+The optional Qt framework binds fresh contextual models or shared controller state,
+captures DTO targets before dispatch, resolves transport correlations within their
+prototype and retires projections/model data when authority expires. Custom JS/TS
+transport remains supported. UUID transport labels are opaque routing metadata;
+application Source does not generate counters, compare epochs or propagate labels
+through DTO methods. Projection failures require their own revocable publication
+lifetime so a later successful projection starts with fresh private view state.
+
+Database row versions, ticket versions and business idempotency remain application
+contracts. Revoking UI publication does not undo an external effect or replace an
+authoritative committed mutation receipt with cancellation. Source async effect
+APIs must preserve that separation; these UI bindings do not claim durable-effect
+rollback or database locking.
+
+Local qualification passed through `workflows/context.check/{config,refresh,qt,wasm}.yml`
+and the Cloud context workflows. Native-v3 qualifies the final core lifetime
+implementation; native-v7, Qt-v7 and WASM-v7 qualify the current generated binding
+layer and composite SDKs. Compiler/Source profiles, ordinary allocation regression,
+normal and ASan/UBSan/LSan runtime fixtures and actual Source/WASM execution pass.
+Cloud passes 27 normal and 27 bounded-profile sanitizer consumer suites, plus
+597 actual Qt/WASM presentation and 108 Knowledge reader browser assertions.
+The consumer sanitizer profile explicitly uses 32 MiB global/128 KiB per-thread
+quarantine, with leak detection, assertions and containment unchanged; its shorter
+temporal UAF history is recorded separately from the retained default-profile timeout.
+
+Proof and exact candidate/component mapping:
+`/tmp/view-context-ownership-20261113/REPORT.md`. All expected process trees are
+reaped and input/artifact hashes verified. Candidates do not switch the default
+SDK or consumer pins. Windows/macOS, hosted qualification and release remain open.
+Root projection notifications are not lifetime loss; callers observe native
+context retirement for private-state cleanup. The actual Cloud browser regression
+verifies ordinary root updates retain accepted details and drafts while actual
+revocation clears private state.
+
+Permanent controller commands use explicit captured supervisor admission. Only a
+current operation can capture its exact unbound root prototype. Admission is
+checked immediately before the synchronous Source call; the root owns its state
+transaction independently of its child view publication. A root can therefore
+rotate child contexts and commit an access reset, with a domain operation outcome
+and a cancelled old UI projection. Expired supervisors cannot enter a newer root.
+Ordinary operation/DTO aliases retain strict captured-publication guards; converting
+a supervisor to an ordinary operation alias does not retain supervisor semantics.
+This is an owning-controller boundary, not an application epoch check or a database
+transaction feature. Qt async methods remain outside this synchronous binding profile.

@@ -8,6 +8,9 @@
 #include "../../src/native/sdk-tools/bindings.hpp"
 
 #include <map>
+#include <regex>
+#include <set>
+#include <sstream>
 
 namespace {
 
@@ -220,13 +223,50 @@ void verifyCompiledProjectPolicy(const std::filesystem::path& build, bool saniti
     require(commands.is_array() && !commands.empty(), "compiled fixture has no compile commands");
     std::size_t implementations = 0;
     std::size_t consumers = 0;
+    std::size_t precompiledHeaders = 0;
+    std::size_t unityUnits = 0;
+    std::set<fs::path> expectedImplementations;
+    std::istringstream sourceList(readFile(build / "implementation-sources.txt", 4U << 20));
+    std::string source;
+    while (std::getline(sourceList, source)) {
+        if (!source.empty()) {
+            require(expectedImplementations.insert(fs::path(source).lexically_normal()).second,
+                "canonical implementation inventory contains a duplicate");
+        }
+    }
+    require(!expectedImplementations.empty(), "compiled fixture lost its canonical implementation inventory");
+    std::set<fs::path> compiledImplementations;
+    const std::regex unityInclude(R"include(^#include "([^"]+)")include", std::regex::multiline);
+    const auto recordImplementation = [&](const fs::path& implementation) {
+        const auto normalized = implementation.lexically_normal();
+        require(expectedImplementations.contains(normalized), "compiled an unowned implementation source");
+        require(compiledImplementations.insert(normalized).second, "compiled an implementation source more than once");
+        ++implementations;
+    };
     for (const auto& entry : commands) {
-        const auto file = fs::path(entry.at("file").get<std::string>()).filename().string();
+        const auto sourcePath = fs::path(entry.at("file").get<std::string>());
+        const auto file = sourcePath.filename().string();
         const bool implementation = file.starts_with("Implementation_");
-        if (implementation)
-            ++implementations;
-        else
+        if (implementation) {
+            recordImplementation(sourcePath);
+        } else if (file.starts_with("unity_") && file.ends_with("_cxx.cxx")) {
+            const auto contents = readFile(sourcePath, 4U << 20);
+            std::size_t members = 0;
+            for (auto include = std::sregex_iterator(contents.begin(), contents.end(), unityInclude);
+                 include != std::sregex_iterator(); ++include) {
+                fs::path member = (*include)[1].str();
+                if (!member.is_absolute())
+                    member = sourcePath.parent_path() / member;
+                recordImplementation(member);
+                ++members;
+            }
+            require(members > 0 && members <= 2, "compiled implementation batch is not a bounded pair");
+            ++unityUnits;
+        } else if (file == "cmake_pch.hxx.cxx") {
+            ++precompiledHeaders;
+        } else {
             ++consumers;
+        }
         const auto command = entry.at("command").get<std::string>();
         for (const auto& required : {"PIPELANG_COMPILED_DEFINITION=17", "PIPELANG_COMPILED_OPTION=23",
              "PIPELANG_COMPILED_TRANSITIVE_DEFINITION=19", "PIPELANG_COMPILED_TRANSITIVE_OPTION=31",
@@ -240,8 +280,10 @@ void verifyCompiledProjectPolicy(const std::filesystem::path& build, bool saniti
                         "sanitizer policy missing from " + file + ": " + required);
         }
     }
-    require(implementations > 0 && consumers == 4,
-            "compiled policy audit did not cover every implementation and both consumer routes");
+    require(compiledImplementations == expectedImplementations && consumers == 4 &&
+            precompiledHeaders == 1 && unityUnits > 0,
+            "compiled policy audit missed an owned source, paired build, private header cache or consumer route");
     atomicWrite(build / "compile-policy-acceptance.json", canonical({{"status", "passed"},
-        {"instrumented", sanitizer}, {"implementation_units", implementations}, {"consumer_units", consumers}}));
+        {"instrumented", sanitizer}, {"implementation_units", implementations}, {"consumer_units", consumers},
+        {"precompiled_header_units", precompiledHeaders}, {"paired_compile_units", unityUnits}}));
 }

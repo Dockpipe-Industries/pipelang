@@ -1,0 +1,8 @@
+module PipeLang.Json;
+
+public Record JsonRenderOptions {
+    public int maximumBytes = 0;
+    public JsonRenderLayout layout = JsonRenderLayout.Compact;
+    public bool ascii = false;
+    public int initialDepth = 0;
+}

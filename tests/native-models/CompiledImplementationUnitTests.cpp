@@ -57,7 +57,8 @@ void compiledImplementationUnitContracts() {
     try {
         bounded.append("Owner0", "next");
     } catch (const pipelang::models::Diagnostic& error) {
-        refused = std::string(error.what()) == "compiled project implementation unit limit exceeded";
+        refused = std::string(error.what()) ==
+            "compiled project implementation_units resource budget exceeded; configure implementation_units";
     }
     require(refused && bounded.files() == before,
             "implementation limit changed or partially published an overflowing definition");

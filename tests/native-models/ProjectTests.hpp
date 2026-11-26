@@ -7,3 +7,5 @@ void generateProjectFixture(const std::filesystem::path& prefix, const std::file
 void projectContracts(const std::filesystem::path& prefix, const std::filesystem::path& output);
 
 void generateCompiledProjectFixture(const std::filesystem::path& prefix, const std::filesystem::path& output);
+
+void sourceLibraryContracts(const std::filesystem::path& prefix, const std::filesystem::path& output);

@@ -317,9 +317,15 @@ void verifyNativeNumericArrayRejections(const std::filesystem::path& prefix,
                                   invalid.dump(), std::chrono::seconds(45), 4U << 20);
     require(compiled.exit == 0, "qualified helper work-limit compiler transport failed");
     const auto response = parseJson(compiled.output, 4U << 20);
-    require(response.at("ok") == false &&
-            response.dump().find("expanded method evaluation work limit exceeded") != std::string::npos,
-            "qualified helper DAG escaped the ordinary expanded-work limit");
+    require(response.at("ok") == true,
+            "runtime-bounded qualified helper DAG was rejected");
+    std::set<std::string> exportedOwners;
+    for (const auto& item : response.at("manifest").at("nativeNumericExports"))
+        exportedOwners.insert(item.at("owner").get<std::string>());
+    require(exportedOwners.contains("Numeric.QualifiedCost0"),
+            "finite qualified helper lost its safe native export");
+    require(!exportedOwners.contains("Numeric.QualifiedCost16"),
+            "over-budget qualified helper DAG escaped through an unguarded native export");
 }
 
 std::string nativeNumericArrayOrdinaryConsumer()

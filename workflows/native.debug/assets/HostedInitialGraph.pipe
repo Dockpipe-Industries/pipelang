@@ -1,0 +1,55 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedInitialGraph;
+
+public Class Link {
+    private int payload;
+    private Link? prior;
+
+    public Link(int amount) {
+        payload = amount;
+    }
+
+    public void Connect(Link? previous) {
+        prior = previous;
+    }
+
+    public pure int Read() {
+        return payload;
+    }
+
+    public pure Link? Previous() {
+        return prior;
+    }
+}
+
+public model Class Session {
+    private Link? latest;
+
+    public Session() {
+        latest = new Link(42);
+    }
+
+    public int Run(int scenario) {
+        if (scenario == 0)
+            return latest.Value.Read();
+        if (scenario == 1) {
+            latest = null;
+            return 42;
+        }
+        if (scenario >= 2 && scenario <= 65) {
+            for (int index = 0; index < scenario; index = index + 1) {
+                Link link = new Link(42);
+                link.Connect(latest);
+                latest = link;
+            }
+            return latest.Value.Read();
+        }
+        int count = 0;
+        Link? current = latest;
+        while (current.HasValue) {
+            count = count + 1;
+            current = current.Value.Previous();
+        }
+        return count;
+    }
+}

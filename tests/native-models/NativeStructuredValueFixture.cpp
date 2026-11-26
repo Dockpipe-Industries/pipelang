@@ -9,7 +9,7 @@ using namespace pipelang::tools;
 void invoke(const std::vector<std::string>& command)
 {
     const auto result = process(command, {}, std::chrono::seconds(90), 4U << 20);
-    require(result.exit == 0, "structured value fixture failed: " + result.output + result.diagnostic);
+    require(result.exit == 0, "structured value fixture failed (" + std::to_string(result.exit) + "): " + result.output + result.diagnostic);
 }
 }
 
@@ -187,7 +187,6 @@ public model Class Queries {
         require(refused, "closed numeric manifest trusted a reserved, generic or ambiguous authored alias");
     }
     for (const auto& invalidMethod : {
-        "public Result<int,BError> Invalid() => Result<int,BError>.Success(1);",
         "public async Task<Result<int,BError>> Invalid() { return Result<int,BError>.Success(1); }",
         "public pure Result<int,int> Invalid() => Result<int,int>.Failure(1);"}) {
         auto invalid = request;
@@ -195,7 +194,19 @@ public model Class Queries {
             "\npublic model Class InvalidBoundary { " + invalidMethod + " }\n";
         const auto rejected = process({compiler.string()}, invalid.dump(), std::chrono::seconds(45), 4U << 20);
         require(rejected.exit == 0 && parseJson(rejected.output, 4U << 20).at("ok") == false,
-            "structured errors widened an action/async or scalar-error boundary");
+            "structured errors widened an async or scalar-error boundary: " + std::string(invalidMethod));
+    }
+    auto ordinaryResult = request;
+    ordinaryResult["modules"][0]["source"] = ordinaryResult["modules"][0]["source"].get<std::string>() +
+        "\npublic model Class InvalidBoundary { "
+        "public Result<int,BError> Invalid() => Result<int,BError>.Success(1); }\n";
+    const auto ordinaryCompiled = process({compiler.string()}, ordinaryResult.dump(), std::chrono::seconds(45), 4U << 20);
+    require(ordinaryCompiled.exit == 0, "ordinary structured Result compiler transport failed");
+    const auto ordinaryResponse = parseJson(ordinaryCompiled.output, 4U << 20);
+    require(ordinaryResponse.at("ok") == true, "valid ordinary structured Result method was rejected");
+    for (const auto& item : ordinaryResponse.at("manifest").at("nativeNumericExports")) {
+        require(item.at("owner") != "ClosedValues.InvalidBoundary",
+            "non-pure structured Result method escaped through a pure native numeric export");
     }
     generateProjectBindings(prefix, manifest, fileHash(manifest), compiler, output, "src", "Queries.pipe",
         "structured_header", output / "header");
@@ -352,12 +363,22 @@ bool structuredFloatingProfiles(Operation operation)
                 const unsigned control = (_mm_getcsr() & ~0xe07fu) | (sseRounding << 13)
                     | ((denormal & 1u) ? 0x8000u : 0u) | ((denormal & 2u) ? 0x40u : 0u) | 5u;
                 _mm_setcsr(control);
+                const auto beforeRounding = std::fegetround();
                 const auto beforeFlags = std::fetestexcept(FE_ALL_EXCEPT);
+#if defined(__i386__) || defined(__x86_64__)
+                unsigned short beforeX87 = 0;
+                asm volatile("fnstcw %0" : "=m"(beforeX87));
+#endif
                 forbidStructuredAllocations = true;
                 valid = operation() && valid;
                 forbidStructuredAllocations = false;
-                valid = valid && _mm_getcsr() == control && std::fegetround() == rounding
+                valid = valid && _mm_getcsr() == control && std::fegetround() == beforeRounding
                     && std::fetestexcept(FE_ALL_EXCEPT) == beforeFlags;
+#if defined(__i386__) || defined(__x86_64__)
+                unsigned short afterX87 = 0;
+                asm volatile("fnstcw %0" : "=m"(afterX87));
+                valid = valid && beforeX87 == afterX87;
+#endif
             }
         }
 #else
@@ -479,7 +500,12 @@ target_compile_definitions(structured_values PRIVATE PIPELANG_ACTIVE_HOST_FLOATI
 target_compile_options(structured_values PRIVATE -frounding-math)
 )cmake");
     invoke({nativeTool("cmake").string(), "-S", output.string(), "-B", (output / "initial-normal").string(),
-        "-DSTRUCTURED_SDK_PREFIX=" + prefix.string(), "-DCMAKE_CXX_COMPILER=" + nativeTool("c++").string(), "-DCMAKE_BUILD_TYPE=Release"});
+        "-DSTRUCTURED_SDK_PREFIX=" + prefix.string(),
+        "-DCMAKE_CXX_COMPILER=" + nativeTool("c++").string(),
+#ifdef _WIN32
+        "-G", "Ninja", "-DCMAKE_EXE_LINKER_FLAGS=-static",
+#endif
+        "-DCMAKE_BUILD_TYPE=Release"});
     invoke({nativeTool("cmake").string(), "--build", (output / "initial-normal").string(), "--parallel", "1"});
     invoke({nativeExecutable(output / "initial-normal/structured_values").string()});
     invoke({nativeExecutable(output / "initial-normal/structured_headers").string()});

@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "composition.hpp"
+#include "CheckedProgram.hpp"
 #include "ProjectModelFacets.hpp"
 #include "DiagnosticOriginScope.hpp"
 #include "ModuleDiagnosticScope.hpp"
@@ -30,7 +31,7 @@ bool builtin(const std::string& name) {
         "void", "bool", "int", "uint32", "float", "float32", "string", "ByteBuffer", "Error", "CancellationToken",
         "Result", "IResult", "Task", "Optional", "List", "Atomic", "Array", "FixedArray", "Dictionary",
         "HashSet", "Queue", "Stack", "KeyValuePair",
-        "ConcurrentDictionary", "ConcurrentQueue", "ConcurrentStack", "Lock", "SemaphoreSlim"
+        "ConcurrentDictionary", "ConcurrentQueue", "ConcurrentStack", "Lock", "SemaphoreSlim", "ContextOwner"
     };
     return names.contains(name);
 }
@@ -680,6 +681,8 @@ private:
             rewriteType(argument, parameters, offset);
         if (builtin(type.name) || parameters.contains(type.name))
             return;
+        if (type.name == "var" && resolve(type.name, offset, false).empty())
+            fail("var is only valid for inferred locals; API types must be explicit", offset);
         const auto canonical = resolve(type.name, offset, true);
         type.name = names_.at(canonical);
         type.sourceName = canonical;
@@ -721,6 +724,7 @@ private:
                 if (!canonical.empty()) {
                     expression->kind = expression->typeArguments.empty() ? "name" : "generic_name";
                     expression->text = names_.at(canonical);
+                    expression->projectTypeReference = expression->kind == "name";
                     expression->children.clear();
                 }
             }
@@ -732,6 +736,12 @@ private:
     void rewriteStatements(std::vector<Statement>& statements, const std::set<std::string>& parameters,
                            std::set<std::string> values) {
         for (auto& statement : statements) {
+            if (statement.type.name.empty() && (statement.kind == "local" ||
+                statement.kind == "foreach" || statement.kind == "parallel_foreach")) {
+                const auto contextual = resolve("var", statement.offset, false);
+                if (parameters.contains("var") || !contextual.empty())
+                    statement.type = {"var", {}};
+            }
             rewriteType(statement.type, parameters, statement.offset);
             if (statement.kind == "for") {
                 rewriteStatements(statement.initialization, parameters, values);
@@ -809,7 +819,20 @@ public:
             declarationOrigins_.emplace(declaration.name, std::make_pair(declaration.module, declaration.originPath));
     }
 
-    void run() {
+    void run(bool checkSemantics = false) {
+        // Discover the additive syntax before specializing any local helper.
+        // Programs without instance generic syntax retain their original native
+        // specialization names and avoid checker discovery/cloning entirely.
+        for (auto& declaration : program_.declarations) {
+            for (const Field& field : fieldsAndConstants(declaration))
+                hasGenericMembers_ = hasGenericMembers_ || genericMember(field.initializer);
+            for (const auto& method : declaration.methods) {
+                hasGenericMembers_ = hasGenericMembers_ || genericMember(method.baseConstructor) ||
+                    genericMember(method.body);
+                for (const auto& initializer : method.fieldInitializers)
+                    hasGenericMembers_ = hasGenericMembers_ || genericMember(initializer);
+            }
+        }
         resolveModelExports();
         // Store templates separately so vector growth never invalidates their identity.
         std::vector<Declaration> concrete;
@@ -834,6 +857,9 @@ public:
                 if (!records_.emplace(name, std::move(declaration)).second)
                     fail("duplicate generic record", offset, module);
             } else {
+                if (program_.projectEnabled && declaration.kind == "Class" && declaration.interfaces.empty())
+                    directProjectClasses_.insert(declaration.name);
+
                 concrete.push_back(std::move(declaration));
             }
         }
@@ -885,19 +911,187 @@ public:
                 fail("closed class member limit exceeded", found->offset, found->module);
             }
         }
+        generatedMethods_.clear();
         resolveClassHierarchy();
         flattenSourceInterfaces();
-        lowerProjectModelFacets(program_, [&](const Declaration& declaration) {
-            try {
-                budget_.projectDeclaration(declaration);
-            } catch (Diagnostic& diagnostic) {
-                diagnostic.path = declaration.originPath;
-                throw;
-            }
-        });
+        const bool needsDiscovery = hasGenericMembers_ && (!program_.projectEnabled ||
+            std::any_of(program_.declarations.begin(), program_.declarations.end(),
+                [](const Declaration& declaration) { return genericMember(declaration); }));
+        if (checkSemantics && needsDiscovery) {
+            checkGenericMembers();
+        } else {
+            lowerFacets(program_);
+            if (checkSemantics)
+                check(program_);
+        }
     }
 
 private:
+    static bool genericMember(const Declaration& declaration) {
+        const auto containsCall = [](const Field& field) { return genericMember(field.initializer); };
+        if (std::any_of(declaration.fields.begin(), declaration.fields.end(), containsCall) ||
+            std::any_of(declaration.constants.begin(), declaration.constants.end(), containsCall))
+            return true;
+
+        for (const auto& method : declaration.methods) {
+            if (genericMember(method.baseConstructor) || genericMember(method.body))
+                return true;
+            if (std::any_of(method.fieldInitializers.begin(), method.fieldInitializers.end(),
+                    [](const Expr& initializer) { return genericMember(initializer); }))
+                return true;
+        }
+
+        return false;
+    }
+
+    static bool genericMember(const Expr& expression) {
+        if (!expression)
+            return false;
+        if (expression->kind == "generic_member")
+            return true;
+        return std::any_of(expression->children.begin(), expression->children.end(),
+            [](const Expr& child) { return genericMember(child); });
+    }
+
+    static bool genericMember(const std::vector<Statement>& statements) {
+        return std::any_of(statements.begin(), statements.end(), [](const Statement& statement) {
+            return genericMember(statement.expression) || genericMember(statement.target) ||
+                genericMember(statement.initialization) || genericMember(statement.body) ||
+                genericMember(statement.iteration) || genericMember(statement.alternative) ||
+                genericMember(statement.cleanup);
+        });
+    }
+
+    struct MemberDemand {
+        std::vector<std::string> owners;
+        std::string name;
+        std::vector<Type> arguments;
+        std::size_t offset;
+        std::string module;
+        std::string path;
+    };
+
+    void claimDeclaration(const Declaration& declaration) {
+        DiagnosticOriginScope origin(declaration.originPath);
+        budget_.projectDeclaration(declaration);
+    }
+
+    void lowerFacets(Program& target) {
+        lowerProjectModelFacets(target, [&](const Declaration& declaration) {
+            claimDeclaration(declaration);
+        });
+    }
+
+    // Keep pre-facet declarations as the source of truth. Each discovery trial
+    // owns a deep AST clone, so an interrupted checker cannot retain conversions,
+    // implicit receivers, call edges, constants or partially checked bodies.
+    // Every retry must add a specialization under the existing method/node caps.
+    void checkGenericMembers() {
+        for (;;) {
+            for (const auto& declaration : program_.declarations)
+                claimDeclaration(declaration);
+            Program trial = program_;
+            for (auto& declaration : trial.declarations)
+                declaration = cloneDeclaration(declaration);
+            lowerFacets(trial);
+            std::map<std::string, std::string> sourceOwners;
+            for (const auto& declaration : trial.declarations) {
+                if (!declaration.sourceObjectFacet.empty())
+                    sourceOwners.emplace(declaration.sourceObjectFacet, declaration.name);
+            }
+            const auto sourceName = [&](const std::string& name) {
+                const auto found = sourceOwners.find(name);
+                return found == sourceOwners.end() ? name : found->second;
+            };
+            const auto sourceType = [&](const Type& original, const auto& recurse) -> Type {
+                Type result = original;
+                result.name = sourceName(result.name);
+                for (auto& argument : result.arguments)
+                    argument = recurse(argument, recurse);
+                return result;
+            };
+            GenericMemberResolver resolver = [&](const std::string& receiver,
+                const std::string& name, const std::vector<Type>& arguments,
+                const Declaration& caller, std::size_t offset) {
+                DiagnosticOriginScope origin(caller.originPath);
+                ModuleDiagnosticScope moduleScope(currentModule_, caller.module);
+                std::vector<Type> sourceArguments;
+                for (const auto& argument : arguments) {
+                    budget_.type(argument, offset, currentModule_);
+                    sourceArguments.push_back(sourceType(argument, sourceType));
+                }
+                const auto ownerName = sourceName(receiver);
+                const auto found = std::find_if(program_.declarations.begin(), program_.declarations.end(),
+                    [&](const Declaration& declaration) { return declaration.name == ownerName; });
+                if (found == program_.declarations.end())
+                    fail("unknown generic member receiver", offset, currentModule_);
+                std::vector<std::string> candidates{found->name};
+                candidates.insert(candidates.end(), found->ancestors.begin(), found->ancestors.end());
+                std::vector<std::string> missing;
+                std::string result;
+                bool named = false;
+                for (const auto& candidate : candidates) {
+                    const auto owner = templates_.find(candidate);
+                    if (owner == templates_.end() || !owner->second.contains(name))
+                        continue;
+                    named = true;
+                    const auto& definitions = owner->second.at(name);
+                    if (std::none_of(definitions.begin(), definitions.end(), [&](const Method& method) {
+                        return method.typeParameters.size() == sourceArguments.size();
+                    }))
+                        continue;
+                    const auto key = candidate + '.' + appliedName(name, sourceArguments);
+                    if (const auto instance = methodInstances_.find(key); instance != methodInstances_.end())
+                        result = instance->second;
+                    else
+                        missing.push_back(candidate);
+                }
+                if (!missing.empty())
+                    throw MemberDemand{std::move(missing), name, std::move(sourceArguments),
+                        offset, caller.module, caller.originPath};
+                if (result.empty())
+                    fail(named ? "explicit generic argument count mismatch" : "unknown generic method '" + name + "'",
+                        offset, currentModule_);
+                return result;
+            };
+            try {
+                check(trial, resolver);
+                program_ = std::move(trial);
+                return;
+            } catch (const MemberDemand& demand) {
+                DiagnosticOriginScope origin(demand.path);
+                ModuleDiagnosticScope moduleScope(currentModule_, demand.module);
+                for (const auto& owner : demand.owners)
+                    specializeMethods(owner, demand.name, demand.arguments, demand.offset);
+                appendGeneratedMethods();
+            }
+        }
+    }
+
+    void appendGeneratedMethods() {
+        for (auto& [name, methods] : generatedMethods_) {
+            const auto owner = std::find_if(program_.declarations.begin(), program_.declarations.end(),
+                [&](const Declaration& declaration) { return declaration.name == name; });
+            if (owner == program_.declarations.end())
+                fail("internal generic method owner was lost", 0);
+            for (auto& method : methods)
+                owner->methods.push_back(std::move(method));
+        }
+        generatedMethods_.clear();
+        for (const auto& owner : program_.declarations) {
+            std::size_t members = owner.fields.size() + owner.constants.size() + owner.methods.size();
+            for (const auto& ancestor : owner.ancestors) {
+                const auto base = std::find_if(program_.declarations.begin(), program_.declarations.end(),
+                    [&](const Declaration& declaration) { return declaration.name == ancestor; });
+                members += base->fields.size() + base->constants.size() + base->methods.size();
+            }
+            if (members > 256) {
+                DiagnosticOriginScope origin(owner.originPath);
+                fail("closed class inherited member limit exceeded", owner.offset, owner.module);
+            }
+        }
+    }
+
     static std::string interfaceSlot(const Method& method) {
         std::string result = method.name + '(';
         for (std::size_t index = 0; index < method.parameters.size(); ++index) {
@@ -1290,7 +1484,21 @@ private:
         const auto activeKey = owner + '.' + name;
         if (activeMethods_.contains(activeKey))
             fail("expanding recursive generic method instantiation", offset, currentModule_);
-        const auto nativeName = "pl_generic_method_" + std::to_string(methodInstances_.size());
+        std::string nativeName;
+        if (!hasGenericMembers_) {
+            nativeName = "pl_generic_method_" + std::to_string(methodInstances_.size());
+        } else {
+            // An application has one spelling across the inheritance tree.
+            // Ordinary effective-method selection then preserves signature
+            // hiding, inherited overloads and the declaring class's access.
+            const auto application = appliedName(name, arguments);
+            auto spelling = methodNames_.find(application);
+            if (spelling == methodNames_.end()) {
+                const auto spellingName = "pl_generic_method_" + std::to_string(methodNames_.size());
+                spelling = methodNames_.emplace(application, spellingName).first;
+            }
+            nativeName = spelling->second;
+        }
         methodInstances_[key] = nativeName;
         activeMethods_.insert(activeKey);
         bool matched = false;
@@ -1312,6 +1520,50 @@ private:
         if (!matched)
             fail("explicit generic argument count mismatch", offset, currentModule_);
         return nativeName;
+    }
+
+    void planDirectStaticApplication(Expr& expression) {
+        if (expression->kind != "call" || expression->children.empty())
+            return;
+
+        auto& target = expression->children.front();
+        if (target->kind != "generic_member" || target->children.size() != 1)
+            return;
+
+        const auto& receiver = target->children.front();
+        if (receiver->kind != "name" || !receiver->projectTypeReference ||
+            !directProjectClasses_.contains(receiver->text))
+            return;
+
+        const auto owner = templates_.find(receiver->text);
+        if (owner == templates_.end())
+            return;
+
+        const auto named = owner->second.find(target->text);
+        if (named == owner->second.end())
+            return;
+
+        bool staticApplication = false;
+        for (const auto& candidate : named->second) {
+            if (candidate.typeParameters.size() != target->typeArguments.size())
+                continue;
+            if (!candidate.staticMethod)
+                return;
+
+            staticApplication = true;
+        }
+        if (!staticApplication)
+            return;
+
+        // The linker already proved the receiver despite lexical shadowing.
+        // Charge the same argument and specialization bounds, then let the
+        // ordinary checker resolve accessibility, overloads and returns.
+        for (const auto& argument : target->typeArguments)
+            budget_.type(argument, target->offset, currentModule_);
+
+        target->text = specializeMethods(receiver->text, target->text, target->typeArguments, target->offset);
+        target->typeArguments.clear();
+        target->kind = "member";
     }
 
     void normalizeExpression(Expr& expression, const std::string& owner,
@@ -1356,16 +1608,22 @@ private:
             }
             expression->typeArguments.clear();
         } else if (expression->kind == "generic_member") {
-            fail("generic instance member calls are unsupported; use a local generic method", expression->offset,
-                 currentModule_);
+            hasGenericMembers_ = true;
         }
         for (auto& child : expression->children)
             normalizeExpression(child, owner, substitutions);
+
+        if (program_.projectEnabled)
+            planDirectStaticApplication(expression);
     }
 
     void normalizeStatements(std::vector<Statement>& statements, const std::string& owner,
                              const Substitutions& substitutions) {
         for (auto& statement : statements) {
+            if (statement.type.name.empty() && substitutions.contains("var") &&
+                (statement.kind == "local" || statement.kind == "foreach" || statement.kind == "parallel_foreach"))
+                statement.type = {"var", {}};
+
             normalizeType(statement.type, substitutions, statement.offset);
             normalizeExpression(statement.expression, owner, substitutions);
             normalizeExpression(statement.target, owner, substitutions);
@@ -1383,12 +1641,15 @@ private:
     std::map<std::string, std::map<std::string, std::vector<Method>>> templates_;
     std::map<std::string, std::string> recordInstances_;
     std::map<std::string, std::string> methodInstances_;
+    std::map<std::string, std::string> methodNames_;
     std::map<std::string, std::vector<Method>> generatedMethods_;
+    std::set<std::string> directProjectClasses_;
     std::set<std::string> activeRecords_;
     std::set<std::string> activeMethods_;
     std::map<std::string, std::pair<std::string, std::string>> declarationOrigins_;
     std::string currentModule_;
     std::size_t methodCount_ = 0;
+    bool hasGenericMembers_ = false;
 };
 
 }
@@ -1415,6 +1676,40 @@ Declaration cloneDeclaration(const Declaration& declaration) {
 
 void normalizeComposition(Program& program) {
     CompositionNormalizer(program).run();
+}
+
+void normalizeAndCheckComposition(Program& program) {
+    CompositionNormalizer(program).run(true);
+}
+
+CheckedProgram::CheckedProgram(Program program)
+    : program_(std::move(program))
+{
+}
+
+CheckedProgram CheckedProgram::complete(Program program, bool enableObjects,
+                                        std::vector<std::string> modelExports)
+{
+    program.objectEnabled = enableObjects || program.projectEnabled;
+    program.modelExports = std::move(modelExports);
+    normalizeAndCheckComposition(program);
+
+    return CheckedProgram(std::move(program));
+}
+
+CheckedProgram CheckedProgram::project(const std::vector<ModuleSource>& modules,
+                                       const std::string& entry, bool activeHostNumericEnvironment)
+{
+    auto program = linkModules(modules, entry, true, true);
+    program.activeHostNumericEnvironment = activeHostNumericEnvironment;
+
+    std::vector<std::string> modelExports;
+    for (const auto& declaration : program.declarations) {
+        if (declaration.modelDeclared)
+            modelExports.push_back(declaration.sourceName);
+    }
+
+    return complete(std::move(program), true, std::move(modelExports));
 }
 
 }

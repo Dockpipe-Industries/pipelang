@@ -1,0 +1,3 @@
+module PipeLang.Testing.SelfTests;
+
+public Enum TestBehavior { Success, Failure, Cancelled, Throw }

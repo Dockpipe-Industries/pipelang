@@ -1,0 +1,41 @@
+module PipeLang.IO.OutputTests;
+import PipeLang.IO;
+import PipeLang.Testing;
+
+public model Class OutputSuite {
+    private ExclusiveFileOutput output;
+    private FileStreams input;
+    private OutputFixture fixture;
+
+    public OutputSuite(ExclusiveFileOutput output, FileStreams input, OutputFixture fixture) {
+        this.output = output;
+        this.input = input;
+        this.fixture = fixture;
+    }
+
+    public OutputReport Run(CancellationToken token, CancellationToken cancelled,
+                            CancellationToken creation, CancellationToken writing,
+                            CancellationToken syncing) {
+        TestRunner runner = new TestRunner();
+        List<TestResult> results = List<TestResult>.Empty();
+        for (int scenario = 0; scenario < 16; scenario = scenario + 1) {
+            OutputCase selected = new OutputCase(output, input, fixture, scenario);
+            if (scenario == 6)
+                results.Add(runner.RunProbe(selected, token, creation));
+            else if (scenario == 7)
+                results.Add(runner.RunProbe(selected, token, writing));
+            else if (scenario == 12)
+                results.Add(runner.RunProbe(selected, token, syncing));
+            else
+                results.Add(runner.RunProbe(selected, token, cancelled));
+        }
+
+        bool allPassed = results.Count == 16;
+        foreach (TestResult result in results) {
+            if (result.outcome != TestOutcome.Passed || !result.bodyRan || !result.cleanupRan)
+                allPassed = false;
+        }
+
+        return OutputReport(allPassed, results);
+    }
+}

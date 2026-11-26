@@ -70,9 +70,15 @@ private:
     static void validateReceiver(const Declaration& declaration, const Expr& expression) {
         if (!expression)
             return;
+        // Explicit member selection has a fixed receiver in the native facet.
+        // The source object clone retains ordinary this/object dispatch. Bare
+        // this/base values still cannot represent an independently owned root.
+        if ((expression->kind == "member" || expression->kind == "generic_member") &&
+            expression->children.size() == 1 && expression->children.front()->kind == "this")
+            return;
         if (expression->kind == "this" || expression->kind == "base") {
             refuse(declaration,
-                   "does not yet support explicit this/base receiver references; ordinary unmarked classes retain these semantics",
+                   "does not support bare this/base receiver values; explicit this.member selection retains its fixed owner",
                    expression->offset);
         }
         for (const auto& child : expression->children)

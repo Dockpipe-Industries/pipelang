@@ -68,12 +68,13 @@ int main(int argc, char** argv) {
             const fs::path projectRoot = arguments.take("--project-root");
             const fs::path sourceRoot = arguments.optional("--source-root", "src");
             const fs::path entry = arguments.take("--entry");
+            const fs::path sourceLibraries = arguments.optional("--source-libraries");
             const auto nameSpace = arguments.take("--namespace");
             const auto numericEnvironment = arguments.optional("--native-numeric-environment");
             const bool emitCompositionFactory = arguments.flag("--composition-factory");
             arguments.finish();
             std::cout << canonical(compiledProjectInformation(prefix, manifest, expected, modelTool,
-                projectRoot, sourceRoot, entry, nameSpace, numericEnvironment, emitCompositionFactory));
+                projectRoot, sourceRoot, entry, nameSpace, numericEnvironment, emitCompositionFactory, sourceLibraries));
         } else if (command == "project-info") {
             const fs::path prefix = arguments.take("--sdk-prefix");
             const fs::path manifest = arguments.take("--sdk-manifest");
@@ -81,8 +82,9 @@ int main(int argc, char** argv) {
             const fs::path projectRoot = arguments.take("--project-root");
             const fs::path sourceRoot = arguments.optional("--source-root", "src");
             const fs::path entry = arguments.take("--entry");
+            const fs::path sourceLibraries = arguments.optional("--source-libraries");
             arguments.finish();
-            std::cout << canonical(projectInformation(prefix, manifest, expected, projectRoot, sourceRoot, entry));
+            std::cout << canonical(projectInformation(prefix, manifest, expected, projectRoot, sourceRoot, entry, sourceLibraries));
         } else if (command == "source-set-info") {
             const fs::path prefix = arguments.take("--sdk-prefix");
             const fs::path manifest = arguments.take("--sdk-manifest");
@@ -102,6 +104,9 @@ int main(int argc, char** argv) {
             const fs::path projectRoot = arguments.optional("--project-root");
             const fs::path sourceRoot = projectRoot.empty() ? fs::path{} : fs::path(arguments.optional("--source-root", "src"));
             const fs::path entry = projectRoot.empty() ? fs::path{} : fs::path(arguments.take("--entry"));
+            const fs::path sourceLibraries = arguments.optional("--source-libraries");
+            require(sourceLibraries.empty() || (!withView && !projectRoot.empty()),
+                    "source libraries require a headless project");
             const auto inputCount = static_cast<int>(!model.empty()) + static_cast<int>(!descriptor.empty()) +
                                     static_cast<int>(!projectRoot.empty());
             require(inputCount == 1, "select exactly one --model, --source-set or --project-root");
@@ -131,10 +136,10 @@ int main(int argc, char** argv) {
             else if (compiled)
                 generateCompiledProjectBindings(prefix, manifest, expected, modelTool, projectRoot, sourceRoot,
                     entry, nameSpace, output, expectedPlan, numericEnvironment,
-                    requireCompositionPlan || emitCompositionFactory, emitCompositionFactory);
+                    requireCompositionPlan || emitCompositionFactory, emitCompositionFactory, sourceLibraries);
             else if (!projectRoot.empty())
                 generateProjectBindings(prefix, manifest, expected, modelTool, projectRoot, sourceRoot, entry, nameSpace, output,
-                    numericEnvironment, requireCompositionPlan || emitCompositionFactory, emitCompositionFactory);
+                    numericEnvironment, requireCompositionPlan || emitCompositionFactory, emitCompositionFactory, sourceLibraries);
             else if (!descriptor.empty())
                 generateSourceSetBindings(prefix, manifest, expected, modelTool, descriptor, nameSpace, output);
             else

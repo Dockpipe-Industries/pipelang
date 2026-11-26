@@ -35,11 +35,18 @@ void fields(const Json& values, bool identifiers) {
             identifier(field.at("name"));
     }
 }
-void methods(const Json& values, bool identifiers) {
+void methods(const Json& values, bool identifiers, bool allowStatic) {
     array(values, "methods");
     std::set<std::string> signatures;
     for (const auto& method : values) {
-        exactObject(method, {"name", "returnType", "parameters", "async", "pure"}, {"sourceName"}, "method");
+        std::set<std::string> optional{"sourceName"};
+        if (allowStatic)
+            optional.insert("static");
+
+        exactObject(method, {"name", "returnType", "parameters", "async", "pure"}, optional, "method");
+        if (method.contains("static"))
+            require(method.at("static").is_boolean(), "method static metadata requires an exact boolean");
+
         const auto name = text(method.at("name"), "method name", 1024);
         text(method.at("returnType"), "method return type", 4096);
         fields(method.at("parameters"), identifiers);
@@ -423,7 +430,7 @@ void admitModel(const Json& manifest, const std::string& nameSpace) {
             if (declaration.contains("fields"))
                 fields(declaration.at("fields"), objects);
             if (declaration.contains("methods"))
-                methods(declaration.at("methods"), objects);
+                methods(declaration.at("methods"), objects, objects && (kind == "classes" || kind == "objects"));
             if (declaration.contains("constructor"))
                 constructors(declaration, objects);
             if (kind == "enums") {

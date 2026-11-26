@@ -1,0 +1,48 @@
+{
+  "protocol": "pipelang.source-library.v1",
+  "name": "PipeLang.IO",
+  "version": "0.1.0",
+  "source_root": "src",
+  "sources": [
+    {
+      "path": "AppendFileState.pipe",
+      "sha256": "f4e95f512150a36fba9d31f41eb0f1f183a5da00ce95b8ec85c1bf8b49b17556"
+    },
+    {
+      "path": "AtomicFileReplacement.pipe",
+      "sha256": "eebd5e5563472d548780743d18ce8e7ca7f7176a7cf9f3bbcc0cee7f976004e0"
+    },
+    {
+      "path": "CapturedFile.pipe",
+      "sha256": "02d69495138119472ef2d66acef3df4e9e2328ebed39e8d36f011b88f30df16e"
+    },
+    {
+      "path": "ExclusiveFileOutput.pipe",
+      "sha256": "bb9482a2aadd7c5abd4629b6913c42b0b5051adcb97e1700451d46e6fdfe4d56"
+    },
+    {
+      "path": "ExistingFileAppend.pipe",
+      "sha256": "274cab544e9a8f84d943365a9d4b7068dfaf4eca6832b048e78071928d22cfc8"
+    },
+    {
+      "path": "FileDigest.pipe",
+      "sha256": "fb723eaa04cda38dc687d42d69c21c82a10a9bebe558fe92cda54d48022e7c8a"
+    },
+    {
+      "path": "FileIdentity.pipe",
+      "sha256": "8c1b6243b9406221c5024ca421738f5463038025a825eb34857d7301d86aa178"
+    },
+    {
+      "path": "FileStreams.pipe",
+      "sha256": "9ce30c4e48e815253ba729861b2d9c1121244a7742ca8c0597a5a23625599840"
+    },
+    {
+      "path": "IoFailure.pipe",
+      "sha256": "87b4e6dddcb0ea87b0de9fafdce8d9d5b1164cc50fcd8b7d503d02a4168466d8"
+    },
+    {
+      "path": "OutputEffect.pipe",
+      "sha256": "042bbf31f38a29783797a5c338630a6b2c7a6ed61028d70b83bcd38b8ad90389"
+    }
+  ]
+}

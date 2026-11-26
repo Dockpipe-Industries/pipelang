@@ -1,0 +1,77 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.PolymorphicFactory;
+
+public source Interface IClose {
+    Result<void,string> Close(CancellationToken token);
+}
+
+public Interface Recorder {
+    pure int Record(int marker);
+    pure bool ChooseDerived();
+}
+
+public Class Base : IClose {
+    private Recorder recorder;
+
+    public Base(Recorder recorder) {
+        this.recorder = recorder;
+    }
+
+    protected pure int Notify(int marker) => recorder.Record(marker);
+
+    public virtual pure int Read() => 10;
+
+    public virtual Result<void,string> Close(CancellationToken token) {
+        var recorded = Notify(10);
+        return Result<void,string>.Success();
+    }
+}
+
+public Class Derived : Base {
+    private int offset = 32;
+
+    public Derived(Recorder recorder) : base(recorder) {}
+
+    public override pure int Read() => base.Read() + offset;
+
+    public override Result<void,string> Close(CancellationToken token) {
+        var recorded = Notify(42);
+        return Result<void,string>.Success();
+    }
+}
+
+public Class Maker {
+    private Recorder recorder;
+
+    public Maker(Recorder recorder) {
+        this.recorder = recorder;
+    }
+
+    public Result<Base,string> Create() {
+        if (recorder.ChooseDerived())
+            return Result<Base,string>.Success(new Derived(recorder));
+        return Result<Base,string>.Success(new Base(recorder));
+    }
+}
+
+public Class Failing {
+    public Failing(Base resource) {
+        if (resource.Read() != 42)
+            throw Error("constructor did not dispatch the provisional receiver");
+        throw Error("polymorphic construction failed");
+    }
+}
+
+public model Class Root {
+    public pure int Run() => 42;
+}
+
+public composition Startup {
+    singleton input Recorder;
+    singleton Maker = Maker;
+    singleton Base = factory Maker.Create;
+    cleanup IClose.Close;
+    scoped Failing = Failing;
+    export Failing;
+    export Base;
+}

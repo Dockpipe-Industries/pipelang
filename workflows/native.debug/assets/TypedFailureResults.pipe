@@ -1,0 +1,73 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.TypedFailureResults;
+
+public Record TestFailure {
+    public string message;
+    public int code = 17;
+    public Result<void,string> cleanup;
+}
+
+public Enum FailureCode { Unspecified, Denied }
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var report = await Worker.Run(scenario);
+        if (report.IsCancelled)
+            return Result<int,string>.Cancelled(report.Error);
+        if (report.IsFailure)
+            return Result<int,string>.Failure(report.Error);
+
+        var steps = report.Value;
+        var passed = steps.At(0);
+        var failed = steps.At(1);
+        var cancelled = steps.At(2);
+        if (!passed.IsSuccess || passed.Error.code != 17 || !passed.Error.cleanup.IsCancelled ||
+            !failed.IsFailure || !cancelled.IsCancelled || cancelled.Error != passed.Error) {
+            return Result<int,string>.Failure("typed failure or default outcome changed");
+        }
+
+        var expected = Result<void,TestFailure>.Failure(
+            TestFailure("étape bloquée", 42, Result<void,string>.Success()));
+        if (failed != expected || failed.Error.message != "étape bloquée" || !failed.Error.cleanup.IsSuccess)
+            return Result<int,string>.Failure("typed outcome lost its retained error");
+
+        var guarded = Result<int,FailureCode>.Failure(FailureCode.Denied);
+        if (!guarded.IsFailure || guarded.Error != FailureCode.Denied ||
+            Result<int,FailureCode>.Success(42).Error != FailureCode.Unspecified) {
+            return Result<int,string>.Failure("enum error projection changed the value");
+        }
+        if (scenario == 1)
+            return Result<int,string>.Failure(failed.Error.message);
+        if (scenario == 2)
+            return Result<int,string>.Cancelled(failed.Error.message);
+        if (scenario == 3)
+            return Result<int,string>.Success(guarded.Value);
+        return Result<int,string>.Success(failed.Error.code);
+    }
+}
+
+public Class Worker {
+    public static async Task<Result<List<Result<void,TestFailure>>,string>> Run(int scenario) {
+        var cleanup = await Worker.Wait(scenario);
+        if (cleanup.IsCancelled)
+            return Result<List<Result<void,TestFailure>>,string>.Cancelled(cleanup.Error);
+        if (cleanup.IsFailure)
+            return Result<List<Result<void,TestFailure>>,string>.Failure(cleanup.Error);
+
+        var steps = List<Result<void,TestFailure>>.Empty();
+        steps.Add(Result<void,TestFailure>.Success());
+        steps.Add(Result<void,TestFailure>.Failure(TestFailure("étape bloquée", 42, cleanup)));
+        steps.Add(Result<void,TestFailure>.Cancelled());
+        var gate = SemaphoreSlim.Create(0, 1);
+        var finished = await gate.WaitAsync(65);
+        return Result<List<Result<void,TestFailure>>,string>.Success(steps);
+    }
+
+    public static async Task<Result<void,string>> Wait(int scenario) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var finished = await gate.WaitAsync(45);
+        if (scenario == 4)
+            return Result<void,string>.Failure("child cleanup failed");
+        return Result<void,string>.Success();
+    }
+}

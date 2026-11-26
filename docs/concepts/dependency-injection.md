@@ -228,14 +228,19 @@ one shared object domain and task scope, bounded concurrency, callback reentry
 checks and subtree cancellation. Existing source `await` and finally lowering runs
 the method; DI introduces no alternative async implementation.
 
-For synchronous methods, direct source `CancellationToken` parameters pass through
-unchanged; the separate optional boundary token controls admission and budget. Async
-methods combine their direct source token parameters with the boundary token before
-task admission, matching ordinary model async wrappers. A pre-cancelled combined
-token refuses admission before starting the method. A returned authoritative source
-outcome remains authoritative after work completes, including Success before late
-cancellation. Construction has its separate final cancellation check before cache
-publication.
+Direct source `CancellationToken` parameters pass through unchanged in both
+synchronous and asynchronous methods. The separate optional boundary token controls
+admission; it does not rewrite authored token arguments. A pre-cancelled boundary
+token refuses admission before starting source work. A pre-cancelled authored token
+is an ordinary input: source selects the concrete operation that consumes it, and
+can still perform cleanup with a different token. Construction retains its separate
+final cancellation check before cache publication.
+
+The task's implicit cancellation combines boundary, Task.cancel, group and context
+cancellation independently of authored arguments. It reaches awaited operations;
+it is not copied into each source parameter or inferred from their names/count.
+A returned authoritative source outcome remains authoritative after work completes,
+including Success before late cancellation.
 
 Async cancellation remains cooperative through the existing awaited operations
 and explicit source token checks. DI does not add cancellation checks to every

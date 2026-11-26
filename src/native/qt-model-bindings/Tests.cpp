@@ -41,8 +41,50 @@ int main() {
         require(header.find("Q_PROPERTY(QStringList Pages") != std::string::npos, "owned string-list projection missing");
         require(header.find("qt.wrong_owner") != std::string::npos && header.find("qt.reentry") != std::string::npos, "owner/reentry guards missing");
         const auto query = header.substr(header.find("ActionReport Check("));
-        require(query.find("return {std::move(pl_operation), pl_projection_}") != std::string::npos,
+        require(query.find("pl_group->publish()") == std::string::npos,
             "pure query emitted projection notifications");
+        require(query.find("pl_group->invoking") == std::string::npos &&
+            query.find("QScopedValueRollback<bool>") == std::string::npos,
+            "committed pure queries must remain available during effect projection notification");
+        require(header.find("public pipelang::qt::ContextualObject") != std::string::npos &&
+            header.find("const auto pl_group = pl_group_") != std::string::npos,
+            "context receiver or invocation model lifetime is missing");
+        require(header.find("pl_binding.supervisedRoot ? pipelang::model::InvocationPermit{} : pl_binding.permit") != std::string::npos &&
+            header.find("pl_binding.permit.requireCurrent();") != std::string::npos &&
+            header.find("catch (const pipelang::model::StaleContextCancelled&)") != std::string::npos,
+            "captured context does not guard source invocation");
+        require(header.find("QScopedValueRollback<bool> pl_guard(pl_group->invoking, true)") != std::string::npos,
+            "operation clones do not share the reentry guard");
+        auto context = value;
+        context["classes"][0]["methods"].push_back({{"name", "Lifetime"}, {"returnType", "ContextOwner"},
+            {"pure", true}, {"async", false}, {"parameters", Json::array()}});
+        const auto contextual = admit(context, "Example.Presentation.State");
+        require(contextual.properties.back().type == "ContextOwner" && contextual.properties.back().getter,
+            "opaque context owner getter was rejected");
+        const auto contextHeader = emit(contextual, "qt_fixture", "StateQt");
+        require(contextHeader.find("Q_PROPERTY(QObject* Lifetime") != std::string::npos &&
+            contextHeader.find("ContextObject::capture(pl_group->model->Lifetime(), contextRoot())") != std::string::npos,
+            "context owner was serialized instead of captured by the framework");
+        require(contextHeader.find("pl_value_Lifetime.clear()") != std::string::npos,
+            "expired receiver keeps an old context projection");
+        auto invalidContext = context;
+        invalidContext["classes"][0]["methods"].back()["pure"] = false;
+        rejected(invalidContext, "string-error");
+        invalidContext = context;
+        invalidContext["classes"][0]["methods"].back()["parameters"].push_back({{"name", "request"}, {"type", "string"}});
+        rejected(invalidContext, "string-error");
+        invalidContext = value;
+        invalidContext["classes"][0]["fields"][0]["type"] = "ContextOwner";
+        rejected(invalidContext, "properties require");
+        invalidContext = value;
+        invalidContext["classes"][0]["methods"][0]["parameters"][0]["type"] = "ContextOwner";
+        rejected(invalidContext, "action input");
+        invalidContext = value;
+        invalidContext["classes"][0]["methods"][0]["name"] = "latest";
+        rejected(invalidContext, "unique synchronous");
+        invalidContext = value;
+        invalidContext["classes"][0]["methods"][0]["name"] = "captureSupervisor";
+        rejected(invalidContext, "unique synchronous");
         auto changed = value;
         changed["protocol"] = "unknown";
         rejected(changed, "protocol");

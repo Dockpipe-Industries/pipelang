@@ -1,0 +1,145 @@
+module PipeLang.IO.AppendTests;
+import PipeLang.IO;
+import PipeLang.Testing;
+
+public Class AppendCase : IProbeTestCase {
+    private ExistingFileAppend output;
+    private FileStreams input;
+    private AppendFixture fixture;
+    private int scenario;
+    private string path;
+    private int effects = 0;
+    private int handle = 0;
+
+    public AppendCase(ExistingFileAppend output, FileStreams input, AppendFixture fixture, int scenario) {
+        this.output = output;
+        this.input = input;
+        this.fixture = fixture;
+        this.scenario = scenario;
+        path = "events-" + string.FromInt(scenario);
+    }
+
+    public pure string Id() => "io.append_existing." + string.FromInt(scenario);
+    public pure string Name() => "existing event file append custody " + string.FromInt(scenario);
+
+    public Result<void,TestFailure> Setup(CancellationToken token) {
+        string fault = "";
+        if (scenario == 4) {
+            fault = "short";
+        } else if (scenario == 5) {
+            fault = "cancel";
+        } else if (scenario == 6) {
+            fault = "link";
+        } else if (scenario == 8) {
+            fault = "large";
+        }
+
+        try Assert.True(fixture.Prepare(path, fault).IsSuccess, "prepare an actual pre-existing file");
+        Result<int,string> count = fixture.Effects();
+        try Assert.True(count.IsSuccess, "read actual effect baseline");
+        effects = count.Value;
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Cleanup() {
+        bool captureClosed = true;
+        if (handle != 0)
+            captureClosed = input.CloseSnapshot(handle).IsSuccess;
+
+        bool fixtureClosed = fixture.Close().IsSuccess;
+        return Assert.True(captureClosed && fixtureClosed, "independent cleanup releases capture and native operation");
+    }
+
+    private Result<void,TestFailure> ActualBytes(string expected, CancellationToken token) {
+        Result<CapturedFile,IoFailure> captured = input.CaptureSnapshot(path, 64, token);
+        try Assert.True(captured.IsSuccess, "read actual event bytes");
+        handle = captured.Value.snapshotId;
+        Result<ByteBuffer,IoFailure> read = input.ReadSnapshot(handle, 0, captured.Value.file.byteCount);
+        try Assert.True(read.IsSuccess, "read exact event extent");
+        return Assert.Equal<string>(expected, read.Value.DecodeUtf8(), "original prefix and actual append bytes");
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        return Assert.True(false, "append contracts require scoped probe dispatch");
+    }
+
+    public Result<void,TestFailure> BodyWithProbe(CancellationToken token, CancellationToken probeToken) {
+        int cap = 64;
+        if (scenario == 2) {
+            cap = 7;
+        } else if (scenario == 8) {
+            cap = 8589934592;
+        }
+
+        Result<AppendFileState,IoFailure> observed = output.InspectAppendTarget(path, cap, token);
+        if (scenario == 6) {
+            try Assert.True(observed.IsFailure && observed.Error.effect == OutputEffect.NoDurableOutput &&
+                            observed.Error.code == "io.append_type", "symlink refused at metadata admission");
+            return Assert.True(output.InspectAppendTarget("missing", cap, token).IsFailure, "missing file stays absent");
+        }
+
+        try Assert.True(observed.IsSuccess, "inspection binds actual extent and object");
+        if (scenario == 8)
+            try Assert.Equal<int>(cap, observed.Value.byteCount, "actual sparse fixture reaches the 8 GiB extent bound");
+        if (scenario == 7)
+            try Assert.True(fixture.ChangeRevision().IsSuccess, "real same-length source mutation");
+
+        ByteBuffer suffix = ByteBuffer.FromUtf8("new\n");
+        Result<AppendFileState,IoFailure> appended = Result<AppendFileState,IoFailure>.Failure(new IoFailure {});
+        if (scenario == 3 || scenario == 5)
+            appended = output.AppendExistingFile(path, observed.Value, cap, suffix, probeToken);
+        else
+            appended = output.AppendExistingFile(path, observed.Value, cap, suffix, token);
+
+        if (scenario <= 1) {
+            try Assert.True(appended.IsSuccess && appended.Value.byteCount == 8, "actual complete append");
+            Result<AppendFileState,IoFailure> replay = output.AppendExistingFile(path, observed.Value, cap, suffix, token);
+            try Assert.True(replay.IsFailure && replay.Error.code == "io.append_stale" &&
+                            replay.Error.effect == OutputEffect.NoDurableOutput, "stale extent cannot replay bytes");
+            if (scenario == 1) {
+                Result<AppendFileState,IoFailure> resumed = output.AppendExistingFile(path, appended.Value,
+                    cap, ByteBuffer.FromUtf8("again\n"), token);
+                try Assert.True(resumed.IsSuccess && resumed.Value.byteCount == 14, "resume from the new observed extent");
+                return ActualBytes("old\nnew\nagain\n", token);
+            }
+
+            return ActualBytes("old\nnew\n", token);
+        }
+
+        if (scenario == 2 || scenario == 8) {
+            try Assert.True(appended.IsFailure && appended.Error.code == "io.byte_limit" &&
+                            appended.Error.effect == OutputEffect.NoDurableOutput, "running cap refuses before writing");
+            if (scenario == 8)
+                return Assert.Equal<int>(cap, output.InspectAppendTarget(path, cap, token).Value.byteCount, "extent unchanged");
+
+            return ActualBytes("old\n", token);
+        }
+
+        if (scenario == 3) {
+            try Assert.True(appended.IsCancelled && appended.Error.effect == OutputEffect.NoDurableOutput,
+                            "pre-cancel has no persistent effect");
+            return ActualBytes("old\n", token);
+        }
+
+        if (scenario == 7) {
+            try Assert.True(appended.IsFailure && appended.Error.code == "io.append_stale" &&
+                            appended.Error.effect == OutputEffect.NoDurableOutput, "changed revision refuses stale append");
+            return ActualBytes("OLD\n", token);
+        }
+
+        if (scenario == 4) {
+            try Assert.True(appended.IsFailure && appended.Error.code == "io.append_short", "actual short write is consumed");
+        } else {
+            try Assert.True(appended.IsCancelled, "post-write cancellation remains typed");
+        }
+
+        try Assert.True(appended.Error.effect == OutputEffect.Unknown, "actual prefix remains for read-back");
+        try Assert.Equal<int>(effects + 1, fixture.Effects().Value, "actual write boundary reached once");
+        Result<AppendFileState,IoFailure> refused = output.AppendExistingFile(path, observed.Value, cap, suffix, token);
+        try Assert.True(refused.IsFailure && refused.Error.code == "io.append_stale", "stale replay remains refused");
+        if (scenario == 4)
+            return ActualBytes("old\nn", token);
+
+        return ActualBytes("old\nnew\n", token);
+    }
+}

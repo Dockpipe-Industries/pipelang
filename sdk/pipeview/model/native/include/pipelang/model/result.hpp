@@ -1,6 +1,8 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "publication.hpp"
+
 #include <charconv>
 #include <cstdint>
 #include <cstddef>
@@ -8,6 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -23,6 +26,11 @@ public:
 class OperationCancelled : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
+};
+
+class StaleContextCancelled : public OperationCancelled {
+public:
+    StaleContextCancelled() : OperationCancelled("context.stale") {}
 };
 
 class EvaluationLimitFailure : public ExecutionFailure {
@@ -128,7 +136,7 @@ constexpr void validate(const Result<T, E>& result);
 template<class T>
 constexpr void validate(const T&) {}
 
-inline void validate(const std::string& value) {
+inline void validateText(std::string_view value) {
     if (value.size() > maximumStringBytes)
         throw ExecutionFailure("string byte limit exceeded");
     std::size_t offset = 0;
@@ -167,6 +175,7 @@ inline void validate(const std::string& value) {
     }
 }
 
+inline void validate(const std::string& value) { validateText(value); }
 inline void validate(const Error& error) { validate(error.message); }
 
 inline Error makeError(std::string message) {
@@ -252,20 +261,24 @@ inline constexpr std::int64_t negate(std::int64_t value) {
     return subtract(0, value);
 }
 
-inline std::string concatenate(const std::string& left, const std::string& right) {
-    validate(left);
-    validate(right);
+inline std::string concatenate(std::string_view left, std::string_view right) {
+    validateText(left);
+    validateText(right);
     if (right.size() > maximumStringBytes - left.size())
         throw ExecutionFailure("string byte limit exceeded");
-    return left + right;
+    std::string joined;
+    joined.reserve(left.size() + right.size());
+    joined.append(left);
+    joined.append(right);
+    return joined;
 }
 
-inline bool isUtf8Boundary(const std::string& value, std::size_t offset) {
+inline bool isUtf8Boundary(std::string_view value, std::size_t offset) {
     return offset == value.size() ||
         (static_cast<unsigned char>(value[offset]) & 0xc0) != 0x80;
 }
 
-inline std::size_t checkedUtf8Offset(const std::string& value, std::int64_t offset) {
+inline std::size_t checkedUtf8Offset(std::string_view value, std::int64_t offset) {
     if (offset < 0 || static_cast<std::uint64_t>(offset) > value.size())
         throw ExecutionFailure("UTF-8 byte offset out of range");
     const auto position = static_cast<std::size_t>(offset);
@@ -274,8 +287,8 @@ inline std::size_t checkedUtf8Offset(const std::string& value, std::int64_t offs
     return position;
 }
 
-inline std::int64_t utf8Length(const std::string& value) {
-    validate(value);
+inline std::int64_t utf8Length(std::string_view value) {
+    validateText(value);
     return static_cast<std::int64_t>(value.size());
 }
 
@@ -287,8 +300,8 @@ inline std::string stringFromInt(std::int64_t value) {
     return std::string(buffer, converted.ptr);
 }
 
-inline std::string utf8Slice(const std::string& value, std::int64_t start, std::int64_t count) {
-    validate(value);
+inline std::string_view utf8SliceView(std::string_view value, std::int64_t start, std::int64_t count) {
+    validateText(value);
     const auto position = checkedUtf8Offset(value, start);
     if (count < 0 || static_cast<std::uint64_t>(count) > value.size() - position)
         throw ExecutionFailure("UTF-8 byte count out of range");
@@ -298,30 +311,51 @@ inline std::string utf8Slice(const std::string& value, std::int64_t start, std::
     return value.substr(position, length);
 }
 
-inline std::int64_t utf8IndexOf(const std::string& value, const std::string& pattern, std::int64_t start) {
-    validate(value);
-    validate(pattern);
+inline std::string utf8Slice(std::string_view value, std::int64_t start, std::int64_t count) {
+    return std::string(utf8SliceView(value, start, count));
+}
+
+inline std::int64_t utf8IndexOf(std::string_view value, std::string_view pattern, std::int64_t start) {
+    validateText(value);
+    validateText(pattern);
     const auto position = checkedUtf8Offset(value, start);
     const auto found = value.find(pattern, position);
-    return found == std::string::npos ? -1 : static_cast<std::int64_t>(found);
+    return found == std::string_view::npos ? -1 : static_cast<std::int64_t>(found);
 }
 
 // A transaction owns its working copy. No authored partial mutation escapes a
 // failed synchronous action. Async methods commit at each await and successful
 // return, then refresh from live state when resumed by the owner executor.
+template<class State>
+class GraphModelTransaction;
+
 template<class T>
 class Transaction {
 public:
-    explicit Transaction(T& target) : target_(target), working_(target) {}
+    explicit Transaction(T& target)
+        : publication_(currentPublicationGuard()), target_(target), working_(target) {}
     T& state() { return working_; }
     const T& state() const { return working_; }
     void commit() {
+        requirePublication();
+        publishUnchecked();
+    }
+    void refresh() { working_ = target_; }
+private:
+    template<class State>
+    friend class GraphModelTransaction;
+
+    void requirePublication() const {
+        if (!publication_.is_current())
+            throw StaleContextCancelled();
+    }
+
+    void publishUnchecked() noexcept {
         static_assert(std::is_nothrow_swappable_v<T>);
         using std::swap;
         swap(target_, working_);
     }
-    void refresh() { working_ = target_; }
-private:
+    PublicationGuard publication_;
     T& target_;
     T working_;
 };

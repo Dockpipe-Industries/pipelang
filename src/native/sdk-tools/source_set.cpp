@@ -91,6 +91,28 @@ const std::string& SourceSet::compilerProtocol() const {
     return compilerProtocol_;
 }
 
+const std::string& SourceSet::entryModule() const
+{
+    return entry_;
+}
+
+std::vector<models::ModuleSource> SourceSet::sourceModules() const
+{
+    std::vector<models::ModuleSource> modules;
+    modules.reserve(records_.size());
+    for (std::size_t index = 0; index < records_.size(); ++index) {
+        const auto& record = records_[index];
+        modules.push_back({record.at("name").get<std::string>(), contents_.at(index + 1),
+                           record.at("path").get<std::string>()});
+    }
+    return modules;
+}
+
+std::vector<std::string> SourceSet::exportedModels() const
+{
+    return models_.is_null() ? std::vector<std::string>{} : models_.get<std::vector<std::string>>();
+}
+
 Json SourceSet::request(const std::string& nameSpace) const {
     Json result{{"protocol", compilerProtocol_}, {"entry", entry_},
                 {"modules", modules_}, {"namespace", nameSpace}};

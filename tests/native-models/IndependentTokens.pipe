@@ -1,0 +1,172 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Record TokenReceipt {
+    public bool bodyBefore;
+    public bool cleanupBefore;
+    public bool bodyAfter;
+    public bool cleanupAfter;
+    public int bodyOutcome;
+    public int cleanupOutcome;
+}
+
+public Record ScopeStamp {
+    public int value;
+}
+
+public Interface TokenHost {
+    Task<Result<int,string>> Step(int phase, CancellationToken token);
+}
+
+public source Interface ITokenPath {
+    Task<Result<TokenReceipt,string>> Run(CancellationToken bodyToken, CancellationToken cleanupToken);
+    Task<Result<int,string>> Wait(CancellationToken bodyToken, CancellationToken cleanupToken);
+    void ReleasePermit();
+}
+
+public Class TokenWorker : ITokenPath {
+    private TokenHost host;
+    private int phase;
+    private SemaphoreSlim permits = SemaphoreSlim.Create(0, 1);
+
+    public TokenWorker(TokenHost host, ScopeStamp stamp) {
+        this.host = host;
+        phase = stamp.value * 10;
+    }
+
+    private pure int Outcome(Result<int,string> result) {
+        if (result.IsSuccess)
+            return 1;
+        if (result.IsCancelled)
+            return 2;
+        return 3;
+    }
+
+    public async Task<Result<TokenReceipt,string>> Generic<T>(T retained, CancellationToken bodyToken, CancellationToken cleanupToken) {
+        bool bodyBefore = bodyToken.IsCancellationRequested;
+        bool cleanupBefore = cleanupToken.IsCancellationRequested;
+        Result<int,string> body = Result<int,string>.Success(0);
+        Result<int,string> cleanup = Result<int,string>.Success(0);
+        try {
+            body = await host.Step(phase + 1, bodyToken);
+        } finally {
+            cleanup = await host.Step(phase + 2, cleanupToken);
+        }
+        return Result<TokenReceipt,string>.Success(TokenReceipt(bodyBefore, cleanupBefore,
+            bodyToken.IsCancellationRequested, cleanupToken.IsCancellationRequested,
+            Outcome(body), Outcome(cleanup)));
+    }
+
+    public async Task<Result<TokenReceipt,string>> Run(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await Generic<int>(17, bodyToken, cleanupToken);
+        return result;
+    }
+
+    public async Task<Result<int,string>> Wait(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        await permits.WaitAsync(bodyToken);
+        return Result<int,string>.Success(1);
+    }
+
+    public void ReleasePermit() { permits.Release(); }
+}
+
+public Class VirtualPath {
+    public virtual async Task<Result<TokenReceipt,string>> Run(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        return Result<TokenReceipt,string>.Failure("unselected virtual base");
+    }
+}
+
+public Class DerivedPath : VirtualPath {
+    private TokenWorker worker;
+    public DerivedPath(TokenHost host) { worker = new TokenWorker(host, ScopeStamp(0)); }
+    public override async Task<Result<TokenReceipt,string>> Run(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await worker.Generic<int>(19, bodyToken, cleanupToken);
+        return result;
+    }
+}
+
+public Class App {
+    private TokenHost host;
+    private TokenWorker worker;
+    private ITokenPath path;
+    private VirtualPath virtualPath;
+    private SemaphoreSlim permit = SemaphoreSlim.Create(1, 1);
+    private Lock gate;
+
+    public App(TokenHost host) {
+        this.host = host;
+        worker = new TokenWorker(host, ScopeStamp(0));
+        path = worker;
+        virtualPath = new DerivedPath(host);
+    }
+
+    private pure int Outcome(Result<int,string> result) {
+        if (result.IsSuccess)
+            return 1;
+        if (result.IsCancelled)
+            return 2;
+        return 3;
+    }
+
+    public async Task<Result<TokenReceipt,string>> Direct(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        bool bodyBefore = bodyToken.IsCancellationRequested;
+        bool cleanupBefore = cleanupToken.IsCancellationRequested;
+        Result<int,string> body = Result<int,string>.Success(0);
+        Result<int,string> cleanup = Result<int,string>.Success(0);
+        try {
+            body = await host.Step(1, bodyToken);
+        } finally {
+            cleanup = await host.Step(2, cleanupToken);
+        }
+        return Result<TokenReceipt,string>.Success(TokenReceipt(bodyBefore, cleanupBefore,
+            bodyToken.IsCancellationRequested, cleanupToken.IsCancellationRequested,
+            Outcome(body), Outcome(cleanup)));
+    }
+
+    private async Task<Result<TokenReceipt,string>> LocalChild(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await Direct(bodyToken, cleanupToken);
+        return result;
+    }
+    public async Task<Result<TokenReceipt,string>> Local(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await LocalChild(bodyToken, cleanupToken);
+        return result;
+    }
+    public async Task<Result<TokenReceipt,string>> ViaObject(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await worker.Run(bodyToken, cleanupToken);
+        return result;
+    }
+    public async Task<Result<TokenReceipt,string>> ViaInterface(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await path.Run(bodyToken, cleanupToken);
+        return result;
+    }
+    public async Task<Result<TokenReceipt,string>> ViaVirtual(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await virtualPath.Run(bodyToken, cleanupToken);
+        return result;
+    }
+    private async Task<Result<TokenReceipt,string>> GenericChild<T>(T retained, CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await Direct(bodyToken, cleanupToken);
+        return result;
+    }
+    public async Task<Result<TokenReceipt,string>> ViaGeneric(CancellationToken bodyToken, CancellationToken cleanupToken) {
+        Result<TokenReceipt,string> result = await GenericChild<int>(23, bodyToken, cleanupToken);
+        return result;
+    }
+
+    public bool Wait(CancellationToken bodyToken, CancellationToken unrelatedToken) {
+        return permit.Wait(0, bodyToken);
+    }
+    public async Task<Result<bool,string>> WaitAsync(CancellationToken bodyToken, CancellationToken unrelatedToken) {
+        bool acquired = await permit.WaitAsync(0, bodyToken);
+        return Result<bool,string>.Success(acquired);
+    }
+    public int LockValue(CancellationToken unusedToken) {
+        lock (gate) {
+            return 7;
+        }
+    }
+    public int ParallelValue(List<int> values, CancellationToken unusedToken) {
+        Atomic<int> total = Atomic<int>.Create(0);
+        parallel foreach (int value in values) {
+            total.Add(value);
+        }
+        return total.Load();
+    }
+}

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -12,6 +13,70 @@
 namespace pipelang::model {
 
 inline constexpr std::size_t maximumByteBufferBytes = 1024 * 1024;
+
+namespace byte_buffer {
+
+inline std::size_t offset(std::size_t size, std::int64_t value) {
+    if (value < 0 || static_cast<std::uint64_t>(value) > size)
+        throw ExecutionFailure("byte buffer offset out of range");
+    return static_cast<std::size_t>(value);
+}
+
+inline std::uint8_t at(std::span<const std::uint8_t> bytes, std::int64_t index) {
+    const auto position = offset(bytes.size(), index);
+    if (position == bytes.size())
+        throw ExecutionFailure("byte buffer index out of range");
+    return bytes[position];
+}
+
+inline std::span<const std::uint8_t> slice(std::span<const std::uint8_t> bytes, std::int64_t start, std::int64_t count) {
+    const auto position = offset(bytes.size(), start);
+    if (count < 0 || static_cast<std::uint64_t>(count) > bytes.size() - position)
+        throw ExecutionFailure("byte buffer count out of range");
+    return bytes.subspan(position, static_cast<std::size_t>(count));
+}
+
+inline std::int64_t indexOf(std::span<const std::uint8_t> bytes, std::span<const std::uint8_t> pattern,
+                            std::int64_t start) {
+    const auto position = offset(bytes.size(), start);
+    if (pattern.empty())
+        return start;
+    if (pattern.size() > bytes.size() - position)
+        return -1;
+    // Prefix matching keeps repeated-byte inputs linear in both lengths.
+    std::vector<std::size_t> prefix(pattern.size(), 0);
+    std::size_t matched = 0;
+    for (std::size_t index = 1; index < pattern.size(); ++index) {
+        while (matched > 0 && pattern[index] != pattern[matched])
+            matched = prefix[matched - 1];
+        if (pattern[index] == pattern[matched])
+            ++matched;
+        prefix[index] = matched;
+    }
+    matched = 0;
+    for (std::size_t index = position; index < bytes.size(); ++index) {
+        while (matched > 0 && bytes[index] != pattern[matched])
+            matched = prefix[matched - 1];
+        if (bytes[index] == pattern[matched])
+            ++matched;
+        if (matched == pattern.size())
+            return static_cast<std::int64_t>(index + 1 - matched);
+    }
+    return -1;
+}
+
+inline void admitAppend(std::size_t size, std::size_t count) {
+    if (size > maximumByteBufferBytes || count > maximumByteBufferBytes - size)
+        throw ExecutionFailure("byte buffer limit exceeded");
+}
+
+inline std::uint8_t byte(std::uint32_t value) {
+    if (value > 255)
+        throw ExecutionFailure("byte buffer value must be between 0 and 255");
+    return static_cast<std::uint8_t>(value);
+}
+
+}
 
 class ByteBuffer {
 public:
@@ -36,61 +101,27 @@ public:
     }
 
     std::uint32_t at(std::int64_t index) const {
-        const auto position = checkedOffset(index);
-        if (position == bytes_.size())
-            throw ExecutionFailure("byte buffer index out of range");
-        return bytes_[position];
+        return byte_buffer::at(bytes_, index);
     }
 
     ByteBuffer slice(std::int64_t start, std::int64_t count) const {
-        const auto position = checkedOffset(start);
-        if (count < 0 || static_cast<std::uint64_t>(count) > bytes_.size() - position)
-            throw ExecutionFailure("byte buffer count out of range");
-        const auto first = bytes_.begin() + static_cast<std::ptrdiff_t>(position);
-        const auto last = first + static_cast<std::ptrdiff_t>(count);
-        return ByteBuffer(std::vector<std::uint8_t>(first, last));
+        const auto slice = byte_buffer::slice(bytes_, start, count);
+        return ByteBuffer(std::vector<std::uint8_t>(slice.begin(), slice.end()));
     }
 
     std::int64_t indexOf(const ByteBuffer& pattern, std::int64_t start) const {
-        const auto position = checkedOffset(start);
-        if (pattern.bytes_.empty())
-            return start;
-        if (pattern.bytes_.size() > bytes_.size() - position)
-            return -1;
-        // Prefix matching keeps repeated-byte inputs linear in both lengths.
-        std::vector<std::size_t> prefix(pattern.bytes_.size(), 0);
-        std::size_t matched = 0;
-        for (std::size_t index = 1; index < pattern.bytes_.size(); ++index) {
-            while (matched > 0 && pattern.bytes_[index] != pattern.bytes_[matched])
-                matched = prefix[matched - 1];
-            if (pattern.bytes_[index] == pattern.bytes_[matched])
-                ++matched;
-            prefix[index] = matched;
-        }
-        matched = 0;
-        for (std::size_t index = position; index < bytes_.size(); ++index) {
-            while (matched > 0 && bytes_[index] != pattern.bytes_[matched])
-                matched = prefix[matched - 1];
-            if (bytes_[index] == pattern.bytes_[matched])
-                ++matched;
-            if (matched == pattern.bytes_.size())
-                return static_cast<std::int64_t>(index + 1 - matched);
-        }
-        return -1;
+        return byte_buffer::indexOf(bytes_, pattern.bytes_, start);
     }
 
     void append(ByteBuffer value) {
-        if (value.bytes_.size() > maximumByteBufferBytes - bytes_.size())
-            throw ExecutionFailure("byte buffer limit exceeded");
+        byte_buffer::admitAppend(bytes_.size(), value.bytes_.size());
         bytes_.insert(bytes_.end(), value.bytes_.begin(), value.bytes_.end());
     }
 
     void add(std::uint32_t value) {
-        if (value > 255)
-            throw ExecutionFailure("byte buffer value must be between 0 and 255");
-        if (bytes_.size() == maximumByteBufferBytes)
-            throw ExecutionFailure("byte buffer limit exceeded");
-        bytes_.push_back(static_cast<std::uint8_t>(value));
+        const auto admitted = byte_buffer::byte(value);
+        byte_buffer::admitAppend(bytes_.size(), 1);
+        bytes_.push_back(admitted);
     }
 
     std::string decodeUtf8() const {
@@ -106,12 +137,6 @@ public:
     bool operator==(const ByteBuffer&) const = default;
 
 private:
-    std::size_t checkedOffset(std::int64_t offset) const {
-        if (offset < 0 || static_cast<std::uint64_t>(offset) > bytes_.size())
-            throw ExecutionFailure("byte buffer offset out of range");
-        return static_cast<std::size_t>(offset);
-    }
-
     std::vector<std::uint8_t> bytes_;
 };
 

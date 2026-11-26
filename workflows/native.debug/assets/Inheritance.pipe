@@ -1,0 +1,111 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.Inheritance;
+
+public source Interface IReading {
+    pure int Read();
+    Task<Result<int,string>> Later();
+}
+
+public Class Base {
+    private int stored = 6;
+
+    public Base(int initial) {
+        stored = stored + initial;
+    }
+
+    public virtual pure int Read() {
+        return stored;
+    }
+
+    public virtual async Task<Result<int,string>> Later() {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(4);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected base permit");
+        return Result<int,string>.Success(stored);
+    }
+}
+
+public Class Child : Base {
+    private int increment = 2;
+
+    public Child(int initial, int increment) : base(initial) {
+        this.increment = this.increment + increment;
+    }
+
+    public override pure int Read() {
+        return base.Read() + increment;
+    }
+
+    public override async Task<Result<int,string>> Later() {
+        int inherited = try await base.Later();
+        return Result<int,string>.Success(inherited + increment);
+    }
+}
+
+public Class Grandchild : Child, IReading {
+    private int marker = 4;
+
+    public Grandchild(int initial, int increment) : base(initial, increment) {
+        marker = marker + 1;
+    }
+
+    public pure int Marker() {
+        return marker;
+    }
+}
+
+public Class Sibling : Base {
+    public Sibling(int initial) : base(initial) {}
+
+    public override pure int Read() {
+        return base.Read() - 3;
+    }
+}
+
+public model Class Session {
+    public Session() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        if (scenario == 0) {
+            Base direct = new Base(11);
+            int first = direct.Read();
+            int later = try await direct.Later();
+            return Result<int,string>.Success(first + later);
+        }
+        if (scenario == 1) {
+            Grandchild derived = new Grandchild(30, 4);
+            Base view = derived;
+            int reading = view.Read();
+            int later = try await view.Later();
+            return Result<int,string>.Success(reading + later + derived.Marker());
+        }
+        if (scenario == 2) {
+            IReading contract = new Grandchild(30, 4);
+            int reading = contract.Read();
+            int later = try await contract.Later();
+            return Result<int,string>.Success(reading + later);
+        }
+
+        if (scenario == 4) {
+            Base? absent = null;
+            if (absent.HasValue)
+                return Result<int,string>.Failure("absent virtual receiver became present");
+            try {
+                int unexpected = absent.Value.Read();
+                return Result<int,string>.Failure("absent virtual receiver returned " + string.FromInt(unexpected));
+            } catch (Error error) {
+                if (error.Message != "Optional.Value requires Some")
+                    return Result<int,string>.Failure(error.Message);
+            }
+            Base? view = new Grandchild(30, 4);
+            int later = try await view.Value.Later();
+            return Result<int,string>.Success(later);
+        }
+
+        Base sibling = new Sibling(14);
+        int first = sibling.Read();
+        int second = try await sibling.Later();
+        return Result<int,string>.Success(first + second);
+    }
+}

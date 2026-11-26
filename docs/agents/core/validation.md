@@ -10,14 +10,20 @@ Run the default workflows through the exact released DockPipe admitted by
 "$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml
 ```
 
-There is no Go/Python fallback or opt-in native lane. Build compiles the C++
-SDK, command line tools and C++ assertions. Check rejects Go/Python sources,
-bytecode and manifests, interpreter/toolchain commands in workflow/CMake scripts,
+Build compiles the C++ SDK, command line tools and C++ assertions. Check
+rejects Go/Python sources, bytecode and manifests, interpreter/toolchain commands in workflow/CMake scripts,
 unpinned CI actions and toolchain-lock drift. All remaining declared workflows
 are validated. Tests run compiler oracles, generated runtime fixtures and
 ASan/UBSan counterparts. Packaging verifies the installed manifest, writes a
 bounded deterministic archive, extracts by exact checksum, and qualifies relocated
 tools and an installed CMake consumer. Publication is separate.
+
+The build workflow includes the direct object compiler and the supported host's
+application runtime in the SDK by default. The release workflow packages the
+selected build and records both files in its manifest. Set
+`PIPELANG_BUILD_NATIVE_OBJECT_PROOF=OFF` for a compatibility-only workflow build.
+Direct CMake configuration defaults to `ON` in a fresh build directory and
+honors the cached selection in an existing build directory.
 
 On Linux, the first build bootstraps only the C++ containment runner/probe
 inside one verified systemd unit. It checks memory.max=1GiB, memory.high=700MiB, no swap and
@@ -28,6 +34,11 @@ instead. These are optional inputs, not dependencies on a historical SDK.
 
 Every Linux full job retains the existing aggregate cap of 2GiB, memory.high=1536MiB,
 zero swap and 384 tasks; workload units retain the above 1GiB/800MiB limits.
+Linux execve tracing uses strace's syscall filter when the installed tracer
+supports it, avoiding stops for unselected syscalls. Descendant execve coverage
+and execution audits remain unchanged; unavailable kernel filtering retains
+ordinary tracing. Sanitizer runtime exceptions to tracing remain as below.
+
 The proof estate cap remains 8GiB. Accounting does not follow symbolic/reparse
 entries. Windows counts their own allocation and refuses redirected estate roots;
 SDK/package/source admission separately rejects reparse inputs. The cap covers the
@@ -49,6 +60,11 @@ in C++. Its sanitizer runtime units are untraced because LeakSanitizer refuses
 ptrace; their normal counterparts and compilation are traced. Native macOS and
 Windows use explicit compiler/tool paths and native-only producer PATHs; this
 does not claim Linux syscall tracing on those platforms.
+
+The POSIX C++ fixture sanitizer builds use `-g1` to keep file and line reports
+within the existing memory limits. The direct native runtime sanitizer build
+uses the same level for its C++ SDK objects. The PipeLang source debugger
+checks use the native compiler's debug profile.
 
 Focused suite/runtime selectors provide subset evidence only. Default tests
 include all declared modern suites, C++ source/runtime fixtures, inheritance and

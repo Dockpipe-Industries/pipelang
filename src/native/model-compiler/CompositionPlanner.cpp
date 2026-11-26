@@ -221,7 +221,7 @@ private:
             refuse(origin, "composition method selectors require a source class or source interface");
         while (owner) {
             for (const auto& method : owner->methods) {
-                if (method.constructor || method.name != name)
+                if (method.constructor || method.staticMethod || method.name != name)
                     continue;
                 std::string key;
                 for (const auto& parameter : method.parameters)

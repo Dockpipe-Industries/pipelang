@@ -1,0 +1,93 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Interface LoopObserver {
+    Result<void,string> Cleanup();
+    Task<Result<int,string>> Read(CancellationToken token);
+}
+
+public Class App {
+    private LoopObserver observer;
+    private int updates = 0;
+
+    public App(LoopObserver observer) {
+        this.observer = observer;
+    }
+
+    public pure int RawWhile() {
+        while (true) {}
+    }
+
+    public pure int RawFor() {
+        for (;;) {}
+    }
+
+    public Result<int,string> EmptyWhile() {
+        try {
+            while (true) {}
+        } finally {
+            Result<void,string> cleanup = observer.Cleanup();
+        }
+    }
+
+    public Result<int,string> EmptyFor() {
+        try {
+            for (;;) {}
+        } finally {
+            Result<void,string> cleanup = observer.Cleanup();
+        }
+    }
+
+    public Result<int,string> WhileTransfers() {
+        int index = 0;
+        while (true) {
+            index = index + 1;
+            if (index < 3)
+                continue;
+            break;
+        }
+        return Result<int,string>.Success(index);
+    }
+
+    private void Advance() {
+        updates = updates + 1;
+    }
+
+    public Result<int,string> ForTransfers() {
+        updates = 0;
+        for (; true; Advance()) {
+            if (updates == 3)
+                break;
+            continue;
+        }
+        return Result<int,string>.Success(updates);
+    }
+
+    private pure Result<int,string> Step(int value, bool fail) {
+        if (fail)
+            return Result<int,string>.Failure("loop iteration failed");
+        return Result<int,string>.Success(value + 1);
+    }
+
+    public Result<int,string> PropagatingFor(bool fail) {
+        int index = 0;
+        for (; true; index = try Step(index, fail)) {
+            if (index == 3)
+                break;
+            continue;
+        }
+        return Result<int,string>.Success(index);
+    }
+
+    public async Task<Result<int,string>> AwaitedLoop(CancellationToken token) {
+        try {
+            while (true) {
+                Result<int,string> observed = await observer.Read(token);
+                if (!observed.IsSuccess)
+                    return observed;
+                if (observed.Value > 0)
+                    return observed;
+            }
+        } finally {
+            Result<void,string> cleanup = observer.Cleanup();
+        }
+    }
+}

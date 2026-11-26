@@ -1,0 +1,50 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.NumericExport;
+
+public Record Point {
+    public float wide;
+    public float32 narrow;
+    public uint32 code;
+    public int tag;
+}
+
+public Record Pair {
+    public Point point;
+    public float32 ratio;
+}
+
+public Record Empty {
+}
+
+public model Class Queries {
+    public pure float32 Narrow(float value) => float32.FromFloat(value);
+    public pure float Widen(float32 value) => float.FromFloat32(value);
+    public pure float32 Add(float32 first, float32 second) => first + second;
+    public pure float32 Divide(float32 first, float32 second) => first / second;
+    public pure float32 LiteralDivide() => 1.0f / 3.0f;
+    public pure float32 ThroughHelper(float32 first, float32 second) => Helper.Add(first, second);
+    public pure float32 SingleFromInteger(int value) => float32.FromInt(value);
+    public pure float WideFromInteger(int value) => float.FromInt(value);
+    public pure int SignedIdentity(int value) => value;
+    public pure uint32 UnsignedIdentity(uint32 value) => value;
+    public pure float Choose(float first, float second) {
+        bool selectsFirst = first < second;
+        if (selectsFirst)
+            return first;
+        return second;
+    }
+    public pure Point AdjustPoint(Point point, float shift)
+        => Point(point.wide + shift, (point.narrow + 0.000000059604644775390625f) / 3.0f, point.code, point.tag);
+    public pure Pair NestPoint(Point point, float shift) {
+        Point moved = AdjustPoint(point, shift);
+        return Pair(moved, moved.narrow);
+    }
+    public pure int PointTag(Point point) => point.tag;
+    public pure Empty EmptyRecord(Empty value) => value;
+    public pure int Unsafe(float value) => int.RoundFromFloat(value);
+    public pure float32 Unsupported(float32 value) => float32.Sin(value);
+}
+
+public model Class Helper {
+    public pure float32 Add(float32 first, float32 second) => first + second;
+}

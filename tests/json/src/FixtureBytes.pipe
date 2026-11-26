@@ -1,0 +1,8 @@
+module PipeLang.Json.Tests;
+import PipeLang.Json;
+
+public Interface FixtureBytes {
+    Result<int,string> Length(int scenario);
+    Result<ByteBuffer,string> Slice(int scenario, int start, int count);
+    Result<JsonNode,string> CompleteCancelled(int document);
+}

@@ -140,7 +140,8 @@ Json generateArtifacts(const fs::path& prefix, const fs::path& manifest, const s
                       const fs::path& projectRoot = {}, const fs::path& sourceRoot = {},
                       const fs::path& entry = {}, bool compiled = false, bool planning = false,
                       const std::string& expectedPlan = {}, const std::string& numericEnvironment = {},
-                      bool requireCompositionPlan = false, bool emitCompositionFactory = false) {
+                      bool requireCompositionPlan = false, bool emitCompositionFactory = false,
+                      const fs::path& sourceLibraries = {}) {
     require(!requireCompositionPlan || !projectRoot.empty(), "composition plans require PROJECT_ROOT");
     require(!emitCompositionFactory || (!projectRoot.empty() && !withView),
             "composition factories require a headless PROJECT_ROOT");
@@ -201,16 +202,17 @@ Json generateArtifacts(const fs::path& prefix, const fs::path& manifest, const s
     }
     std::optional<SourceProject> project;
     if (!projectRoot.empty()) {
-        project.emplace(SourceProject::load(projectRoot, sourceRoot, entry));
+        project.emplace(SourceProject::load(projectRoot, sourceRoot, entry, sourceLibraries));
         for (const auto& input : planning ? std::vector<fs::path>{} : project->dependencies()) {
             const auto relative = input.lexically_relative(output).generic_string();
             require(input != output && (relative.empty() || relative == ".." || relative.starts_with("../")),
                     "output cannot own a project input");
         }
-        const auto sourceDirectory = projectRoot / sourceRoot;
-        const auto outputRelative = output.lexically_relative(sourceDirectory).generic_string();
-        require(planning || outputRelative.empty() || outputRelative == ".." || outputRelative.starts_with("../"),
-                "project outputs must be outside the discovered source root");
+        for (const auto& sourceDirectory : project->sourceDirectories()) {
+            const auto outputRelative = output.lexically_relative(sourceDirectory).generic_string();
+            require(planning || outputRelative.empty() || outputRelative == ".." || outputRelative.starts_with("../"),
+                    "project outputs must be outside the discovered source root");
+        }
     }
     const auto modelBytes = sourceSet || project ? std::string{} : source(model);
     const auto viewBytes = withView ? source(view) : std::string{};
@@ -393,10 +395,10 @@ Json generateProjectBindings(const fs::path& prefix, const fs::path& manifest, c
                              const fs::path& sourceRoot, const fs::path& entry,
                              const std::string& nameSpace, const fs::path& output,
                              const std::string& numericEnvironment, bool requireCompositionPlan,
-                             bool emitCompositionFactory) {
+                             bool emitCompositionFactory, const fs::path& sourceLibraries) {
     return generateArtifacts(prefix, manifest, manifestHash, modelTool, {},
         {}, {}, nameSpace, output, false, false, {}, projectRoot, sourceRoot, entry, false, false, {}, numericEnvironment,
-        requireCompositionPlan, emitCompositionFactory);
+        requireCompositionPlan, emitCompositionFactory, sourceLibraries);
 }
 
 Json generateModelBindings(const fs::path& prefix, const fs::path& manifest, const std::string& manifestHash,
@@ -409,10 +411,11 @@ Json compiledProjectInformation(const fs::path& prefix, const fs::path& manifest
                                 const std::string& manifestHash, const fs::path& modelTool,
                                 const fs::path& projectRoot, const fs::path& sourceRoot,
                                 const fs::path& entry, const std::string& nameSpace,
-                                const std::string& numericEnvironment, bool emitCompositionFactory) {
+                                const std::string& numericEnvironment, bool emitCompositionFactory,
+                                const fs::path& sourceLibraries) {
     return generateArtifacts(prefix, manifest, manifestHash, modelTool, {},
         {}, {}, nameSpace, {}, false, false, {}, projectRoot, sourceRoot, entry, true, true, {}, numericEnvironment,
-        emitCompositionFactory, emitCompositionFactory);
+        emitCompositionFactory, emitCompositionFactory, sourceLibraries);
 }
 
 Json generateCompiledProjectBindings(const fs::path& prefix, const fs::path& manifest,
@@ -421,10 +424,10 @@ Json generateCompiledProjectBindings(const fs::path& prefix, const fs::path& man
                                      const fs::path& entry, const std::string& nameSpace,
                                      const fs::path& output, const std::string& expectedPlan,
                                      const std::string& numericEnvironment, bool requireCompositionPlan,
-                                     bool emitCompositionFactory) {
+                                     bool emitCompositionFactory, const fs::path& sourceLibraries) {
     return generateArtifacts(prefix, manifest, manifestHash, modelTool, {},
         {}, {}, nameSpace, output, false, false, {}, projectRoot, sourceRoot, entry, true, false, expectedPlan, numericEnvironment,
-        requireCompositionPlan, emitCompositionFactory);
+        requireCompositionPlan, emitCompositionFactory, sourceLibraries);
 }
 
 }

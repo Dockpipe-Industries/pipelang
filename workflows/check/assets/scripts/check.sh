@@ -48,7 +48,7 @@ if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
     exit
 fi
 "$PIPELANG_NATIVE_RUNNER" unit --output "$proof/check" --estate "$proof" --timeout 600 -- \
-    /usr/bin/strace -f -e trace=execve -s 4096 -o "$proof/check.exec" \
+    /bin/sh "$script_directory/../../../build/assets/scripts/trace-executions.sh" "$proof/check.exec" \
     "$build/sdk-tools/pipelang-repository-check" --source-root "$PWD" --dockpipe "$DOCKPIPE_BIN" \
     --output "$proof/contracts" > "$proof/check.launcher.log" 2>&1
 "$PIPELANG_NATIVE_RUNNER" unit --output "$proof/exec-audit" --estate "$proof" --timeout 60 -- \

@@ -8,6 +8,7 @@
 #include <limits>
 #include <pipelang/model/collection.hpp>
 #include <pipelang/model/limits.hpp>
+#include <pipelang/model/source_call.hpp>
 
 namespace pipelang::models {
 NativeNumericExports::NativeNumericExports(const Program& program, const Declaration& owner, bool observation)
@@ -1850,7 +1851,11 @@ bool NativeNumericExports::method(const Declaration& owner, const Method& select
     } else if (!spendValue(selected.result)) {
         return false;
     }
-    if (!activeMethods_.insert(selected.identity).second)
+    // This projection intentionally omits runtime guards, so every admitted
+    // closure must independently prove the same source depth bound. Cyclic or
+    // deeper methods retain the ordinary guarded source implementation.
+    if (activeMethods_.size() >= pipelang::model::SourceCallContext::maximumDepth ||
+        !activeMethods_.insert(selected.identity).second)
         return false;
     OutcomeFlow flow;
     std::size_t arrayCount = 0;

@@ -1,4 +1,6 @@
 function(pipelang_add_model_bindings target)
+    _pipelang_model_resolve_cxx_resource_profile(cxx_resource_profile cxx_resource_response
+        cxx_resource_digest cxx_resource_dependency)
     cmake_parse_arguments(PARSE_ARGV 1 model "STYLE_INSPECTION" "MODEL;SOURCE_SET;VIEW;NAMESPACE;OUTPUT_DIRECTORY" "")
     if(model_UNPARSED_ARGUMENTS OR model_KEYWORDS_MISSING_VALUES)
         message(FATAL_ERROR "pipelang_add_model_bindings received unexpected or incomplete arguments")
@@ -40,10 +42,12 @@ function(pipelang_add_model_bindings target)
             ${inspection_arguments}
         DEPENDS "${model_source}" "${view_source}" "${PipeLangModel_MANIFEST}"
             "${PipeLangModel_MODELC}" "${PipeLangModel_VIEWC}" "${PipeLangModel_GENERATOR}"
-            ${runtime_headers}
+            ${runtime_headers} ${cxx_resource_dependency}
         VERBATIM COMMENT "Compile typed PipeLang model and view bindings")
     add_custom_target("${target}_generate" DEPENDS ${outputs})
     add_library("${target}" INTERFACE)
+    _pipelang_model_apply_cxx_resource_profile("${target}"
+        "${cxx_resource_profile}" "${cxx_resource_response}" "${cxx_resource_digest}")
     add_dependencies("${target}" "${target}_generate")
     target_link_libraries("${target}" INTERFACE PipeLang::ModelRuntime)
     set_property(TARGET "${target}" PROPERTY PIPELANG_CONSTANTS_HEADER "${output}/StandaloneConstants.hpp")
@@ -52,7 +56,9 @@ endfunction()
 
 # Generate ordinary model code without a view or UI adapter dependency.
 function(pipelang_add_model target)
-    cmake_parse_arguments(PARSE_ARGV 1 model "COMPOSITION_PLAN;COMPOSITION_FACTORY" "MODEL;SOURCE_SET;PROJECT_ROOT;SOURCE_ROOT;ENTRY;NAMESPACE;OUTPUT_DIRECTORY;COMPILATION;NATIVE_NUMERIC_ENVIRONMENT;RESOURCE_BUDGET" "")
+    _pipelang_model_resolve_cxx_resource_profile(cxx_resource_profile cxx_resource_response
+        cxx_resource_digest cxx_resource_dependency)
+    cmake_parse_arguments(PARSE_ARGV 1 model "COMPOSITION_PLAN;COMPOSITION_FACTORY;BATCH_IMPLEMENTATIONS" "MODEL;SOURCE_SET;PROJECT_ROOT;SOURCE_ROOT;ENTRY;SOURCE_LIBRARIES;NAMESPACE;OUTPUT_DIRECTORY;COMPILATION;RUNTIME_TARGET;NATIVE_NUMERIC_ENVIRONMENT;RESOURCE_BUDGET" "")
     if(model_UNPARSED_ARGUMENTS OR model_KEYWORDS_MISSING_VALUES)
         message(FATAL_ERROR "pipelang_add_model received unexpected or incomplete arguments")
     endif()
@@ -75,6 +81,23 @@ function(pipelang_add_model target)
     endif()
     if(NOT model_COMPILATION STREQUAL "HEADER_ONLY" AND NOT model_COMPILATION STREQUAL "COMPILED")
         message(FATAL_ERROR "COMPILATION must be HEADER_ONLY or COMPILED")
+    endif()
+    if(model_RUNTIME_TARGET)
+        if(NOT model_COMPILATION STREQUAL "COMPILED")
+            message(FATAL_ERROR "RUNTIME_TARGET requires COMPILATION COMPILED")
+        endif()
+        _pipelang_model_validate_linked_runtime("${model_RUNTIME_TARGET}" model_RUNTIME_TARGET)
+    endif()
+    if(model_BATCH_IMPLEMENTATIONS)
+        if(NOT model_COMPILATION STREQUAL "COMPILED")
+            message(FATAL_ERROR "BATCH_IMPLEMENTATIONS requires COMPILATION COMPILED")
+        endif()
+        if(DEFINED CMAKE_UNITY_BUILD AND NOT CMAKE_UNITY_BUILD)
+            message(FATAL_ERROR "BATCH_IMPLEMENTATIONS conflicts with CMAKE_UNITY_BUILD=OFF")
+        endif()
+        if(DEFINED CMAKE_UNITY_BUILD_BATCH_SIZE AND NOT CMAKE_UNITY_BUILD_BATCH_SIZE EQUAL 2)
+            message(FATAL_ERROR "BATCH_IMPLEMENTATIONS requires paired CMAKE_UNITY_BUILD_BATCH_SIZE=2")
+        endif()
     endif()
     set(numeric_environment_arguments)
     set(composition_plan_arguments)
@@ -116,8 +139,8 @@ function(pipelang_add_model target)
     if(model_COMPILATION STREQUAL "COMPILED" AND NOT model_PROJECT_ROOT)
         message(FATAL_ERROR "Compiled model generation requires PROJECT_ROOT")
     endif()
-    if(NOT model_PROJECT_ROOT AND (model_SOURCE_ROOT OR model_ENTRY))
-        message(FATAL_ERROR "SOURCE_ROOT and ENTRY require PROJECT_ROOT")
+    if(NOT model_PROJECT_ROOT AND (model_SOURCE_ROOT OR model_ENTRY OR model_SOURCE_LIBRARIES))
+        message(FATAL_ERROR "SOURCE_ROOT, ENTRY and SOURCE_LIBRARIES require PROJECT_ROOT")
     endif()
     if(TARGET "${target}")
         message(FATAL_ERROR "Model target already exists: ${target}")
@@ -130,6 +153,11 @@ function(pipelang_add_model target)
             set(model_SOURCE_ROOT src)
         endif()
         get_filename_component(project_root "${model_PROJECT_ROOT}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+        set(source_library_arguments)
+        if(model_SOURCE_LIBRARIES)
+            get_filename_component(source_libraries "${model_SOURCE_LIBRARIES}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+            set(source_library_arguments --source-libraries "${source_libraries}")
+        endif()
         set(project_information_command project-info)
         set(project_information_arguments)
         set(project_information_protocol pipelang.native-model-project-info.v1)
@@ -142,7 +170,7 @@ function(pipelang_add_model target)
             set(project_information_protocol pipelang.native-model-project-compile-info.v1)
         endif()
         execute_process(
-            COMMAND "${PipeLangModel_GENERATOR}" "${project_information_command}" ${project_information_arguments} ${resource_budget_arguments}
+            COMMAND "${PipeLangModel_GENERATOR}" "${project_information_command}" ${project_information_arguments} ${source_library_arguments} ${resource_budget_arguments}
                 --sdk-prefix "${PipeLangModel_SDK_PREFIX}"
                 --sdk-manifest "${PipeLangModel_MANIFEST}"
                 --sdk-manifest-sha256 "${PipeLangModel_MANIFEST_SHA256}"
@@ -189,6 +217,15 @@ function(pipelang_add_model target)
         # resolves module declarations, imports and exports, never this helper.
         file(GLOB_RECURSE project_membership CONFIGURE_DEPENDS LIST_DIRECTORIES false
             "${project_root}/${model_SOURCE_ROOT}/*.pipe")
+        if(model_SOURCE_LIBRARIES)
+            string(JSON source_directory_count LENGTH "${project_information}" source_directories)
+            math(EXPR source_directory_last "${source_directory_count} - 1")
+            foreach(index RANGE 0 ${source_directory_last})
+                string(JSON source_directory GET "${project_information}" source_directories ${index})
+                file(GLOB_RECURSE library_membership CONFIGURE_DEPENDS LIST_DIRECTORIES false
+                    "${source_directory}/*.pipe")
+            endforeach()
+        endif()
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${input_dependencies})
         # Removing a source removes its prerequisite from the regenerated build
         # graph. Keep an explicit index identity dependency so deletion also
@@ -205,7 +242,7 @@ NATIVE_NUMERIC_ENVIRONMENT=active-host")
         file(CONFIGURE OUTPUT "${project_input_stamp}" CONTENT "${project_input_identity}\n" @ONLY)
         list(APPEND input_dependencies "${project_input_stamp}")
         set(model_input_arguments --project-root "${project_root}"
-            --source-root "${model_SOURCE_ROOT}" --entry "${model_ENTRY}")
+            --source-root "${model_SOURCE_ROOT}" --entry "${model_ENTRY}" ${source_library_arguments})
         if(model_COMPILATION STREQUAL "COMPILED")
             list(APPEND model_input_arguments --compilation compiled --plan-sha256 "${project_plan_sha256}")
         endif()
@@ -280,11 +317,13 @@ NATIVE_NUMERIC_ENVIRONMENT=active-host")
             --model-compiler "${PipeLangModel_MODELC}"
             ${model_input_arguments} ${numeric_environment_arguments} ${composition_plan_arguments} ${resource_budget_arguments} --namespace "${model_NAMESPACE}"
             --output-directory "${output}"
-        DEPENDS ${input_dependencies} ${resource_budget_dependencies} "${PipeLangModel_MANIFEST}" "${PipeLangModel_MODELC}"
+        DEPENDS ${input_dependencies} ${resource_budget_dependencies} ${cxx_resource_dependency} "${PipeLangModel_MANIFEST}" "${PipeLangModel_MODELC}"
             "${PipeLangModel_GENERATOR}" ${runtime_headers}
         VERBATIM COMMENT "Compile headless PipeLang model")
     add_custom_target("${target}_generate" DEPENDS ${outputs})
     add_library("${target}" INTERFACE)
+    _pipelang_model_apply_cxx_resource_profile("${target}"
+        "${cxx_resource_profile}" "${cxx_resource_response}" "${cxx_resource_digest}")
     add_dependencies("${target}" "${target}_generate")
     if(model_NATIVE_NUMERIC_ENVIRONMENT)
         target_compile_definitions("${target}" INTERFACE PIPELANG_ACTIVE_HOST_FLOATING=1)
@@ -311,11 +350,28 @@ NATIVE_NUMERIC_ENVIRONMENT=active-host")
                 target_compile_options("${target}_implementation" PRIVATE -ffp-model=strict)
             endif()
         endif()
-        target_link_libraries("${target}_implementation" PRIVATE
-            "$<BUILD_INTERFACE:PipeLang::ModelRuntime>"
-            "$<INSTALL_INTERFACE:Threads::Threads>")
+        if(model_RUNTIME_TARGET)
+            target_link_libraries("${target}_implementation" PRIVATE
+                "$<BUILD_INTERFACE:${model_RUNTIME_TARGET}>"
+                "$<INSTALL_INTERFACE:${model_RUNTIME_TARGET}>")
+        else()
+            target_link_libraries("${target}_implementation" PRIVATE
+                "$<BUILD_INTERFACE:PipeLang::ModelRuntime>"
+                "$<INSTALL_INTERFACE:Threads::Threads>")
+        endif()
         target_include_directories("${target}_implementation" PRIVATE "${output}")
         set_target_properties("${target}_implementation" PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_EXTENSIONS OFF)
+        # Each partition consumes the same private declarations and SDK headers.
+        # Cache their parsing with the producer's complete effective policy.
+        # PRIVATE keeps this build artifact out of installed owner interfaces.
+        target_precompile_headers("${target}_implementation" PRIVATE
+            "$<BUILD_INTERFACE:${output}/Objects.hpp>")
+        if(model_BATCH_IMPLEMENTATIONS)
+            # This explicit strategy changes native TU/archive granularity,
+            # while the owned generated partitions and plan remain intact.
+            set_target_properties("${target}_implementation" PROPERTIES
+                UNITY_BUILD ON UNITY_BUILD_MODE BATCH UNITY_BUILD_BATCH_SIZE 2)
+        endif()
         target_link_libraries("${target}" INTERFACE "${target}_implementation")
         # Evaluate the facade's producer policy at generation time, including
         # settings added after this function returns and transitive policies.
@@ -329,7 +385,12 @@ NATIVE_NUMERIC_ENVIRONMENT=active-host")
             "$<TARGET_PROPERTY:${target},INTERFACE_SYSTEM_INCLUDE_DIRECTORIES>")
         set_property(TARGET "${target}" PROPERTY PIPELANG_IMPLEMENTATION_TARGET "${target}_implementation")
     endif()
-    target_link_libraries("${target}" INTERFACE PipeLang::ModelRuntime)
+    if(model_RUNTIME_TARGET)
+        target_link_libraries("${target}" INTERFACE "${model_RUNTIME_TARGET}")
+        set_property(TARGET "${target}" PROPERTY PIPELANG_RUNTIME_TARGET "${model_RUNTIME_TARGET}")
+    else()
+        target_link_libraries("${target}" INTERFACE PipeLang::ModelRuntime)
+    endif()
     set_property(TARGET "${target}" PROPERTY PIPELANG_MODEL_COMPILATION "${model_COMPILATION}")
     if(model_COMPOSITION_PLAN)
         set_property(TARGET "${target}" PROPERTY PIPELANG_COMPOSITION_PLAN "${output}/CompositionPlan.json")
@@ -382,7 +443,15 @@ function(pipelang_install_model_implementation model)
         message(FATAL_ERROR "Compiled model installation requires a PipeLang model facade")
     endif()
     if(compilation STREQUAL "HEADER_ONLY")
+        _pipelang_model_runtime_contract("${ownership_OWNER}" "${PipeLangModel_MANIFEST_SHA256}" HEADER_ONLY "" "")
         return()
+    endif()
+    get_target_property(runtime "${model}" PIPELANG_RUNTIME_TARGET)
+    if(runtime)
+        _pipelang_model_install_linked_runtime("${runtime}" "${ownership_OWNER}"
+            "${ownership_EXPORT}" "${ownership_ARCHIVE_DESTINATION}")
+    else()
+        _pipelang_model_runtime_contract("${ownership_OWNER}" "${PipeLangModel_MANIFEST_SHA256}" HEADER_ONLY "" "")
     endif()
     get_target_property(implementation "${model}" PIPELANG_IMPLEMENTATION_TARGET)
     # Record-only class libraries have no implementation archive to install.

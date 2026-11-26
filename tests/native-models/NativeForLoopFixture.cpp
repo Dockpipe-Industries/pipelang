@@ -8,7 +8,7 @@ using namespace pipelang::tools;
 void invoke(const std::vector<std::string>& command)
 {
     const auto result = process(command, {}, std::chrono::seconds(90), 4U << 20);
-    require(result.exit == 0, "for loop fixture failed: " + result.output + result.diagnostic);
+    require(result.exit == 0, "for loop fixture failed (" + std::to_string(result.exit) + "): " + result.output + result.diagnostic);
 }
 }
 
@@ -196,7 +196,6 @@ public model Class Queries {
     }
     public pure int Unbounded() {
         for (;;) { }
-        return 0;
     }
 }
 )pipe");
@@ -416,7 +415,12 @@ endforeach()
 target_link_libraries(for_loops PRIVATE Threads::Threads for_compiled)
 )cmake");
     invoke({nativeTool("cmake").string(), "-S", output.string(), "-B", (output / "initial-normal").string(),
-        "-DFOR_LOOP_SDK_PREFIX=" + prefix.string(), "-DCMAKE_CXX_COMPILER=" + nativeTool("c++").string(), "-DCMAKE_BUILD_TYPE=Release"});
+        "-DFOR_LOOP_SDK_PREFIX=" + prefix.string(),
+        "-DCMAKE_CXX_COMPILER=" + nativeTool("c++").string(),
+#ifdef _WIN32
+        "-G", "Ninja", "-DCMAKE_EXE_LINKER_FLAGS=-static",
+#endif
+        "-DCMAKE_BUILD_TYPE=Release"});
     invoke({nativeTool("cmake").string(), "--build", (output / "initial-normal").string(), "--parallel", "1"});
     invoke({nativeExecutable(output / "initial-normal/for_loops").string()});
     invoke({nativeExecutable(output / "initial-normal/for_loop_headers").string()});

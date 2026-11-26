@@ -65,6 +65,29 @@ runtime validation also checks references nested in supported containers.
 The internal object-domain optional codec and checked Value access are unchanged.
 See [nullable values](pipelang-nullable-values.md).
 
+In v3, method and constructor parameters may share a field name, including an
+inherited field. An unqualified name selects the lexical parameter; `this.field`
+selects the instance field. Lexical values also take precedence over same-name
+constants and type-qualified constant receivers. Duplicate parameters and the
+existing local/catch/iteration shadowing restrictions still refuse. Earlier
+non-object profiles retain their parameter/field refusal contract.
+
+Field declaration initializers retain class-member bindings: a same-name
+constructor parameter does not capture a field or constant reference. Distinct
+constructor inputs remain available to initializers, preserving the existing
+initialization contract. Constructor bodies and explicit base arguments prefer
+lexical parameters. In a derived object, an initializer can read an accessible
+inherited field after base construction. Private access and the prohibition on
+instance access in base arguments remain unchanged.
+
+An exported native model accepts explicit `this.field`, `this.Method(...)` and
+`this.Method<T>(...)` as selection of its fixed owner, through the same checked
+field/service/local-call paths as implicit selection. This syntax does not create
+a first-class native-owner reference: bare `this`/`base` values remain refused.
+The project source-object facet retains ordinary reference and virtual-dispatch
+semantics. Both facets preserve pure, worker and constructor-only service/shared
+identity rules; parameter shadowing does not grant access to the hidden field.
+
 Assignment and parameter passing preserve object identity. `this` denotes the
 current ordinary instance. Public/private checks apply to fields and instance
 methods; a private constructor is callable only from its declaring class.
@@ -85,8 +108,11 @@ for callback reentry, transaction and lifetime rules.
 A Class implicitly upcasts to its base classes and implemented source interfaces.
 Overloads prefer an exact argument match, then one unique upcast match; ties
 refuse. Interface calls dispatch through the checked closed set of concrete
-implementations. Generic local methods can close over reference types, while
-generic instance-member dispatch remains unsupported.
+implementations. Generic local methods can close over reference types. Explicit generic member
+calls on concrete class receivers reuse closed specialization and ordinary member
+selection, including inherited methods and imported public methods. Generic
+virtual methods and generic interface-member dispatch remain unsupported. See the
+[closed generic contract](pipelang-native-model-composition.md#exact-overloads-and-explicit-generics).
 
 ## Composing source interfaces
 
@@ -121,7 +147,19 @@ agree exactly; a matching authored redeclaration is allowed. Conflicting inherit
 or redeclared signatures, duplicate authored methods, repeated direct bases,
 cycles and unknown/non-source-interface bases refuse. Implementations supply all
 inherited public methods. Calls through either interface retain closed dispatch,
-effect, recursion and work-budget checks, including async methods.
+effect, runtime call-depth and work-budget checks, including async methods.
+
+A closed source interface may have no concrete implementation in the selected
+program. Calls in imported or unused methods are still checked against its
+declared signature, purity, async and ownership contract. Their checked dispatch
+set is empty, rather than unresolved or open to later implementations. This is
+not dead-code elimination: the method and interface remain in generated output.
+The generated interface tag accepts no concrete object, and its zero-case
+dispatcher refuses an invalid receiver. No default result or abstract body is
+executed. An empty list or absent nullable interface value remains valid, while
+a required nonnullable interface reference has no valid inhabitant in this
+compilation. A different consumer that supplies a concrete implementation is
+checked and emitted against its own complete closed program.
 
 Inheritance supports at most 32 interfaces on a path and 256 effective methods
 per interface, with at most 65,536 effective method copies and 4 MiB of qualified
@@ -190,7 +228,8 @@ arms and iteration using the existing checked reference conversion. Interfaces
 implemented by a base class are inherited. Calls through classes and interfaces
 select the most-derived override, including directly awaited async calls. The
 closed effect/call analysis includes every possible override of the selected
-slot and charges the maximum alternative work; recursion still refuses.
+slot. Execution charges the selected implementation to the inherited work
+budget and source call ancestry, including recursive virtual calls.
 
 Hierarchy paths contain at most 32 classes, and the sum of authored members on a
 path cannot exceed 256. Hierarchy metadata is bounded by 65,536 ancestor entries
@@ -280,15 +319,54 @@ task bounds still apply. Additional object bounds are:
 | Logical graph bytes, including retained versions/savepoints | 1 MiB |
 | Active graph transactions per domain | 33 |
 | Nested runtime construction savepoints | 64 |
-| Closed call depth / expanded work | 32 / 65,536 |
+| Entered source call depth / execution-segment work | 32 / 65,536 |
 | Dispatch annotation edges / identity bytes | 65,536 / 4 MiB |
 | Added implicit receiver AST nodes | 65,536 |
 
 Checks precede mutation publication. Logical graph accounting excludes allocator
 overhead and is distinct from process containment and existing per-container or
-shared-cell caps. Dispatch analysis includes every possible implementation,
-uses the maximum alternative target cost, and refuses recursive call graphs.
-Cyclic storage does not imply recursive methods are supported.
+shared-cell caps. Dispatch analysis includes every possible implementation for
+effect, ownership, cleanup and synchronization admission. It does not treat the
+union of all receiver implementations as an actual execution path. Recursive
+source calls are admitted in v3 and checked against the same runtime limits.
+The compiler retains per-body structural work admission and existing graph,
+specialization and metadata limits. Earlier non-object profiles retain their
+static recursive-call refusal.
+
+Each entered source method or constructor adds one activation to immutable
+ancestry. Interfaces, virtual dispatch, generic specializations, qualified pure
+helpers, base constructors and worker helpers use the same accounting. Generated
+transport/dispatch wrappers do not add source activations. Entry beyond 32 fails
+before the authored body or initializers run. Constructor factories check before
+allocating the object cell. Async factories check before allocating the child
+coroutine frame; the entered ancestry lives in that frame across suspension.
+Siblings and independent top-level tasks do not change one another's depth.
+
+Source statements, expressions and callable entry consume the existing shared
+65,536-step execution-segment budget. Real host/semaphore suspension retains the
+existing segment reset behavior; immediately completed local awaits do not
+reset work. Resetting work never resets call ancestry. Parallel workers inherit
+the parent's depth value and share the existing atomic aggregate work counters;
+they do not acquire owner-confined object execution state. Resource exhaustion
+cannot be caught as an authored `Error`. Awaiting a child preserves that terminal
+identity, while the native top-level task still publishes a Failure result.
+
+`finally` retains its independent cleanup work allowance and the same 32-depth
+limit. Cleanup is attempted once; it cannot promise successful arbitrary work
+after exhaustion. At maximum depth an inline cleanup action can run, but another
+source helper cannot enter until ancestry unwinds. No extra depth reserve is
+granted. A cleanup fault during unwinding preserves the primary failure; forced
+frame destruction retains its existing nonthrowing boundary. Modern asynchronous
+finally follows the [awaited cleanup contract](pipelang-synchronization.md#awaited-finally-in-the-modern-profile).
+
+Synchronous generated calls borrow their parent's callback/cancellation leases.
+Async frames retain the required leases. Existing owner-thread, synchronous-host
+reentry and native lifetime contracts remain in force. Native numeric/observation
+projections omit runtime call guards only when their complete acyclic closure
+independently proves depth at most 32 and bounded work. A recursive method uses
+the ordinary generated source implementation and has no unguarded numeric export.
+Generated code and runtime headers must be rebuilt and qualified as one exact SDK
+candidate; this contract makes no mixed-version ABI or performance-parity claim.
 
 V3 emits `pipelang.native-model-manifest.v2`, separating exported `classes`,
 ordinary `objects`, source `sourceInterfaces` and existing host `interfaces`.
@@ -300,3 +378,35 @@ Frozen graph snapshots, default interface methods,
 generic classes/interfaces, source downcasts and a global collector are not implemented. This capability does not
 claim view integration, consumer deployment, cross-platform release or complete
 C#/Java/.NET compatibility.
+
+Modern object-enabled asynchronous methods support awaited finally with owned
+pending return/fault state, inherited cleanup cancellation and bounded owner
+draining. See [awaited finally](pipelang-synchronization.md#awaited-finally-in-the-modern-profile)
+for the cancellation, publication, depth/work and native await ownership contract.
+
+## Static source methods
+
+The explicit v3 source-object profile supports class methods declared with
+`public/private/protected static [pure|async]`. Call them through the declaring
+type, for example `Assert.Equal<int>(expected, actual, message)`. Explicit generic
+arguments use the existing closed specialization and resource budgets. Local
+static calls can omit the type qualification. Instance-qualified static calls
+are refused; locals and fields continue to shadow type names.
+
+Static methods have no receiver and cannot read or write implicit instance fields,
+refer to `this`/`base`, or call implicit instance methods. They can act on explicitly
+passed source objects under the usual pure/effect rules. Static constructors,
+fields, virtual/override slots and interface contracts are not admitted. Inherited
+static members retain their declaring visibility; method-slot hiding is refused
+under the existing exact inheritance rules.
+
+Static calls do not construct an object or run its field initializers/constructor.
+They share the caller's owner, graph transaction, cancellation, evaluation budget
+and source call ancestry. Async static calls must be directly awaited by an async
+method and retain the normal segment/cleanup rules. Parallel workers do not admit
+static calls in this profile. Header and compiled generation use the same checked
+targets. Earlier native-model profiles do not admit static declarations.
+
+Static members appear in manifest method entries with `static: true` and are excluded
+from instance composition exports and native model instance actions. They are source
+class APIs, not independently scheduled native model entrypoints.

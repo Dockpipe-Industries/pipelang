@@ -1,0 +1,60 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.StructuredResults;
+
+public Record Heading {
+    public string title;
+    public bool accepted;
+    public int source;
+}
+
+public Record Report {
+    public Heading heading;
+    public bool discarded;
+    public int score;
+    public Result<bool,string> verification;
+}
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var outcome = await Collector.Collect(scenario);
+        if (scenario == 3) {
+            return Result<int,string>.Success(outcome.Value.score);
+        }
+        if (!outcome.IsSuccess) {
+            if (outcome.IsCancelled)
+                return Result<int,string>.Cancelled(outcome.Error);
+            return Result<int,string>.Failure(outcome.Error);
+        }
+
+        var report = outcome.Value;
+        var confirmed = await Collector.Confirm();
+        if (!confirmed.IsSuccess || !confirmed.Value || !report.heading.accepted || report.discarded ||
+            report.heading.source != 17 || !report.verification.IsSuccess || !report.verification.Value) {
+            return Result<int,string>.Failure("structured result changed after resumption");
+        }
+        if (scenario == 4)
+            return Result<int,string>.Failure(report.heading.title);
+        return Result<int,string>.Success(report.score);
+    }
+}
+
+public Class Collector {
+    public static async Task<Result<Report,string>> Collect(int scenario) {
+        var heading = Heading("épreuve structurée", true, 17);
+        var gate = SemaphoreSlim.Create(0, 1);
+        try {
+            var first = await gate.WaitAsync(45);
+            if (scenario == 1 || scenario == 3)
+                return Result<Report,string>.Failure("report unavailable");
+            if (scenario == 2)
+                return Result<Report,string>.Cancelled("report cancelled");
+            return Result<Report,string>.Success(Report(heading, false, 42, Result<bool,string>.Success(true)));
+        } finally {
+            var second = await gate.WaitAsync(65);
+        }
+    }
+
+    public static async Task<Result<bool,string>> Confirm() {
+        return Result<bool,string>.Success(true);
+    }
+}

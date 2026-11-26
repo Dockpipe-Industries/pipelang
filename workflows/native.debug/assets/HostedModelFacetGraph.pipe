@@ -1,0 +1,42 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedModelFacetGraph;
+
+public model Class Score {
+    private int points;
+
+    public Score(int initial) {
+        points = initial;
+    }
+
+    public pure int Read() {
+        return points;
+    }
+
+    public void Increase() {
+        points = points + 2;
+    }
+}
+
+public model Class Session {
+    private List<Score> scores = List<Score>.Empty();
+
+    public Session() {}
+
+    public int Run(int scenario) {
+        if (scenario == 0) {
+            scores.Add(new Score(40));
+            return scores.At(0).Read();
+        }
+        if (scenario == 1) {
+            Score alias = scores.At(0);
+            alias.Increase();
+            return scores.At(0).Read();
+        }
+        if (scenario == 2) {
+            scores.At(0).Increase();
+            scores.Add(new Score(99));
+            throw Error("score changes rolled back");
+        }
+        return scores.Count * 100 + scores.At(0).Read();
+    }
+}

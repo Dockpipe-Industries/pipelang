@@ -1,0 +1,45 @@
+module PipeLang.IO.Tests;
+import PipeLang.IO;
+import PipeLang.Crypto;
+import PipeLang.Testing;
+
+public model Class FileSuite {
+    private FileStreams files;
+    private FileStreams peer;
+    private Sha256Streams crypto;
+    private FileInputs inputs;
+
+    public FileSuite(FileStreams files, FileStreams peer, Sha256Streams crypto, FileInputs inputs) {
+        this.files = files;
+        this.peer = peer;
+        this.crypto = crypto;
+        this.inputs = inputs;
+    }
+
+    public FileReport Run(CancellationToken token, CancellationToken beforeRead,
+                          CancellationToken afterRead, CancellationToken afterHash,
+                          CancellationToken afterFinish, CancellationToken digestBeforeRead,
+                          CancellationToken digestAfterRead, CancellationToken digestAfterHash,
+                          CancellationToken digestAfterFinish) {
+        TestRunner runner = new TestRunner();
+        List<TestResult> results = List<TestResult>.Empty();
+        for (int scenario = 0; scenario <= 21; scenario = scenario + 1)
+            results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, scenario), token, beforeRead));
+
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 22), token, beforeRead));
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 23), token, afterRead));
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 24), token, afterHash));
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 25), token, afterFinish));
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 26), token, digestBeforeRead));
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 27), token, digestAfterRead));
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 28), token, digestAfterHash));
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 29), token, digestAfterFinish));
+        results.Add(runner.RunProbe(new FileCase(files, peer, crypto, inputs, 30), token, beforeRead));
+        bool allPassed = results.Count == 31;
+        foreach (TestResult result in results) {
+            if (result.outcome != TestOutcome.Passed || !result.bodyRan || !result.cleanupRan)
+                allPassed = false;
+        }
+        return FileReport(allPassed, results);
+    }
+}

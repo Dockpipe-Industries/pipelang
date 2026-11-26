@@ -7,6 +7,7 @@
 #include "NativeNumericExportTests.hpp"
 #include "CompiledProjectTests.hpp"
 #include "CompiledOwnerFixture.hpp"
+#include "LinkedRuntimeFixture.hpp"
 #include "ProjectModuleTests.hpp"
 #include <chrono>
 #include <cerrno>
@@ -43,6 +44,46 @@ Json modelManifest() {
             {"classes", {{{"name", "Model"}, {"fields", Json::array()}, {"methods", Json::array()},
                           {"constructor", {{"parameters", Json::array()}}}}}}};
 }
+void staticMethodManifestContracts() {
+    const Json method{{"name", "Read"}, {"returnType", "int"}, {"parameters", Json::array()},
+        {"pure", true}, {"async", false}, {"static", true}};
+    auto legacy = modelManifest();
+    admitModel(legacy, "fixture");
+    legacy["classes"][0]["methods"] = Json::array({method});
+    refuse([&] { admitModel(legacy, "fixture"); }, "static metadata in legacy model manifest");
+
+    auto modern = legacy;
+    modern["protocol"] = "pipelang.native-model-manifest.v2";
+    modern["objects"] = Json::array();
+    modern["sourceInterfaces"] = Json::array();
+    admitModel(modern, "fixture");
+    modern["classes"][0]["methods"][0]["static"] = false;
+    admitModel(modern, "fixture");
+
+    for (const auto& invalidFlag : {Json(1), Json("true"), Json(nullptr), Json::array()}) {
+        auto invalid = modern;
+        invalid["classes"][0]["methods"][0]["static"] = invalidFlag;
+        refuse([&] { admitModel(invalid, "fixture"); }, "non-boolean static metadata", "exact boolean");
+    }
+
+    for (const auto& category : {"interfaces", "sourceInterfaces"}) {
+        auto invalid = modern;
+        invalid[category] = Json::array({Json{{"name", "Reader"}, {"methods", Json::array({method})}}});
+        refuse([&] { admitModel(invalid, "fixture"); }, "static metadata on an interface");
+    }
+
+    auto object = modern;
+    object["objects"] = Json::array({Json{{"name", "Object"}, {"fields", Json::array()},
+        {"methods", Json::array({method})}, {"constructor", {{"parameters", Json::array()}}},
+        {"implements", Json::array()}}});
+    admitModel(object, "fixture");
+
+    auto duplicate = modern;
+    duplicate["classes"][0]["methods"].push_back(method);
+    refuse([&] { admitModel(duplicate, "fixture"); }, "duplicate static/instance method signature");
+    std::cout << "static method manifest admission contracts passed\n";
+}
+
 int fakeTool(bool model) {
     const std::string bytes{std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>()};
     const auto request = parseJson(bytes);
@@ -681,6 +722,10 @@ int main(int argc, char** argv) {
             return 0;
         }
 #endif
+        if (argc == 2 && std::string(argv[1]) == "--static-method-contracts") {
+            staticMethodManifestContracts();
+            return 0;
+        }
         if (argc == 2 && std::string(argv[1]) == "--sleep") {
             std::this_thread::sleep_for(std::chrono::seconds(30));
             return 0;
@@ -691,6 +736,12 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string(argv[1]) == "--echo") {
             std::cout << std::cin.rdbuf();
+            return 0;
+        }
+        if (argc == 5 && std::string(argv[1]) == "--linked-runtime-prepare") {
+            const std::string mode = argv[4];
+            require(mode == "normal" || mode == "sanitizer", "linked runtime mode must be normal or sanitizer");
+            prepareLinkedRuntimeFixture(argv[2], argv[3], mode == "sanitizer");
             return 0;
         }
         if (argc == 5 && std::string(argv[1]) == "--compiled-owner-prepare") {
@@ -721,6 +772,10 @@ int main(int argc, char** argv) {
             nativeNumericExportContracts(argv[2], argv[3]);
             return 0;
         }
+        if (argc == 4 && std::string(argv[1]) == "--source-library-contracts") {
+            sourceLibraryContracts(argv[2], argv[3]);
+            return 0;
+        }
         if (argc == 4 && std::string(argv[1]) == "--project-fixture") {
             generateProjectFixture(argv[2], argv[3]);
             return 0;
@@ -730,6 +785,7 @@ int main(int argc, char** argv) {
         require(!fs::exists(output), "test output must be fresh");
         fs::create_directories(output);
         const auto self = fs::canonical(argv[0]);
+        staticMethodManifestContracts();
         primitiveContracts(output, self);
         admissionAndPublication(output, self);
         sourceSetAdmission(output, self);

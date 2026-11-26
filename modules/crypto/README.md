@@ -52,3 +52,60 @@ packaging includes exact Cargo.lock, library/header digests and dependency licen
 Security updates require a reviewed dependency/lock update, rebuilding the library,
 re-running ABI and hostile-input tests, then updating all consumer artifact digests.
 No release, publication, broad plugin framework or standalone crypto service is added.
+
+## Additive stream ABI2 — source implementation, qualification pending
+
+`include/pipelang_crypto_stream.h` declares independent versioned stream symbols.
+`pipelang_crypto_stream_abi_version()` returns2. ABI1's version remains1 and its
+whole-buffer function/header, limits, error values and behavior are preserved.
+The same maintained sha2 dependency and exact Cargo.lock are used; there is no
+new cryptographic implementation, dependency, core SDK selection or default.
+
+Create a native owner, begin one or more contexts with explicit maximum byte
+counts, update with chunks <=1MiB, finish into32 caller-owned bytes plus the exact
+byte count, close each context, then close the owner. The registry has16 fixed
+owner slots and64 fixed context slots shared across this linked provider instance.
+Contexts contain maintained Sha256 state directly, not allocated foreign pointers.
+All methods serialize through one mutex; there are no callbacks/background tasks.
+Generation IDs are positive <=INT64_MAX and never reused. The future source host
+adapter keeps its owner ID private and exposes only validated context IDs.
+These IDs enforce lifecycle ownership; they are not tenant authorization against
+native callers who deliberately copy another owner's complete capability.
+
+Maximum bytes may be0 for an empty-only stream and may not exceed UINT64_MAX/8.
+Every update checks addition and the running maximum before hashing; this admits
+512MiB file digests without changing the1MiB chunk or ABI1 buffer limits. A running
+limit failure poisons its context: Finish cannot return a prefix digest as success.
+Invalid argument/chunk-size refusal consumes nothing and leaves state unchanged.
+Finish seals, retaining its bounded slot until Close; repeated Finish/Update fails.
+Close releases active, failed or finalized state. Immediate repeated close succeeds
+only while that slot's tombstone has not been reused. Owner close releases all its
+contexts; a closed/reused owner or foreign/stale context is refused. Panic handling
+invalidates all retained owners/contexts and permits a fresh owner without keeping
+a poisoned mutex. Identifier exhaustion fails before wrap. No unbounded history,
+source-visible raw pointer, allocator ownership transfer or retained borrowed
+input/output is introduced. Caller pointers remain the explicit trusted native
+contract; pointer extent/alignment cannot be validated by this ABI.
+
+This native primitive has no CancellationToken ABI or scheduling. A future source
+adapter checks cancellation before/after each bounded Update and closes affected
+state before returning Cancelled, preventing retries from hashing a consumed chunk
+twice. It preserves close/cleanup failures independently when required. No source
+adapter, CNG backend, file capture, output writer or policy runner is implemented
+by this slice. Existing Linux-only dependency/toolchain qualification still applies.
+
+Pending Rust tests exercise published empty/abc/56-byte/million-a vectors, every
+split of short vectors, exact1MiB update and invalid arguments, poisoned running
+bounds, unchanged failure outputs, count arithmetic at overflow/capacity, owner/
+context limits, stale/reused/cross-owner handles, sealed-slot lifecycle, cleanup,
+identifier exhaustion and caught-panic recovery. A constant-memory512MiB stream
+checks byte count and agreement with a separately driven maintained sha2 context;
+that latter check is a boundary/segmentation witness, not an independent512MiB
+cryptographic oracle. Existing ABI1 tests remain unchanged. Parent schedules all
+Rust/native/link/consumer proof serially; source-only is not acceptance, and C++
+ASan/UBSan alone does not instrument Rust internals.
+
+The existing crypto install includes both headers; its SHA256SUMS inventory adds
+the new header beside the archive, ABI1 header and lock. No existing consumer pins,
+lockfiles, toolchain manifests or core SDK package files are changed. Rebuild and
+repin a qualified additive artifact explicitly before any consumer uses new symbols.

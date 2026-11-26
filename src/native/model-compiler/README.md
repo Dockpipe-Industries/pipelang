@@ -184,7 +184,16 @@ model field, `Count` returns int64 and `At(index)` returns a checked owned copy.
 `foreach (T item in values)` evaluates and owns the input snapshot once, then
 binds an owned item copy per iteration. Editing the original list or item does
 not alter that snapshot. `while`, nested loops, break and continue are admitted.
-Loops never prove a method returns, because they may execute zero times. Lists
+In the explicit modern object/project profile, a literal `true` while/for
+condition (including an omitted for condition) cannot exit by normal condition
+failure. Such a loop does not fall through unless its body has a reachable break
+targeting that loop; nested-loop breaks and continues remain local. Returns and
+throws retain their existing try/catch/finally behavior. Other conditions and
+foreach remain conservatively zero-trip, and the legacy profile retains its
+previous zero-trip return rule. This is non-fallthrough analysis, not a promise
+that an infinite loop produces a value. Existing evaluation-budget checkpoints
+at condition evaluation still bound empty loop bodies; no ticket allowance,
+checkpoint charge or implicit cancellation policy changes. Lists
 cap recursive aggregate elements at 4096 and conservative logical owned footprint
 at 1 MiB, including nested wrappers/records. This is not an allocator/RSS guarantee.
 Class invocations using loops, local async composition or failure control share 65,536 expression/
@@ -562,11 +571,19 @@ not receive fresh allowances. Parallel child budgets share its remaining normal
 counter; cleanup remains a separate shared 65,536-step allowance. Reset retains
 the existing 65,536-step normal and cleanup defaults.
 
-Public queries and actions start independent default 65,536-step invocation
-budgets after initialization, regardless of the constructor's selected allowance.
-Async suspension/reset behavior, cleanup limits, collection ownership bounds and
-native process/cgroup containment caps are unchanged. This is explicit bounded
-initialization policy, not a way for source code to raise or reset its limits.
+Public queries and actions default to independent 65,536-step normal execution
+segments after initialization. A host can explicitly select the immutable
+`TaskOptions::evaluationStepsPerSegment` independently of initialization. It must
+be a positive `std::size_t`; no environment/global setter or source syntax changes
+it. Real normal suspension resumes with the selected normal seed; immediate
+awaits and source descendants share their existing budget. Cleanup remains an
+independent shared 65,536-step reserve with no refill inside cleanup. Initialization
+still resets to the existing default. This is a per-segment work policy, not a
+cumulative async operation or wall-time cap. See the canonical
+[source execution limits](../../../docs/concepts/source-execution-limits.md) for
+ownership, failure/rollback, arithmetic admission and exact-SDK compatibility.
+Collection limits, independent atomic retry bounds, depth and hard host containment
+are unchanged; authoring alone does not qualify new runtime behavior.
 
 Stored object-owned `List` reads keep the receiver's object root alive through
 `Count` or a call-free `At` index. They inspect the stored count or decode only

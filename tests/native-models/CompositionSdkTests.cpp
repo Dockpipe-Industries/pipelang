@@ -210,20 +210,21 @@ void installedSdk(const fs::path& sdk, const fs::path& proof) {
     const auto manifest = sdk / "share/pipelang-model/sdk-manifest.json";
     const auto manifestHash = fileHash(manifest);
     const auto output = proof / "generated";
-    const auto receipt = generateProjectBindings(sdk, manifest, manifestHash, sdk / "bin/pipelang-modelc",
+    const auto receipt = generateProjectBindings(sdk, manifest, manifestHash, nativeExecutable(sdk / "bin/pipelang-modelc"),
         proof, "src", "Startup.pipe", "composition_fixture", output, {}, true);
     check(receipt.at("generated").contains("CompositionPlan.json"), "composition plan missing from artifact receipt");
     const auto plan = parseJson(readFile(output / "CompositionPlan.json", resourceBudget().outputBytes));
     admitCompositionPlans(plan);
-    check(fileHash(output / "CompositionPlan.json") == receipt.at("generated").at("CompositionPlan.json"),
+    check(fileHash(output / "CompositionPlan.json") ==
+              receipt.at("generated").at("CompositionPlan.json").get<std::string>(),
           "composition plan digest mismatch");
     writeFile(proof / "src/Startup.pipe", "module Application; public Class Plain { public Plain() {} }");
     rejects([&] {
-        generateProjectBindings(sdk, manifest, manifestHash, sdk / "bin/pipelang-modelc",
+        generateProjectBindings(sdk, manifest, manifestHash, nativeExecutable(sdk / "bin/pipelang-modelc"),
             proof, "src", "Startup.pipe", "composition_fixture", proof / "missing", {}, true);
     }, "required composition plan is absent");
     check(!fs::exists(proof / "missing/CompositionPlan.json"), "failed plan requirement published artifacts");
-    const auto plainReceipt = generateProjectBindings(sdk, manifest, manifestHash, sdk / "bin/pipelang-modelc",
+    const auto plainReceipt = generateProjectBindings(sdk, manifest, manifestHash, nativeExecutable(sdk / "bin/pipelang-modelc"),
         proof, "src", "Startup.pipe", "composition_fixture", output);
     check(!plainReceipt.at("generated").contains("CompositionPlan.json") &&
           !fs::exists(output / "CompositionPlan.json"),
@@ -269,13 +270,14 @@ void factoryArtifacts(const fs::path& sdk, const fs::path& proof) {
     writeFile(proof / "src/Startup.pipe", source);
     const auto manifest = sdk / "share/pipelang-model/sdk-manifest.json";
     const auto manifestHash = fileHash(manifest);
-    const auto compiler = sdk / "bin/pipelang-modelc";
+    const auto compiler = nativeExecutable(sdk / "bin/pipelang-modelc");
     const auto output = proof / "generated";
     const auto receipt = generateProjectBindings(sdk, manifest, manifestHash, compiler,
         proof, "src", "Startup.pipe", "composition_fixture", output, {}, true, true);
     check(receipt.at("composition_emission") == "factory", "factory selection missing from receipt");
     check(receipt.at("generated").contains("CompositionFactory.hpp"), "factory artifact missing from receipt");
-    check(fileHash(output / "CompositionFactory.hpp") == receipt.at("generated").at("CompositionFactory.hpp"),
+    check(fileHash(output / "CompositionFactory.hpp") ==
+              receipt.at("generated").at("CompositionFactory.hpp").get<std::string>(),
           "factory artifact digest mismatch");
     const auto ordinary = generateProjectBindings(sdk, manifest, manifestHash, compiler,
         proof, "src", "Startup.pipe", "composition_fixture", output);

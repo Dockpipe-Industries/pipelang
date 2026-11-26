@@ -1,0 +1,41 @@
+module PipeLang.Json.WireTests;
+import PipeLang.Json;
+
+public model Class WireInputSuite {
+    private JsonReader reader;
+
+    public WireInputSuite(JsonReader reader) {
+        this.reader = reader;
+    }
+
+    public Result<void,string> Run(ByteBuffer wire, CancellationToken token) {
+        JsonReadLimits limits = new JsonReadLimits {};
+        limits.inputBytes = 4096;
+        limits.retainedBytes = 65536;
+        limits.detectUnicodeEncoding = true;
+        int document = try reader.BeginDocument(limits);
+        try {
+            try reader.AppendDocument(document, wire);
+            JsonNode root = try reader.CompleteDocument(document, token);
+            int number = try reader.Int64Value(root);
+            if (number != 42)
+                return Result<void,string>.Failure("Unicode JSON number changed");
+
+            int length = try reader.InputLength(document);
+            if (length != wire.Length)
+                return Result<void,string>.Failure("original encoding length changed");
+
+            ByteBuffer original = try reader.InputSlice(document, 0, length);
+            for (int index = 0; index < length; index = index + 1) {
+                if (original.At(index) != wire.At(index))
+                    return Result<void,string>.Failure("original encoding bytes changed");
+            }
+
+            return Result<void,string>.Success();
+        } finally {
+            Result<void,string> closed = reader.CloseDocument(document);
+            if (!closed.IsSuccess)
+                throw Error(closed.Error);
+        }
+    }
+}

@@ -1,0 +1,15 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.SnapshotList;
+
+public model Class Session {
+    public List<int> values;
+
+    public Session(List<int> initial) {
+        values = initial;
+    }
+
+    public int Append() {
+        values.Add(42);
+        return values.Count;
+    }
+}

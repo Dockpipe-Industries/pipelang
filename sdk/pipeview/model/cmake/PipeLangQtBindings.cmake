@@ -22,7 +22,7 @@ function(pipelang_add_qt_bindings target)
     if(NOT actual_tool_hash STREQUAL binding_BINDING_COMPILER_SHA256)
         message(FATAL_ERROR "Host Qt binding compiler hash differs")
     endif()
-    find_package(Qt6 6.8 REQUIRED COMPONENTS Core)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Core Qml)
     add_custom_target("${target}_verify"
         COMMAND "${PipeLangModel_GENERATOR}" verify --prefix "${PipeLangModel_SDK_PREFIX}"
             --manifest "${PipeLangModel_MANIFEST}" --sha256 "${PipeLangModel_MANIFEST_SHA256}"
@@ -50,11 +50,12 @@ function(pipelang_add_qt_bindings target)
             message(FATAL_ERROR "Selected SDK does not inventory the optional Qt value headers")
         endif()
         add_library(pipelang_qt_value_runtime STATIC
-            "${qt_headers}/InvocationOutcome.hpp" "${qt_headers}/ActionReport.hpp")
+            "${qt_headers}/InvocationOutcome.hpp" "${qt_headers}/ActionReport.hpp"
+            "${qt_headers}/ContextBinding.hpp" "${qt_headers}/ContextualObject.hpp" "${qt_headers}/ContextObject.hpp")
         set_target_properties(pipelang_qt_value_runtime PROPERTIES AUTOMOC ON LINKER_LANGUAGE CXX)
         add_dependencies(pipelang_qt_value_runtime "${target}_verify")
         target_compile_features(pipelang_qt_value_runtime PUBLIC cxx_std_20)
-        target_link_libraries(pipelang_qt_value_runtime PUBLIC Qt6::Core PipeLang::ModelRuntime)
+        target_link_libraries(pipelang_qt_value_runtime PUBLIC Qt6::Core Qt6::Qml PipeLang::ModelRuntime)
         target_compile_definitions(pipelang_qt_value_runtime PUBLIC QT_NO_KEYWORDS)
     endif()
     add_library("${target}" STATIC "${header}")

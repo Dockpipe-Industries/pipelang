@@ -1,0 +1,18 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module Standalone;
+
+public Class App {
+    public static int Run() {
+        var permits = SemaphoreSlim.Create(1, 1);
+        int answer = 0;
+        if (permits.Wait(0))
+            answer = 42;
+        return answer;
+    }
+
+    public static Result<int,string> Checked(int input) {
+        if (input < 0)
+            return Result<int,string>.Failure("negative input");
+        return Result<int,string>.Success(input + 1);
+    }
+}

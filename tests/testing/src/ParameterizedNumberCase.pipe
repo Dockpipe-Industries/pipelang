@@ -1,0 +1,19 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+public Class ParameterizedNumberCase : ITestCase {
+    private NumberCaseData data;
+
+    public ParameterizedNumberCase(NumberCaseData parameters) {
+        data = parameters;
+    }
+
+    public pure string Id() => data.id;
+    public pure string Name() => "Typed number table: " + data.id;
+    public Result<void,TestFailure> Setup(CancellationToken token) => Result<void,TestFailure>.Success();
+    public Result<void,TestFailure> Cleanup() => Result<void,TestFailure>.Success();
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        return Assert.Equal<int>(data.expected, data.input * data.input, "square matches the typed table");
+    }
+}

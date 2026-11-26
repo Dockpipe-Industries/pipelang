@@ -1,0 +1,70 @@
+@PACKAGE_INIT@
+set(_PipeLangCryptoStream_PREFIX "${PACKAGE_PREFIX_DIR}")
+
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    message(FATAL_ERROR "This CryptoStream package selects Linux x86_64 only")
+endif()
+
+include(CMakeFindDependencyMacro)
+find_dependency(PipeLangModel 0.1.0 EXACT CONFIG)
+find_dependency(Threads)
+if(NOT DEFINED PIPELANG_CORE_MANIFEST_SHA256 OR
+        NOT PipeLangModel_MANIFEST_SHA256 STREQUAL PIPELANG_CORE_MANIFEST_SHA256)
+    message(FATAL_ERROR "Explicit matching core SDK manifest pin required")
+endif()
+if(NOT DEFINED PIPELANG_CRYPTO_STREAM_MANIFEST_SHA256 OR
+        "${PIPELANG_CRYPTO_STREAM_MANIFEST_SHA256}" STREQUAL "")
+    message(FATAL_ERROR "Explicit independent CryptoStream manifest pin required")
+endif()
+
+execute_process(COMMAND "${PipeLangModel_GENERATOR}" verify
+    --prefix "${PipeLangModel_SDK_PREFIX}" --manifest "${PipeLangModel_MANIFEST}"
+    --sha256 "${PIPELANG_CORE_MANIFEST_SHA256}" RESULT_VARIABLE core_status)
+if(NOT core_status EQUAL 0)
+    message(FATAL_ERROR "Selected core SDK failed exact installed-content verification")
+endif()
+
+set(PipeLangCryptoStream_MANIFEST "${_PipeLangCryptoStream_PREFIX}/@package_share@/sdk-manifest.json")
+execute_process(COMMAND "${PipeLangModel_GENERATOR}" verify
+    --prefix "${_PipeLangCryptoStream_PREFIX}" --manifest "${PipeLangCryptoStream_MANIFEST}"
+    --sha256 "${PIPELANG_CRYPTO_STREAM_MANIFEST_SHA256}" RESULT_VARIABLE package_status)
+if(NOT package_status EQUAL 0)
+    message(FATAL_ERROR "Selected optional CryptoStream package failed exact installed-content verification")
+endif()
+
+set(PipeLangCryptoStream_SOURCE_LIBRARY_DIRECTORY "${_PipeLangCryptoStream_PREFIX}/@package_share@/library")
+set(PipeLangCryptoStream_SOURCE_LIBRARY_SHA256 "@crypto_library_sha256@")
+set(_PipeLangCryptoStream_PROVIDER_LOCATION
+    "${_PipeLangCryptoStream_PREFIX}/@CMAKE_INSTALL_LIBDIR@/libpipelang_crypto_stream_provider.a")
+if(TARGET PipeLangCryptoStreamProvider)
+    get_target_property(provider_alias PipeLangCryptoStreamProvider ALIASED_TARGET)
+    get_target_property(provider_imported PipeLangCryptoStreamProvider IMPORTED)
+    get_target_property(provider_type PipeLangCryptoStreamProvider TYPE)
+    get_target_property(provider_location PipeLangCryptoStreamProvider IMPORTED_LOCATION)
+    get_target_property(provider_configurations PipeLangCryptoStreamProvider IMPORTED_CONFIGURATIONS)
+    if(provider_alias OR NOT provider_imported OR NOT provider_type STREQUAL "STATIC_LIBRARY" OR
+            provider_configurations OR NOT provider_location STREQUAL _PipeLangCryptoStream_PROVIDER_LOCATION)
+        message(FATAL_ERROR "Pre-existing CryptoStream provider target conflicts with the selected installed package")
+    endif()
+
+    # Only the exact unconditional selected-package archive is admitted. Refuse
+    # configuration-specific locations or mappings that could redirect linking.
+    set(provider_selected_configurations Debug Release RelWithDebInfo MinSizeRel NoConfig
+        ${CMAKE_CONFIGURATION_TYPES} "${CMAKE_BUILD_TYPE}")
+    foreach(configuration IN LISTS provider_selected_configurations)
+        string(TOUPPER "${configuration}" configuration_upper)
+        get_property(location_is_set TARGET PipeLangCryptoStreamProvider
+            PROPERTY "IMPORTED_LOCATION_${configuration_upper}" SET)
+        get_property(mapping_is_set TARGET PipeLangCryptoStreamProvider
+            PROPERTY "MAP_IMPORTED_CONFIG_${configuration_upper}" SET)
+        if(location_is_set OR mapping_is_set)
+            message(FATAL_ERROR "Pre-existing CryptoStream provider target has ambiguous configuration resolution")
+        endif()
+    endforeach()
+else()
+    add_library(PipeLangCryptoStreamProvider STATIC IMPORTED GLOBAL)
+    set_target_properties(PipeLangCryptoStreamProvider PROPERTIES
+        IMPORTED_LOCATION "${_PipeLangCryptoStream_PROVIDER_LOCATION}")
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/PipeLangCryptoStreamTargets.cmake")
+check_required_components(PipeLangCryptoStream)

@@ -1,0 +1,110 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.SharedAtomics;
+
+public Class Counter {
+    private Atomic<int> value;
+
+    public Counter() {}
+
+    public int Next() {
+        return value.Increment();
+    }
+}
+
+public Class FailedAtomicEffect {
+    public FailedAtomicEffect(Atomic<int> target) {
+        target.Increment();
+        throw Error("atomic constructor failed");
+    }
+}
+
+public Class FailedAtomicAllocation {
+    public FailedAtomicAllocation() {
+        Atomic<int> allocated = Atomic<int>.Create(0);
+        if (allocated.Load() == 0)
+            throw Error("atomic allocation discarded");
+    }
+}
+
+public model Class Session {
+    public Session() {}
+
+    private async Task<Result<int,string>> Finish(Atomic<int> target, CancellationToken token) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(4, token);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected permit");
+        return Result<int,string>.Success(target.Load());
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        Atomic<int> number = Atomic<int>.Create(40);
+        Atomic<int> alias = number;
+        if (alias.Add(2) != 42 || number.CompareExchange(55, 1) != 42 || alias.Load() != 42)
+            return Result<int,string>.Failure("atomic integer did not preserve its previous value");
+        if (number.CompareExchange(43, 42) != 42 || alias.Exchange(44) != 43 || number.Decrement() != 43)
+            return Result<int,string>.Failure("atomic exchange or decrement changed the wrong value");
+        if (alias.Increment() != 44)
+            return Result<int,string>.Failure("atomic increment did not update the shared cell");
+        number.Store(41);
+        try {
+            FailedAtomicEffect failed = new FailedAtomicEffect(alias);
+            return Result<int,string>.Failure("atomic test constructor returned");
+        } catch (Error error) {
+            if (error.Message != "atomic constructor failed")
+                return Result<int,string>.Failure(error.Message);
+        }
+        if (number.Load() != 42)
+            return Result<int,string>.Failure("constructor rollback changed an independent atomic effect");
+
+        for (int attempt = 0; attempt < 4200; attempt = attempt + 1) {
+            Atomic<int> temporary = Atomic<int>.Create(attempt);
+            Atomic<int> temporaryAlias = temporary;
+            var nestedAlias = temporaryAlias;
+            if (nestedAlias.Load() != attempt || nestedAlias.Increment() != attempt + 1 ||
+                temporary.Load() != attempt + 1)
+                return Result<int,string>.Failure("lost an iteration-local cell");
+        }
+        if (scenario == 0) {
+            for (int attempt = 0; attempt < 4200; attempt = attempt + 1) {
+                try {
+                    FailedAtomicAllocation failed = new FailedAtomicAllocation();
+                    return Result<int,string>.Failure("discarded atomic constructor returned");
+                } catch (Error error) {
+                    if (error.Message != "atomic allocation discarded")
+                        return Result<int,string>.Failure(error.Message);
+                }
+            }
+        }
+
+        Atomic<int> maximum = Atomic<int>.Create(9223372036854775807);
+        try {
+            int overflow = maximum.Increment();
+            return Result<int,string>.Failure("atomic overflow returned " + string.FromInt(overflow));
+        } catch (Error error) {
+            if (maximum.Load() != 9223372036854775807)
+                return Result<int,string>.Failure("overflow mutated the atomic cell");
+        }
+
+        Atomic<bool> flag = Atomic<bool>.Create(true);
+        flag.Store(false);
+        if (flag.Exchange(true) || !flag.CompareExchange(false, true) || flag.Load())
+            return Result<int,string>.Failure("atomic Boolean ABI changed its value");
+
+        Atomic<float> wide = Atomic<float>.Create(-0.0);
+        float observed = wide.CompareExchange(4.0, 0.0);
+        if (float.CopySign(1.0, observed) != -1.0 || float.CopySign(1.0, wide.Load()) != -1.0)
+            return Result<int,string>.Failure("atomic float lost signed zero identity");
+
+        float32 payload = float32.FromBits(0x7fc00011u);
+        Atomic<float32> narrow = Atomic<float32>.Create(payload);
+        if (float32.ToBits(narrow.CompareExchange(2.0f, payload)) != 0x7fc00011u || narrow.Load() != 2.0f)
+            return Result<int,string>.Failure("atomic float32 lost the NaN payload");
+
+        Counter counter = new Counter();
+        if (counter.Next() != 1 || counter.Next() != 2)
+            return Result<int,string>.Failure("default atomic field did not retain its cell");
+        Result<int,string> result = await Finish(alias, token);
+        return result;
+    }
+}

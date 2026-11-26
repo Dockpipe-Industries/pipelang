@@ -1,6 +1,7 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "compiler.hpp"
 #include "ScopedResourceBudget.hpp"
+#include "../lexer/lexer.hpp"
 
 #include <array>
 #include <iostream>
@@ -62,20 +63,28 @@ int main(int argc, char** argv) {
         if (!request.is_object() || !request.contains("protocol") || !request["protocol"].is_string())
             throw std::runtime_error("invalid native model request");
         const auto protocol = request["protocol"].get<std::string>();
+        const bool formatting = protocol == "pipelang.native-model-format.v1";
+        const bool index = protocol == "pipelang.native-model-index.v1";
+        const bool analysis = protocol == "pipelang.native-model-analysis.v1";
         const bool compiled = protocol == "pipelang.native-model-project.v2";
-        const bool project = compiled || protocol == "pipelang.native-model-project.v1";
+        const bool project = analysis || compiled || protocol == "pipelang.native-model-project.v1";
         const bool objects = protocol == "pipelang.native-model.v3";
         const bool modular = project || protocol == "pipelang.native-model.v2" || (objects && request.contains("modules"));
-        if (protocol != "pipelang.native-model.v1" && protocol != "pipelang.native-model.v2" && !objects && !project)
+        if (protocol != "pipelang.native-model.v1" && protocol != "pipelang.native-model.v2" && !objects && !project && !index && !formatting)
             throw std::runtime_error("unsupported native model protocol");
         auto required = modular ? std::set<std::string>{"protocol", "modules", "entry"}
                                 : std::set<std::string>{"protocol", "source"};
+        if (index)
+            required = {"protocol", "sources"};
         if (objects)
             required.insert("models");
         if (compiled)
             required.insert("emit");
         auto optional = std::set<std::string>{"namespace"};
-        if (project) {
+        if (formatting) {
+            optional = {"tab_size", "insert_spaces", "range_start", "range_end"};
+        }
+        if (project && !analysis) {
             optional.insert("native_numeric_environment");
             optional.insert("composition_emission");
         }
@@ -106,7 +115,17 @@ int main(int argc, char** argv) {
         if (request.contains("namespace") && !request["namespace"].is_string())
             throw std::runtime_error("namespace must be a string");
         std::vector<pipelang::models::ModuleSource> modules;
-        if (modular) {
+        if (index) {
+            if (!request["sources"].is_array() || request["sources"].empty() ||
+                request["sources"].size() > budget.sourceFragments)
+                throw std::runtime_error("index requires 1..4096 source fragments");
+            for (const auto& source : request["sources"]) {
+                requireFields(source, {"path", "source"});
+                if (!source["path"].is_string() || !source["source"].is_string())
+                    throw std::runtime_error("index paths and sources must be strings");
+                modules.push_back({{}, source["source"].get<std::string>(), source["path"].get<std::string>()});
+            }
+        } else if (modular) {
             if (!request["entry"].is_string() || !request["modules"].is_array() ||
                 request["modules"].empty() || request["modules"].size() > (project ? budget.sourceFragments : budget.modules))
                 throw std::runtime_error(project ? "project requires an entry and 1..4096 source fragments"
@@ -126,7 +145,26 @@ int main(int argc, char** argv) {
         json response;
         try {
             const auto nameSpace = request.value("namespace", "pipelang_models");
-            if (emitCompositionFactory) {
+            if (formatting) {
+                if (request.contains("tab_size") && (!request["tab_size"].is_number_integer() ||
+                    request["tab_size"].get<std::int64_t>() < 1 || request["tab_size"].get<std::int64_t>() > 16))
+                    throw std::runtime_error("format tab_size must be an integer in 1..16");
+                if (request.contains("insert_spaces") && !request["insert_spaces"].is_boolean())
+                    throw std::runtime_error("format insert_spaces must be boolean");
+                for (const auto* field : {"range_start", "range_end"}) {
+                    if (request.contains(field) && (!request[field].is_number_integer() ||
+                        request[field].get<std::int64_t>() < 0))
+                        throw std::runtime_error("format range offsets must be nonnegative integers");
+                }
+                const auto& source = request["source"].get_ref<const std::string&>();
+                response = pipelang::models::formatSource(source, request.value("tab_size", 4U),
+                    request.value("insert_spaces", true), request.value("range_start", std::size_t{0}),
+                    request.value("range_end", source.size()));
+            } else if (index) {
+                response = pipelang::models::indexProjectSources(modules);
+            } else if (analysis) {
+                response = pipelang::models::analyzeProjectModules(modules, request["entry"].get<std::string>());
+            } else if (emitCompositionFactory) {
                 response = pipelang::models::compileProjectCompositionFactory(modules,
                     request["entry"].get<std::string>(), nameSpace,
                     compiled ? request.at("emit").get<std::string>() : std::string{}, activeHostNumericEnvironment);
@@ -145,9 +183,26 @@ int main(int argc, char** argv) {
             }
         } catch (const pipelang::models::Diagnostic& diagnostic) {
             json detail = {{"code", "PLM1001"}, {"message", diagnostic.what()}, {"offset", diagnostic.offset}};
+            if (analysis || index) {
+                detail["length"] = 0;
+                for (const auto& module : modules) {
+                    if ((!diagnostic.path.empty() && module.path != diagnostic.path) ||
+                        (!diagnostic.module.empty() && module.name != diagnostic.module))
+                        continue;
+                    const auto lexical = pipelang::native::lex(module.source,
+                        pipelang::native::NumericSyntax::Binary64, budget.tokens);
+                    for (const auto& token : lexical.tokens) {
+                        if (token.start == diagnostic.offset) {
+                            detail["length"] = token.end - token.start;
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
             if (modular)
                 detail["module"] = diagnostic.module;
-            if (project && !diagnostic.path.empty())
+            if ((project || index) && !diagnostic.path.empty())
                 detail["path"] = diagnostic.path;
             response = {{"protocol", protocol}, {"ok", false}, {"diagnostics", json::array({detail})}};
         }

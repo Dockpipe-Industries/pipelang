@@ -303,7 +303,7 @@ private:
             fail("Optional<T> source syntax has been replaced by T?");
         Type result{current().literal, {}};
         advance();
-        while (result.name != "string" && result.name != "ByteBuffer" && result.name != "CancellationToken" && result.name != "uint32" && result.name != "int" && result.name != "float" && result.name != "float32" && !isSynchronizationHandle(result.name) && take("."))
+        while (result.name != "string" && result.name != "ByteBuffer" && result.name != "CancellationToken" && result.name != "uint32" && result.name != "int" && result.name != "float" && result.name != "float32" && !isSynchronizationHandle(result.name) && result.name != "ContextOwner" && take("."))
             result.name += "." + identifier();
         if (take("<")) {
             if (result.name == "FixedArray") {
@@ -358,12 +358,14 @@ private:
                 std::move(initializer), protectedMember, declaration.name});
             return;
         }
+        const bool staticMethod = take("static");
         const bool virtualMethod = objectSyntax_ && take("virtual");
         const bool overrideMethod = objectSyntax_ && take("override");
         const bool pure = take("pure");
         const bool asynchronous = take("async");
         Method method;
         method.visible = visible;
+        method.staticMethod = staticMethod;
         method.protectedMember = protectedMember;
         method.virtualMethod = virtualMethod;
         method.overrideMethod = overrideMethod;
@@ -371,18 +373,20 @@ private:
         method.asynchronous = asynchronous;
         method.offset = offset;
         if (is(declaration.name) && tokens_.at(position_ + 1).literal == "(") {
+            method.nameOffset = current().start;
             method.name = identifier();
             method.constructor = true;
             method.result = {"void", {}};
         } else {
             method.result = type();
+            method.nameOffset = current().start;
             method.name = identifier();
         }
         method.typeParameters = typeParameters();
         if (!take("(")) {
             if (!method.typeParameters.empty())
                 fail("generic fields are not supported");
-            if (pure || asynchronous || virtualMethod || overrideMethod || method.constructor || declaration.kind == "Interface")
+            if (staticMethod || pure || asynchronous || virtualMethod || overrideMethod || method.constructor || declaration.kind == "Interface")
                 fail("invalid field declaration");
             Expr initializer;
             if (take("="))
@@ -429,6 +433,7 @@ private:
         } else {
             method.body = block();
         }
+        method.endOffset = tokens_.at(position_ - 1).end;
         declaration.methods.push_back(std::move(method));
         if (declaration.methods.size() + declaration.fields.size() > 256)
             fail("member limit exceeded");
@@ -445,6 +450,12 @@ private:
         return result;
     }
     Statement statement() {
+        auto result = parsedStatement();
+        result.endOffset = tokens_.at(position_ - 1).end;
+        return result;
+    }
+
+    Statement parsedStatement() {
         struct DepthGuard {
             unsigned& depth;
             ~DepthGuard() { --depth; }
@@ -469,6 +480,7 @@ private:
             if (take("catch")) {
                 expect("(");
                 result.type = type();
+                result.nameOffset = current().start;
                 result.name = identifier();
                 expect(")");
                 result.alternative = block();
@@ -520,7 +532,9 @@ private:
         if (take("foreach")) {
             result.kind = parallel ? "parallel_foreach" : "foreach";
             expect("(");
-            result.type = type();
+            if (!take("var"))
+                result.type = type();
+            result.nameOffset = current().start;
             result.name = identifier();
             expect("in");
             result.expression = expression();
@@ -559,6 +573,22 @@ private:
     Statement simpleStatement(const std::string& delimiter, bool allowLocal) {
         Statement result;
         result.offset = current().start;
+        if (is("var") && tokens_.at(position_ + 1).kind == "identifier") {
+            advance();
+            if (!allowLocal)
+                fail("var declarations are not allowed in this statement context");
+
+            result.kind = "local";
+            result.nameOffset = current().start;
+            result.name = identifier();
+            if (!take("="))
+                fail("var local declarations require an initializer");
+
+            result.expression = expression();
+            expect(delimiter);
+            return result;
+        }
+
         const auto savedPosition = position_;
         if (allowLocal && current().kind == "identifier" && current().literal != "await") {
             // Type declarations are syntactically distinguished by a following
@@ -570,6 +600,7 @@ private:
                     local.offset = result.offset;
                     local.kind = "local";
                     local.type = std::move(possibleType);
+                    local.nameOffset = current().start;
                     local.name = identifier();
                     expect("=");
                     local.expression = expression();
@@ -711,7 +742,7 @@ private:
             result = make(token.kind, token.literal, token.start);
         } else if (is("Result") || is("Optional") || is("List") || is("Atomic") || is("Array") || is("FixedArray") ||
                    is("Dictionary") || is("HashSet") || is("Queue") || is("Stack") ||
-                   is("KeyValuePair") || is("string") || is("ByteBuffer") || is("CancellationToken") || is("uint32") || is("int") || is("float") || is("float32") || is("Lock") || is("SemaphoreSlim") ||
+                   is("KeyValuePair") || is("string") || is("ByteBuffer") || is("CancellationToken") || is("uint32") || is("int") || is("float") || is("float32") || is("Lock") || is("SemaphoreSlim") || is("ContextOwner") ||
                    isConcurrentCollection(token.literal)) {
             const auto resultType = type();
             result = make("type", resultType.text(), token.start);

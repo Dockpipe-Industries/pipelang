@@ -5,8 +5,10 @@
 #include "CompiledProject.hpp"
 #include "CompositionSyntax.hpp"
 #include "../lexer/lexer.hpp"
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -23,7 +25,20 @@ inline bool isSynchronizationHandle(const std::string& name) {
 
 inline bool isSharedHandle(const Type& type) {
     return type.name == "Atomic" || isConcurrentCollection(type.name) ||
-        isSynchronizationHandle(type.name);
+        isSynchronizationHandle(type.name) || type.name == "ContextOwner";
+}
+
+inline std::optional<Type> sequenceElementType(const Type& sequence)
+{
+    if (sequence.name == "ByteBuffer")
+        return Type{"uint32", {}};
+    if (sequence.name == "Dictionary" || sequence.name == "ConcurrentDictionary")
+        return Type{"KeyValuePair", sequence.arguments};
+    if (sequence.name == "List" || sequence.name == "Array" || sequence.name == "FixedArray" ||
+        sequence.name == "HashSet" || sequence.name == "Queue" || sequence.name == "Stack" ||
+        sequence.name == "ConcurrentQueue" || sequence.name == "ConcurrentStack")
+        return sequence.arguments.at(0);
+    return std::nullopt;
 }
 
 struct Expression {
@@ -45,6 +60,8 @@ struct Expression {
     bool statelessWorkerCall = false;
     Type convertTo = {};
     std::shared_ptr<Expression> constantValue = {};
+    // Project lexical linking proved this receiver denotes a source type.
+    bool projectTypeReference = false;
 };
 using Expr = std::shared_ptr<Expression>;
 
@@ -75,6 +92,11 @@ struct Statement {
     std::size_t offset = 0;
     std::vector<Statement> initialization = {};
     std::vector<Statement> iteration = {};
+    // Source provenance only; checked declarations always carry a concrete Type.
+    bool inferredType = false;
+    // Authored byte ranges retained for compiler-backed editor queries.
+    std::size_t nameOffset = 0;
+    std::size_t endOffset = 0;
 };
 
 
@@ -106,6 +128,9 @@ struct Method {
     // Checked closed dispatch, retained for consumers selecting a method without
     // an authored call expression (for example a composition factory binding).
     std::vector<std::string> dispatchTargets = {};
+    bool staticMethod = false;
+    std::size_t nameOffset = 0;
+    std::size_t endOffset = 0;
 };
 
 struct Declaration {
@@ -153,7 +178,12 @@ Program parse(const std::string& source, bool objectSyntax = false, std::size_t 
 Program parseModuleHeader(const std::string& source);
 // Project convention uses one ordinary source identifier as its implicit module.
 std::string moduleIdentityFromStem(const std::string& stem);
-void check(Program& program);
+// A normalizer-owned resolver admits concrete closed generic member applications.
+// The checker remains the sole owner of receiver typing and call semantics.
+using GenericMemberResolver = std::function<std::string(
+    const std::string&, const std::string&, const std::vector<Type>&,
+    const Declaration&, std::size_t)>;
+void check(Program& program, const GenericMemberResolver& genericMembers = {});
 std::string generate(const Program& program, const std::string& nameSpace);
 std::string generateCompositionFactory(const Program& program, const std::string& nameSpace, bool compiled = false);
 CompiledProject generateCompiledProject(const Program& program, const std::string& nameSpace);

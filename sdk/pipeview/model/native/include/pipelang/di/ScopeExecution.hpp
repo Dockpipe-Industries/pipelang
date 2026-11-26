@@ -47,7 +47,7 @@ public:
             // Ordinary calls retain the established stack transaction path. No
             // construction identity, journal scan or retention heap is involved.
             model::GraphTransaction graph(owner_->objects_.domain());
-            model::EvaluationBudget budget;
+            auto budget = model::EvaluationBudget::forInvocation(owner_->tasks_.evaluationStepsPerSegment());
             budget.setCancellationCheck([&cancellation] { return cancellation.is_cancelled(); });
             model::ObjectExecution execution(owner_->tasks_, budget, graph, {});
             execution.cancellation = cancellation;
@@ -176,7 +176,7 @@ private:
         } finish{*context, admitted.value()};
         try {
             model::GraphTransaction graph(owner->objects_.domain());
-            model::EvaluationBudget budget;
+            auto budget = model::EvaluationBudget::forInvocation(owner->tasks_.evaluationStepsPerSegment());
             // Match ordinary source async: cancellation is cooperative through
             // authored token checks and await/host boundaries. An automatic
             // expression-step check would interrupt publication of an already
@@ -242,7 +242,7 @@ private:
         std::unique_ptr<model::GraphTransaction> graph;
         try {
             graph = std::make_unique<model::GraphTransaction>(owner_->objects_.domain());
-            model::EvaluationBudget budget;
+            auto budget = model::EvaluationBudget::forInvocation(owner_->tasks_.evaluationStepsPerSegment());
             budget.setCancellationCheck([&cancellation] { return cancellation.is_cancelled(); });
             model::ObjectExecution execution(owner_->tasks_, budget, *graph, {});
             execution.cancellation = cancellation;

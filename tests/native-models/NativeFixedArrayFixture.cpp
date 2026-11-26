@@ -11,7 +11,7 @@ using namespace pipelang::tools;
 void invoke(const std::vector<std::string>& command)
 {
     const auto result = process(command, {}, std::chrono::seconds(90), 4U << 20);
-    require(result.exit == 0, "fixed array fixture failed: " + result.output + result.diagnostic);
+    require(result.exit == 0, "fixed array fixture failed (" + std::to_string(result.exit) + "): " + result.output + result.diagnostic);
 }
 }
 
@@ -556,6 +556,7 @@ bool fixedFloatingProfiles(Operation operation)
         std::feclearexcept(FE_ALL_EXCEPT);
         std::feraiseexcept(FE_DIVBYZERO);
 #endif
+                const int beforeRounding = std::fegetround();
                 const int flags = std::fetestexcept(FE_ALL_EXCEPT);
 #if defined(__i386__) || defined(__x86_64__)
                 unsigned short beforeX87 = 0;
@@ -564,7 +565,7 @@ bool fixedFloatingProfiles(Operation operation)
                 forbidFixedAllocations = true;
                 valid = operation() && valid;
                 forbidFixedAllocations = false;
-                valid = valid && std::fegetround() == rounding && std::fetestexcept(FE_ALL_EXCEPT) == flags;
+                valid = valid && std::fegetround() == beforeRounding && std::fetestexcept(FE_ALL_EXCEPT) == flags;
 #if defined(__i386__) || defined(__x86_64__)
                 unsigned short afterX87 = 0;
                 asm volatile("fnstcw %0" : "=m"(afterX87));
@@ -719,7 +720,12 @@ target_compile_definitions(fixed_arrays PRIVATE PIPELANG_ACTIVE_HOST_FLOATING=1)
 target_compile_options(fixed_arrays PRIVATE -frounding-math)
 )cmake");
     invoke({nativeTool("cmake").string(), "-S", output.string(), "-B", (output / "initial-normal").string(),
-        "-DFIXED_ARRAY_SDK_PREFIX=" + prefix.string(), "-DCMAKE_CXX_COMPILER=" + nativeTool("c++").string(), "-DCMAKE_BUILD_TYPE=Release"});
+        "-DFIXED_ARRAY_SDK_PREFIX=" + prefix.string(),
+        "-DCMAKE_CXX_COMPILER=" + nativeTool("c++").string(),
+#ifdef _WIN32
+        "-G", "Ninja", "-DCMAKE_EXE_LINKER_FLAGS=-static",
+#endif
+        "-DCMAKE_BUILD_TYPE=Release"});
     invoke({nativeTool("cmake").string(), "--build", (output / "initial-normal").string(), "--parallel", "1"});
     invoke({nativeExecutable(output / "initial-normal/fixed_arrays").string()});
     invoke({nativeExecutable(output / "initial-normal/fixed_array_headers").string()});

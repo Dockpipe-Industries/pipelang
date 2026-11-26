@@ -52,7 +52,10 @@ BindingModel admit(const nlohmann::json& manifest, const std::string& sourceMode
     if (!identifier(result.nativeModel))
         throw std::runtime_error("unsafe native model identity");
     std::set<std::string> names{"Model", "successOutcome", "cancelledOutcome", "failureOutcome", "projectionStatus", "projectionChanged", "objectName", "deleteLater", "thread", "destroyed",
-        "setParent", "parent", "children", "metaObject", "connect", "disconnect", "property", "setProperty", "event", "eventFilter", "moveToThread"};
+        "setParent", "parent", "children", "metaObject", "connect", "disconnect", "property", "setProperty", "event", "eventFilter", "moveToThread",
+        "Group", "current", "correlation", "operationPending", "contextStatus", "contextChanged", "operationRetired",
+        "latest", "exclusive", "resolveOperation", "finishOperation", "forOperation", "captureTarget", "captureSupervisor", "target", "bindFresh", "bindShared",
+        "prototypeIdentity", "refreshProjection"};
     bounded(selected->at("fields"));
     for (const auto& field : selected->at("fields")) {
         const auto name = text(field, "name");
@@ -69,7 +72,7 @@ BindingModel admit(const nlohmann::json& manifest, const std::string& sourceMode
             !method.at("pure").is_boolean() || method.at("async").get<bool>())
             throw std::runtime_error("Qt binding profile requires unique synchronous checked methods");
         bounded(method.at("parameters"));
-        if (method.at("pure").get<bool>() && method.at("parameters").empty() && scalar(type)) {
+        if (method.at("pure").get<bool>() && method.at("parameters").empty() && (scalar(type) || type == "ContextOwner")) {
             result.properties.push_back({name, type, true});
             continue;
         }

@@ -1,0 +1,7 @@
+module JsonEntry;
+import PipeLang.Json;
+import PipeLang.Testing;
+import PipeLang.Json.Tests;
+import PipeLang.Json.RenderTests;
+import PipeLang.Json.WriterTests;
+import PipeLang.Json.WireTests;

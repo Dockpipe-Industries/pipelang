@@ -100,9 +100,21 @@ application-source publication requirements; existing notice obligations remain.
 
 [Developer foundations](tasks/developer-foundations-20261112.md) owns the ordered
 scope, current capability audit, licensing/provider boundaries and qualification.
-Sequential ByteBuffer iteration is locally qualified on native and WASM. General lambdas,
-LINQ/query-provider translation, typed host-error transport and request contexts
-remain planned; this entry does not claim them implemented or lift any SDK budgets.
+Sequential ByteBuffer iteration, general Result propagation and the owning common
+Result interface have local native/WASM qualification. Captured context ownership,
+stale-publication guards and generated Qt operation receivers now have local
+native, sanitizer, actual WASM and Cloud browser consumer qualification in the same
+foundation task. General lambdas, LINQ/query-provider
+translation, generated codecs and persistence SDK integration remain planned.
+This does not lift SDK budgets or claim complete async effect/transaction semantics.
+
+## Authored testing framework — implemented subset, qualification continuing
+
+The installed source library now supports typed synchronous/asynchronous unit and table
+tests, stable registration and source-owned lifecycle assertions. The
+[testing task](tasks/source-testing-framework-20261114.md) owns current Linux installed-consumer
+and host-journey qualification and remaining work. F31/C7 are incomplete: property generators,
+shrinkers, seeds, effect/schedule replay, debugging and full platform qualification remain open.
 
 ## Deferred: compiler-enforced real-time-safe execution
 
@@ -123,6 +135,11 @@ phases and acceptance criteria. Allocation freedom, lock freedom and measured
 callback latency do not establish hard-real-time guarantees.
 
 ## Native migration and current evidence
+
+The [direct native compilation contract](../concepts/pipelang-direct-native.md)
+owns the machine-code production target, compatibility rules and acceptance
+evidence. `pipelang build` defaults to native executables. `pipelang-modelc`
+continues to generate C++ models for reference and compatibility use.
 
 The earlier ecosystem-wide C++ rewrite direction is superseded for ForgePipe
 and MesaMoto by the PipeLang engine-first requirement above. The current C++

@@ -74,6 +74,9 @@ std::string replace(std::string source, const std::string& old, const std::strin
     return source;
 }
 void run(Oracle& oracle) {
+    oracle.admitted("ContextOwnerSource", sourceRequest(
+        oracle.source("tests/native-models/ContextOwnerSource.pipe"), "context_owner_source"));
+
     const std::string statelessWorker = R"pipe(
 public Class Numeric {
     public Numeric() {}
@@ -94,8 +97,8 @@ public Class App {
     const auto stateless = oracle.admitted("StatelessObjectWorker",
         sourceRequest(statelessWorker, "stateless_object_worker", true));
     const auto statelessHeader = stateless.at("header").get<std::string>();
-    require(statelessHeader.find("_value_worker(pipelang::model::EvaluationBudget& pl_budget, std::int64_t value)") != std::string::npos,
-            "stateless object helper did not lower to a receiver-free worker function");
+    require(statelessHeader.find("_value_worker(pipelang::model::EvaluationBudget& pl_budget, pipelang::model::SourceCallContext pl_parentCalls, std::int64_t value)") != std::string::npos,
+            "stateless object helper lost its receiver-free inherited call context");
     const auto refuseWorker = [&](const std::string& name, const std::string& source,
                                   const std::string& expected) {
         oracle.refused("stateless-worker-" + name,

@@ -74,7 +74,7 @@ Float activeFromInteger(std::int64_t value) noexcept {
 // defines overflow, underflow and directed rounding without a C++ out-of-range
 // floating cast. Other active operations remain available on their own profiles.
 template<class Platform = void>
-float activeNarrowFloat(double value) noexcept
+float activeNarrowFloat([[maybe_unused]] double value) noexcept
 {
 #if defined(__linux__) && defined(__x86_64__) && defined(__SSE2__)
     volatile double input = value;

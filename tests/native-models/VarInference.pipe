@@ -1,0 +1,105 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Record Pair {
+    public int value;
+}
+
+public Interface Host {
+    Task<Result<int,string>> Read(CancellationToken token);
+    Result<void,string> Cleanup();
+}
+
+public Class Worker {
+    private Host host;
+
+    public Worker(Host host) {
+        this.host = host;
+    }
+
+    public async Task<Result<int,string>> Read(CancellationToken token) {
+        var result = await host.Read(token);
+
+        return result;
+    }
+}
+
+public Class App {
+    private Host host;
+    private Worker worker;
+
+    public App(Host host) {
+        this.host = host;
+        worker = new Worker(host);
+    }
+
+    private pure T Echo<T>(T value) => value;
+
+    private pure int? Maybe(int value) => value;
+
+    public pure bool Values() {
+        var boolean = true;
+        var integer = 42;
+        var unsignedInteger = 42u;
+        var wide = 1.5;
+        var narrow = 2.5f;
+        var text = "text";
+        var pair = Pair(42);
+        var result = Result<int,string>.Success(42);
+        var nested = Result<List<int>,string>.Success(List<int>.Empty());
+        var optional = Maybe(42);
+        var generic = Echo<Pair>(pair);
+
+        return boolean && integer == 42 && unsignedInteger == 42u && wide == 1.5 &&
+            narrow == 2.5f && text == "text" && pair.value == 42 &&
+            result.IsSuccess && result.Value == 42 && nested.IsSuccess &&
+            nested.Value.Count == 0 && optional != null && optional.Value == 42 &&
+            generic.value == 42;
+    }
+
+    public pure int Collections(ByteBuffer bytes) {
+        var values = List<int>.Empty();
+        values.Add(2);
+        values.Add(3);
+
+        var total = 0;
+        foreach (var item in values) {
+            var doubled = item * 2;
+            total = total + doubled;
+        }
+
+        var mapping = Dictionary<string,int>.Empty();
+        mapping.Add("number", 4);
+        foreach (var pair in mapping)
+            total = total + pair.Value;
+
+        foreach (var octet in bytes)
+            total = total + int.FromUInt32(octet);
+
+        for (var index = 0; index < 3; index = index + 1)
+            total = total + index;
+
+        var fixedValues = FixedArray<int,2>.Create(5);
+        foreach (var fixedValue in fixedValues)
+            total = total + fixedValue;
+
+        return total;
+    }
+
+    public int Parallel(List<int> values) {
+        var total = Atomic<int>.Create(0);
+        parallel foreach (var item in values) {
+            var added = total.Add(item);
+        }
+
+        return total.Load();
+    }
+
+    public async Task<Result<int,string>> Read(CancellationToken token) {
+        try {
+            var result = await worker.Read(token);
+
+            return result;
+        } finally {
+            var cleanup = host.Cleanup();
+        }
+    }
+}

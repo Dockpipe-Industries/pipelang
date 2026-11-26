@@ -14,6 +14,11 @@ esac
 case "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/" in
     "$PWD/"*) echo 'Native proof must be outside sources' >&2; exit 1 ;;
 esac
+native_objects=${PIPELANG_BUILD_NATIVE_OBJECT_PROOF:-ON}
+case "$native_objects" in
+    ON|OFF) ;;
+    *) echo 'PIPELANG_BUILD_NATIVE_OBJECT_PROOF must be ON or OFF' >&2; exit 1 ;;
+esac
 build=${PIPELANG_NATIVE_BUILD_DIRECTORY:-$PIPELANG_NATIVE_TOOLCHAIN_PROOF/build}
 runner=${PIPELANG_NATIVE_RUNNER:-}
 if [ -z "$runner" ]; then
@@ -35,6 +40,7 @@ if [ "${1:-}" != --inside ]; then
             --estate "$PIPELANG_NATIVE_TOOLCHAIN_PROOF" --timeout 3600 -- \
             /usr/bin/env PIPELANG_NATIVE_TOOLCHAIN_PROOF="$PIPELANG_NATIVE_TOOLCHAIN_PROOF" \
             PIPELANG_NATIVE_BUILD_DIRECTORY="$build" PIPELANG_NATIVE_RUNNER="$runner" \
+            PIPELANG_BUILD_NATIVE_OBJECT_PROOF="$native_objects" \
             PIPELANG_NATIVE_TOOL_PATH="${PIPELANG_NATIVE_TOOL_PATH:-}" PIPELANG_NATIVE_TRACE_EXEC="${PIPELANG_NATIVE_TRACE_EXEC:-0}" \
             PIPELANG_NATIVE_RUNNER_SHA256="$PIPELANG_NATIVE_RUNNER_SHA256" sh "$0" --inside
 fi
@@ -52,7 +58,7 @@ unit() {
     shift
     prefix="$proof/units/$name"
     if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ "${PIPELANG_NATIVE_TRACE_EXEC:-0}" = 1 ]; then
-        set -- /usr/bin/strace -f -e trace=execve -s 4096 -o "$prefix.exec" "$@"
+        set -- /bin/sh "$platform_directory/trace-executions.sh" "$prefix.exec" "$@"
     fi
     if "$runner" unit --output "$prefix" --estate "$proof" --timeout 900 -- "$@" > "$prefix.launcher.log" 2>&1; then
         echo "$name: passed"
@@ -62,9 +68,11 @@ unit() {
     tail -c 3000 "$prefix.launcher.log" >&2
     exit 1
 }
-unit configure "$PIPELANG_CMAKE" -S sdk/pipeview/model -B "$build" \
+set -- -S sdk/pipeview/model -B "$build" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" \
-    -DPIPELANG_BUILD_SDK_TOOL_TESTS=ON -DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON
+    -DPIPELANG_BUILD_SDK_TOOL_TESTS=ON -DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON \
+    "-DPIPELANG_BUILD_NATIVE_OBJECT_PROOF=$native_objects"
+unit configure "$PIPELANG_CMAKE" "$@"
 unit build "$PIPELANG_CMAKE" --build "$build" --parallel 1
 unit install "$PIPELANG_CMAKE" --install "$build" --prefix "$proof/sdk"
 if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ -f "$PIPELANG_NATIVE_TOOLCHAIN_PROOF-bootstrap/build.exec" ]; then

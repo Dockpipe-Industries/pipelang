@@ -1,7 +1,9 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "syntax.hpp"
+#include "AsyncFinallyLowering.hpp"
 #include "CompiledImplementationUnits.hpp"
 #include "NativeNumericExports.hpp"
+#include "ProgramTypeUsage.hpp"
 #include "CompositionEmitter.hpp"
 #include "CompositionPlanner.hpp"
 
@@ -181,6 +183,8 @@ public:
                 line("#include <pipelang/model/extended_collections.hpp>");
             if (usesSynchronization())
                 line("#include <pipelang/model/synchronization.hpp>");
+            if (usesType("ContextOwner"))
+                line("#include <pipelang/model/context.hpp>");
             if (usesConcurrentCollections())
                 line("#include <pipelang/model/concurrent_collections.hpp>");
             if (usesType("Atomic"))
@@ -457,6 +461,7 @@ private:
     }
 
     void prepareQualifiedFunctions() {
+        std::vector<const Method*> pending;
         std::function<void(const Expr&, bool)> inspectExpression;
         std::function<void(const std::vector<Statement>&, bool)> inspectStatements;
         inspectExpression = [&](const Expr& node, bool helperBody) {
@@ -468,7 +473,10 @@ private:
                     const auto& method = resolvedMethod(owner, node->callable);
                     const auto name = "pl_qualified_" + std::to_string(qualifiedFunctions_.size());
                     qualifiedFunctions_.emplace(node->callable, QualifiedFunction{&owner, &method, name});
-                    inspectStatements(method.body, true);
+                    if (program_.objectEnabled)
+                        pending.push_back(&method);
+                    else
+                        inspectStatements(method.body, true);
                 }
             }
             for (const auto& child : node->children)
@@ -489,12 +497,17 @@ private:
             for (const auto& method : owner.methods)
                 inspectStatements(method.body, false);
         }
+        while (!pending.empty()) {
+            const auto* method = pending.back();
+            pending.pop_back();
+            inspectStatements(method->body, true);
+        }
     }
 
     std::string qualifiedParameters(const Method& method) const {
         std::string result = "pipelang::model::EvaluationBudget& pl_budget";
         if (program_.objectEnabled)
-            result += ", pipelang::model::ObjectExecution& pl_execution";
+            result += ", pipelang::model::ObjectExecution& pl_parentExecution";
         const auto authored = parameters(method);
         if (!authored.empty())
             result += ", " + authored;
@@ -531,8 +544,10 @@ private:
                 beginImplementationDefinition(function.owner->name);
             line(std::string(compiled_ ? "" : "inline ") + cpp(method_->result) + " " + function.name +
                 "(" + qualifiedParameters(*method_) + ") {");
-            if (program_.objectEnabled)
-                line("(void)pl_execution;", 1);
+            if (program_.objectEnabled) {
+                line("auto pl_execution = pl_parentExecution.enterCall();", 1);
+                line("pl_budget.step();", 1);
+            }
             unusedParameters(*method_, 1);
             statements(method_->body, 1);
             line("}");
@@ -722,8 +737,16 @@ private:
         numericEmission_ = false;
     }
 
-    void emitRootExecution(unsigned indentation) {
-        line("[[maybe_unused]] auto pl_execution = pl_transaction.execution(pl_scope, pl_budget);", indentation);
+    void emitRootExecution(unsigned indentation, bool sourceCall = false,
+                           const std::string& parentCalls = "pipelang::model::SourceCallContext{}",
+                           bool alreadyEntered = false) {
+        // The returned root owns its leases. Never borrow them from the
+        // temporary execution produced while establishing a transaction.
+        const auto callContext = sourceCall ? ".withCalls(" + parentCalls +
+            (alreadyEntered ? "" : ".enter()") + ")" : "";
+        line("[[maybe_unused]] auto pl_execution = pl_transaction.execution(pl_scope, pl_budget)" + callContext + ";", indentation);
+        if (sourceCall)
+            line("pl_budget.step();", indentation);
         if (classParallel_ || classSynchronization_)
             line("pl_execution.cancellation = pl_parallelCancellation;", indentation);
         if (classParallel_)
@@ -772,9 +795,11 @@ private:
         for (const auto& declaration : program_.declarations) {
             if (objectClass(declaration))
                 objectTypeIds_[declaration.name] = type++;
-            if (!objectClass(declaration) && !declaration.sourceInterface)
+            if (declaration.kind != "Class" && !declaration.sourceInterface)
                 continue;
             for (const auto& callable : declaration.methods) {
+                if (!objectClass(declaration) && !declaration.sourceInterface && !callable.staticMethod)
+                    continue;
                 objectMethods_[callable.identity] = &callable;
                 objectFunctions_[callable.identity] = "pl_object_function_" + std::to_string(method++);
             }
@@ -792,6 +817,7 @@ private:
             const auto id = objectClass(declaration) ? objectTypeIds_.at(declaration.name) : 0;
             line("static constexpr std::uint64_t typeId = " + std::to_string(id) + ";", 1);
             line("static bool accepts(std::uint64_t value) noexcept {", 1);
+            line("(void)value;", 2);
             if (objectClass(declaration)) {
                 std::string accepted = "value == typeId";
                 for (const auto& candidate : program_.declarations) {
@@ -850,7 +876,7 @@ private:
         return lazyObjectBody_ ? "template " : "";
     }
     std::string objectInitializerParameters(const Declaration& owner, const Method& method) const {
-        std::string result = objectExecutionType() + "& pl_execution, " + cpp({owner.name, {}, owner.sourceName}) + " pl_self";
+        std::string result = objectExecutionType() + "& pl_parentExecution, " + cpp({owner.name, {}, owner.sourceName}) + " pl_self";
         for (const auto& parameter : method.parameters)
             result += ", " + cpp(parameter.type) + " " + parameter.name;
         return result;
@@ -862,9 +888,10 @@ private:
             return "pipelang::model::Coroutine<" + cpp(method.result.arguments[0]) + ">";
         return cpp(method.result);
     }
-    std::string objectParameters(const Declaration& owner, const Method& method) const {
-        std::string result = objectExecutionType() + (method.asynchronous ? " " : "& ") + "pl_execution";
-        if (!method.constructor)
+    std::string objectParameters(const Declaration& owner, const Method& method, bool body = false) const {
+        std::string result = objectExecutionType() + (method.asynchronous && body ? " " : "& ") +
+            (body ? "pl_parentExecution" : "pl_execution");
+        if (!method.constructor && !method.staticMethod)
             result += ", " + cpp({owner.name, {}, owner.sourceName}) + " pl_self";
         for (const auto& parameter : method.parameters)
             result += ", " + cpp(parameter.type) + " " + parameter.name;
@@ -1014,7 +1041,7 @@ private:
     std::string objectCall(const Expr& value) {
         std::string result = "([&]() { ";
         std::string arguments = "pl_execution";
-        if (value->resolution != "object_construct") {
+        if (value->resolution != "object_construct" && value->resolution != "static_call") {
             result += "auto pl_objectReceiver = " + expression(value->children[0]->children[0]) + "; ";
             arguments += ", pl_objectReceiver." + objectTemplateKeyword() + "as<" + objectTag(value->owner) + ">()";
         }
@@ -1031,7 +1058,7 @@ private:
         // Preserve the synthetic receiver evaluation's budget charge, without
         // carrying an ObjectRef, graph transaction or owner state to the worker.
         std::string result = "([&]() { pl_budget.step(); ";
-        std::string arguments = "pl_budget";
+        std::string arguments = "pl_budget, pl_calls";
         for (std::size_t index = 1; index < value->children.size(); ++index) {
             const auto name = "pl_workerArgument" + std::to_string(index);
             result += "auto " + name + " = " + expression(value->children[index]) + "; ";
@@ -1041,7 +1068,7 @@ private:
     }
 
     std::string statelessWorkerParameters(const Method& method) const {
-        std::string result = "pipelang::model::EvaluationBudget& pl_budget";
+        std::string result = "pipelang::model::EvaluationBudget& pl_budget, pipelang::model::SourceCallContext pl_parentCalls";
         for (const auto& parameter : method.parameters)
             result += ", " + cpp(parameter.type) + " " + parameter.name;
         return result;
@@ -1071,6 +1098,8 @@ private:
                 workerCaptures_.clear();
                 line(objectInline() + cpp(method.result) + " " + objectFunction(method.identity) +
                      "_value_worker(" + statelessWorkerParameters(method) + ") {");
+                line("[[maybe_unused]] const auto pl_calls = pl_parentCalls.enter();", 1);
+                line("pl_budget.step();", 1);
                 validateParameters(method, 1);
                 unusedParameters(method, 1);
                 statements(method.body, 1);
@@ -1089,14 +1118,15 @@ private:
         const auto cancellation = "pl_objectAwaitCancellation" + suffix;
         const auto operation = "pl_objectAwaitOperation" + suffix;
         const auto result = "pl_objectAwaitResult" + suffix;
-        line("auto " + receiver + " = " + expression(call->children[0]->children[0]) + ";", indentation);
+        if (call->resolution != "static_async")
+            line("auto " + receiver + " = " + expression(call->children[0]->children[0]) + ";", indentation);
         line("auto " + cancellation + " = pl_taskCancellation;", indentation);
-        std::string arguments = "pl_execution, " + receiver + "." + objectTemplateKeyword() + "as<" + objectTag(call->owner) + ">()";
+        std::string arguments = "pl_execution";
+        if (call->resolution != "static_async")
+            arguments += ", " + receiver + "." + objectTemplateKeyword() + "as<" + objectTag(call->owner) + ">()";
         for (std::size_t index = 1; index < call->children.size(); ++index) {
             const auto name = "pl_objectAwaitArgument" + suffix + "_" + std::to_string(index);
             line("auto " + name + " = " + expression(call->children[index]) + ";", indentation);
-            if (call->children[index]->type.name == "CancellationToken")
-                line(cancellation + " = pipelang::model::CancellationToken::combine(" + cancellation + ", " + name + ");", indentation);
             arguments += ", std::move(" + name + ")";
         }
         arguments += ", " + cancellation;
@@ -1161,8 +1191,12 @@ private:
             beginMember("void", "validate", "", " const" + std::string(compiled_ ? "" : " override"));
             line("using pipelang::model::validate;", 2);
             for (const auto& field : fields) {
-                if (!service(program_, field.type))
+                if (field.type.name == "ContextOwner") {
+                    line("if (" + objectSlot(field.name) + ")", 2);
+                    line("validate(" + objectSlot(field.name) + ");", 3);
+                } else if (!service(program_, field.type)) {
                     line("validate(" + objectSlot(field.name) + ");", 2);
+                }
             }
             endMember();
             beginMember("void", "validateInitialized", "", " const" + std::string(compiled_ ? "" : " override"));
@@ -1179,9 +1213,11 @@ private:
             line("};");
         }
         for (const auto& declaration : program_.declarations) {
-            if (!objectClass(declaration) && !declaration.sourceInterface)
+            if (declaration.kind != "Class" && !declaration.sourceInterface)
                 continue;
             for (const auto& method : declaration.methods) {
+                if (!objectClass(declaration) && !declaration.sourceInterface && !method.staticMethod)
+                    continue;
                 line(objectTemplatePrefix() + objectInline() + objectReturn(declaration, method) + " " + objectFunction(method.identity) +
                      "(" + objectParameters(declaration, method) + ");");
                 if (method.constructor)
@@ -1189,6 +1225,9 @@ private:
                 if (method.virtualMethod)
                     line(objectTemplatePrefix() + objectInline() + objectReturn(declaration, method) + " " + objectFunction(method.identity) +
                          "_dispatch(" + objectParameters(declaration, method) + ");");
+                if ((objectClass(declaration) || method.staticMethod) && method.asynchronous)
+                    line(objectTemplatePrefix() + objectInline() + objectReturn(declaration, method) + " " + objectFunction(method.identity) +
+                         "_body(" + objectParameters(declaration, method, true) + ");");
             }
         }
         for (const auto& declaration : program_.declarations) {
@@ -1236,16 +1275,40 @@ private:
         classParallel_ = usesParallel();
         localAsync_ = true;
         for (const auto& declaration : program_.declarations) {
-            if (!objectClass(declaration))
+            if (declaration.kind != "Class")
                 continue;
             objectOwner_ = &declaration;
             for (const auto& method : declaration.methods) {
+                if (!objectClass(declaration) && !method.staticMethod)
+                    continue;
                 beginObjectImplementation(declaration);
                 method_ = &method;
                 internalEffect_ = !method.asynchronous;
+                if (method.asynchronous) {
+                    // This ordinary factory checks ancestry before a child
+                    // coroutine frame can be allocated, including native Source
+                    // callers. Only the body below contains co_await/co_return.
+                    line(objectTemplatePrefix() + objectInline() + objectReturn(declaration, method) + " " + objectFunction(method.identity) +
+                         "(" + objectParameters(declaration, method) + ") {");
+                    line("auto pl_childExecution = pl_execution.enterAsyncCall();", 1);
+                    std::string arguments = "std::move(pl_childExecution)";
+                    if (!method.staticMethod)
+                        arguments += ", std::move(pl_self)";
+                    for (const auto& parameter : method.parameters)
+                        arguments += ", std::move(" + parameter.name + ")";
+                    arguments += ", pl_taskCancellation";
+                    line("return " + objectFunction(method.identity) + "_body(" + arguments + ");", 1);
+                    line("}");
+                    endObjectImplementation();
+                    beginObjectImplementation(declaration);
+                }
                 if (method.constructor) {
                     line(objectTemplatePrefix() + objectInline() + objectReturn(declaration, method) + " " + objectFunction(method.identity) +
                          "(" + objectParameters(declaration, method) + ") {");
+                    // Refuse depth before allocating the constructor's cell.
+                    // The initializer owns the one actual source activation,
+                    // including direct base-initializer calls.
+                    line("(void)pl_execution.calls().enter();", 1);
                     line("auto pl_construction = pl_execution.transaction.savepoint();", 1);
                     line("auto pl_self = pl_execution.transaction." + objectTemplateKeyword() + "create<" + objectState(declaration.name) + ">(" + objectTag(declaration.name) + "{});", 1);
                     std::string arguments = "pl_execution, pl_self";
@@ -1261,11 +1324,14 @@ private:
                     line(objectTemplatePrefix() + objectInline() + "void " + objectFunction(method.identity) + "_initialize(" + objectInitializerParameters(declaration, method) + ") {");
                 } else {
                     line(objectTemplatePrefix() + objectInline() + objectReturn(declaration, method) + " " + objectFunction(method.identity) +
-                         "(" + objectParameters(declaration, method) + ") {");
+                         (method.asynchronous ? "_body" : "") + "(" + objectParameters(declaration, method, true) + ") {");
                 }
+                line(std::string("auto pl_execution = ") +
+                     (method.asynchronous ? "std::move(pl_parentExecution);" : "pl_parentExecution.enterCall();"), 1);
                 line("auto& pl_budget = pl_execution.budget;", 1);
+                line("pl_budget.step();", 1);
                 line("[[maybe_unused]] auto pl_parallelCancellation = " +
-                     std::string(method.asynchronous ? "pl_taskCancellation" : "pl_execution.cancellation") + ";", 1);
+                     std::string(method.asynchronous ? "pl_taskCancellation" : "pl_execution.cancellationToken()") + ";", 1);
                 if (classParallel_)
                     line("[[maybe_unused]] pipelang::model::ParallelOptions pl_parallelOptions{pl_execution.maximumDegree};", 1);
                 validateParameters(method, 1);
@@ -1293,11 +1359,9 @@ private:
                         target->resolution = "object_field";
                         emitObjectAssignment(target, expression(initializer), 1);
                     }
-                } else {
+                } else if (!method.staticMethod) {
                     line("pl_self.require();", 1);
                 }
-                if (method.asynchronous && hasFinally(method.body))
-                    line("pipelang::model::ObjectCommitOnReturn pl_returnCommit([&]() { pl_execution.commitSegment(); }, [&]() noexcept { return pl_execution.scope.abandoningFrames(); });", 1);
                 statements(method.body, 1);
                 if (!method.constructor && method.result.name != "void") {
                     line("throw pipelang::model::ExecutionFailure(\"unreachable object control flow\");", 1);
@@ -1318,46 +1382,9 @@ private:
             return found->second;
         // This query observes only the finalized Program, not emission state.
         // Keep both positive and negative answers within this Generator lifetime.
-        const auto used = scanTypeUsage(name);
+        const auto used = programUsesType(program_, name);
         typeUsage_.emplace(name, used);
         return used;
-    }
-    bool scanTypeUsage(const std::string& name) const {
-        std::function<bool(const Type&)> inType = [&](const Type& type) {
-            if (type.name == name)
-                return true;
-            return std::any_of(type.arguments.begin(), type.arguments.end(), inType);
-        };
-        std::function<bool(const Expr&)> inExpression = [&](const Expr& value) {
-            return value && (inType(value->type) ||
-                std::any_of(value->children.begin(), value->children.end(), inExpression));
-        };
-        std::function<bool(const std::vector<Statement>&)> inStatements = [&](const std::vector<Statement>& body) {
-            return std::any_of(body.begin(), body.end(), [&](const Statement& statement) {
-                return inType(statement.type) || inExpression(statement.expression) ||
-                    inExpression(statement.target) || inStatements(statement.body) || inStatements(statement.alternative) ||
-                    inStatements(statement.cleanup) || inStatements(statement.initialization) || inStatements(statement.iteration);
-            });
-        };
-        for (const auto& declaration : program_.declarations) {
-            for (const auto& field : declaration.fields) {
-                if (inType(field.type) || inExpression(field.initializer))
-                    return true;
-            }
-            for (const auto& method : declaration.methods) {
-                if (inType(method.result) || inStatements(method.body))
-                    return true;
-                for (const auto& initializer : method.fieldInitializers) {
-                    if (inExpression(initializer))
-                        return true;
-                }
-                for (const auto& parameter : method.parameters) {
-                    if (inType(parameter.type))
-                        return true;
-                }
-            }
-        }
-        return false;
     }
     bool usesSynchronousHosts() const {
         for (const auto& declaration : program_.declarations) {
@@ -1471,15 +1498,21 @@ private:
         }
         if (program_.objectEnabled && !workerEmission_)
             result += ", pl_execution";
+        if (program_.objectEnabled && workerEmission_)
+            result += ", pl_calls";
         return result;
     }
     void cancellationContext(const Method& method, unsigned indentation, bool asynchronous = false) {
         if (!classParallel_ && !classSynchronization_)
             return;
-        line(std::string("auto pl_parallelCancellation = ") +
-             (asynchronous ? "pl_taskCancellation;" : "pipelang::model::CancellationToken{};"), indentation);
+        std::string cancellation = "pipelang::model::CancellationToken{}";
+        if (asynchronous)
+            cancellation = "pl_taskCancellation";
+        else if (program_.objectEnabled)
+            cancellation = "pipelang::model::currentPermit().cancellation()";
+        line("auto pl_parallelCancellation = " + cancellation + ";", indentation);
         for (const auto& parameter : method.parameters) {
-            if (parameter.type.name == "CancellationToken")
+            if (!program_.objectEnabled && parameter.type.name == "CancellationToken")
                 line("pl_parallelCancellation = pipelang::model::CancellationToken::combine(pl_parallelCancellation, " + parameter.name + ");", indentation);
         }
     }
@@ -1530,7 +1563,7 @@ private:
         if (initialization)
             line("auto pl_budget = pipelang::model::EvaluationBudget::forInitialization(pl_options.initializationSteps);", indentation);
         else
-            line("pipelang::model::EvaluationBudget pl_budget;", indentation);
+            line("auto pl_budget = pipelang::model::EvaluationBudget::forInvocation(pl_scope.evaluationStepsPerSegment());", indentation);
     }
     // A neutral operand cannot mutate state, fail, or change floating status.
     // Keeping every other operand ordered preserves Source evaluation effects.
@@ -1707,7 +1740,7 @@ private:
         if (state) {
             result += parallelParameters();
             if (program_.objectEnabled && !workerEmission_)
-                result += ", pipelang::model::ObjectExecution& pl_execution";
+                result += ", pipelang::model::ObjectExecution& pl_parentExecution";
         }
         for (const auto& parameter : method.parameters) {
             if (!result.empty())
@@ -1740,7 +1773,7 @@ private:
     bool stableOwnedListReceiver(const Expr& value) const {
         if (!value || !value->convertTo.name.empty())
             return false;
-        if (value->kind == "name")
+        if (value->kind == "name" || value->kind == "model_member")
             return value->resolution == "local" || value->resolution == "field";
         if (value->kind == "member" && value->resolution == "record" && value->children.size() == 1)
             return stableOwnedListReceiver(value->children[0]);
@@ -1753,7 +1786,7 @@ private:
             return false;
         const auto& kind = value->kind;
         if (kind != "integer" && kind != "float" && kind != "float32" && kind != "text" &&
-            kind != "boolean" && kind != "name" && kind != "this" && kind != "base" &&
+            kind != "boolean" && kind != "name" && kind != "model_member" && kind != "this" && kind != "base" &&
             kind != "member" && kind != "unary" && kind != "binary" && kind != "conditional")
             return false;
         // Calls (including pure helpers), constructors, awaits and future
@@ -1868,7 +1901,7 @@ private:
             return objectFieldValue(value);
         if (workerEmission_ && value->statelessWorkerCall)
             return statelessObjectWorker(value);
-        if (value->resolution == "object_construct" || value->resolution == "object_call" || value->resolution == "source_interface_call" || value->resolution == "class_virtual_call")
+        if (value->resolution == "object_construct" || value->resolution == "object_call" || value->resolution == "static_call" || value->resolution == "source_interface_call" || value->resolution == "class_virtual_call")
             return objectCall(value);
         if ((value->resolution == "list_add" || value->resolution.starts_with("collection_mutate_")) &&
             value->kind == "call" && objectFieldRoot(value->children[0]->children[0]))
@@ -1886,7 +1919,7 @@ private:
             return escaped(value->text);
         if (value->kind == "boolean")
             return value->text;
-        if (value->kind == "name") {
+        if (value->kind == "name" || value->kind == "model_member") {
             if (workerEmission_ && value->resolution == "local") {
                 if (const auto capture = workerCaptures_.find(value->text); capture != workerCaptures_.end())
                     return capture->second;
@@ -2059,6 +2092,8 @@ private:
                 result += "using pipelang::model::validate; auto pl_receiver = " + expression(target->children[0]) + "; ";
             else if (value->resolution == "sync_release" || value->resolution == "sync_wait" || value->resolution == "sync_wait_timed")
                 result += "auto pl_receiver = " + expression(target->children[0]) + "; ";
+            else if (value->resolution.starts_with("context_") && value->resolution != "context_construct")
+                result += "auto pl_receiver = " + expression(target->children[0]) + "; pipelang::model::validate(pl_receiver); ";
             else if (value->resolution.starts_with("concurrent_read_") || value->resolution.starts_with("concurrent_mutate_"))
                 result += "auto pl_receiver = " + expression(target->children[0]) + "; ";
             else if (value->resolution.starts_with("atomic_") && value->resolution != "atomic_construct")
@@ -2149,6 +2184,14 @@ private:
                 result += "return pl_read_" + target->text + "(" + state() + budgetArgument() + (arguments.empty() ? "" : ", " + arguments) + "); ";
             else if (value->resolution == "effect")
                 result += "return pl_effect_" + target->text + "(pl_transaction" + budgetArgument() + (arguments.empty() ? "" : ", " + arguments) + "); ";
+            else if (value->resolution == "context_construct")
+                result += "return " + scopeExpression() + ".createContextOwner(); ";
+            else if (value->resolution == "context_replace")
+                result += "(void)pl_receiver->replace(); ";
+            else if (value->resolution == "context_invalidate")
+                result += "pl_receiver->invalidate(); ";
+            else if (value->resolution == "context_close")
+                result += "pl_receiver->close(); ";
             else if (value->resolution == "sync_construct" || value->resolution == "sync_lock_construct")
                 result += "return " + cpp(value->type) + "::Create(" + arguments + "); ";
             else if (value->resolution == "sync_release")
@@ -2275,13 +2318,18 @@ private:
         return {"Result", {method.result, {"string", {}}}};
     }
     void emitReturnValue(const std::string& value, bool hasValue, unsigned indentation) {
+        if (const auto* region = asyncFinally_.returning()) {
+            line(region->exit + ".returning(" + value + ");", indentation);
+            line("goto " + region->label + ";", indentation);
+            return;
+        }
         if (method_->pure || internalEffect_ || observationEmission_) {
             line("return" + (hasValue ? " " + value : "") + ";", indentation);
             return;
         }
         if (hasValue)
             line("auto pl_return = " + value + ";", indentation);
-        if (method_->asynchronous && hasFinally(method_->body))
+        if (method_->asynchronous && !program_.objectEnabled && hasFinally(method_->body))
             line("pl_returnCommit.arm();", indentation);
         else
             line(commitStatement(), indentation);
@@ -2536,14 +2584,12 @@ private:
                 const auto error = statement.expression ? expression(statement.expression) : statement.name;
                 line("pipelang::model::raiseError(" + error + ");", indentation);
             } else if (statement.kind == "break" || statement.kind == "continue") {
-                if (statement.kind == "continue" && !propagationContinueLabels_.empty() &&
-                    !propagationContinueLabels_.back().empty())
-                    line("goto " + propagationContinueLabels_.back() + ";", indentation);
-                else
-                    line(statement.kind + ";", indentation);
+                emitLoopTransfer(statement.kind == "continue", indentation);
             } else if (statement.kind == "for") {
                 if (numericEmission_ && !nativeProjection_.countedLoops.contains(&statement))
                     throw Diagnostic("numeric for lacks a bounded counter proof", statement.offset);
+                const bool literalTrue = statement.expression->kind == "boolean" &&
+                    statement.expression->text == "true";
                 line("{", indentation);
                 statements(statement.initialization, indentation + 1);
                 const bool propagationHeader = hasPropagation(statement.expression) ||
@@ -2554,8 +2600,13 @@ private:
                 if (propagationHeader) {
                     const auto label = "pl_iteration" + std::to_string(propagationSequence_++);
                     line("while (true) {", indentation + 1);
-                    prepareExpression(statement.expression, indentation + 2);
-                    line("if (!(" + expression(statement.expression) + ")) break;", indentation + 2);
+                    if (literalTrue) {
+                        if (usesBudget_)
+                            line("pl_budget.step();", indentation + 2);
+                    } else {
+                        prepareExpression(statement.expression, indentation + 2);
+                        line("if (!(" + expression(statement.expression) + ")) break;", indentation + 2);
+                    }
                     line("{", indentation + 2);
                     const bool needsContinueLabel = continuesCurrentLoop(statement.body);
                     propagationContinueLabels_.push_back(needsContinueLabel ? label : "");
@@ -2567,9 +2618,14 @@ private:
                     statements(statement.iteration, indentation + 2);
                     line("}", indentation + 1);
                 } else {
-                    line("for (; " + expression(statement.expression) + "; [&]() {", indentation + 1);
+                    const auto condition = literalTrue ? "true" : expression(statement.expression);
+                    line("for (; " + condition + "; [&]() {", indentation + 1);
                     statements(statement.iteration, indentation + 2);
                     line("}()) {", indentation + 1);
+                    // Keep C++ non-fallthrough visible without losing the
+                    // literal condition's evaluation tick on each iteration.
+                    if (literalTrue && usesBudget_)
+                        line("pl_budget.step();", indentation + 2);
                     propagationContinueLabels_.push_back("");
                     statements(statement.body, indentation + 2);
                     propagationContinueLabels_.pop_back();
@@ -2579,7 +2635,13 @@ private:
             } else if (statement.kind == "while") {
                 if (numericEmission_ && !nativeProjection_.countedLoops.contains(&statement))
                     throw Diagnostic("numeric while lacks a bounded counter proof", statement.offset);
-                if (hasPropagation(statement.expression)) {
+                const bool literalTrue = statement.expression->kind == "boolean" &&
+                    statement.expression->text == "true";
+                if (literalTrue) {
+                    line("while (true) {", indentation);
+                    if (usesBudget_)
+                        line("pl_budget.step();", indentation + 1);
+                } else if (hasPropagation(statement.expression)) {
                     line("while (true) {", indentation);
                     prepareExpression(statement.expression, indentation + 1);
                     line("if (!(" + expression(statement.expression) + ")) break;", indentation + 1);
@@ -2599,15 +2661,20 @@ private:
                     if (!nativeProjection_.arrayLoops.contains(&statement))
                         throw Diagnostic("numeric foreach lacks a fixed-length proof", statement.offset);
                     line("for (auto " + statement.name + " : " + snapshot + ") {", indentation + 1);
+                } else if (!statement.itemConvertTo.name.empty()) {
+                    const auto& sequence = statement.expression->type;
+                    const auto element = sequenceElementType(sequence).value();
+                    const auto input = sequence.name == "ByteBuffer" ? "static_cast<std::uint32_t>(pl_iterationValue)"
+                                                                     : "pl_iterationValue";
+                    line("for (auto pl_iterationValue : " + snapshot + ".values()) {", indentation + 1);
+                    line("auto " + statement.name + " = " + convertedExpression(input, element, statement.type) + ";",
+                         indentation + 2);
                 } else if (statement.expression->type.name == "ByteBuffer") {
                     // Storage bytes are uint8_t; the language element is uint32.
                     // Keep that widening explicit for overloads and bitwise operations.
                     line("for (std::uint32_t " + statement.name + " : " + snapshot + ".values()) {", indentation + 1);
-                } else if (statement.itemConvertTo.name.empty()) {
-                    line("for (auto " + statement.name + " : " + snapshot + ".values()) {", indentation + 1);
                 } else {
-                    line("for (auto pl_iterationValue : " + snapshot + ".values()) {", indentation + 1);
-                    line("auto " + statement.name + " = pl_iterationValue.template as<" + objectTag(statement.itemConvertTo.name) + ">();", indentation + 2);
+                    line("for (auto " + statement.name + " : " + snapshot + ".values()) {", indentation + 1);
                 }
                 if (usesBudget_)
                     line("pl_budget.step();", indentation + 2);
@@ -2621,7 +2688,14 @@ private:
                 statements(statement.body, indentation + 1);
                 line("}", indentation);
             } else if (statement.kind == "if") {
-                line("if (" + expression(statement.expression) + ") {", indentation);
+                auto condition = expression(statement.expression);
+                if (standaloneHeader_) {
+                    // Source conditions are already bool. Keep expression grouping
+                    // without Clang treating equality parentheses as a likely typo.
+                    condition = "static_cast<bool>(" + condition + ")";
+                }
+
+                line("if (" + condition + ") {", indentation);
                 statements(statement.body, indentation + 1);
                 if (!statement.alternative.empty()) {
                     line("} else {", indentation);
@@ -2635,7 +2709,7 @@ private:
                 line(expression(statement.expression) + ";", indentation);
             } else if (statement.expression->kind == "await") {
                 if (propagationValues_.contains(statement.expression.get()))
-                    storeAwaited(statement, expression(statement.expression), indentation);
+                    storeAwaitedValue(statement, expression(statement.expression), indentation);
                 else
                     emitAwait(statement, indentation);
             } else if (statement.kind == "assign" && objectFieldRoot(statement.target)) {
@@ -2694,9 +2768,13 @@ private:
         // validated pure helpers require only value arguments and the worker
         // budget, so do not capture even an unused owner-state reference.
         std::string captures;
+        if (program_.objectEnabled)
+            captures = "pl_calls = pl_execution.calls()";
         if (!objectEmission_) {
             line("const auto& " + snapshot + " = " + state() + ";", indentation + 1);
-            captures = "&" + snapshot;
+            if (!captures.empty())
+                captures += ", ";
+            captures += "&" + snapshot;
         }
         const auto previousCaptures = workerCaptures_;
         for (const auto& capture : statement.parallelCaptures) {
@@ -2722,21 +2800,71 @@ private:
         line("});", indentation + 2);
         line("}", indentation);
     }
-    void emitTry(const Statement& statement, unsigned indentation) {
-        const auto suffix = std::to_string(cleanupSequence_++);
-        line("{", indentation);
-        if (statement.hasFinally) {
-            line("[[maybe_unused]] auto pl_finally" + suffix + " = pipelang::model::Finally(", indentation + 1);
-            line("[&]() {", indentation + 2);
-            line("auto pl_cleanupRegion = pl_budget.cleanup();", indentation + 3);
-            statements(statement.cleanup, indentation + 3);
-            line("},", indentation + 2);
-            if (method_->asynchronous && !workerEmission_)
-                line(std::string(objectEmission_ ? "[&]" : "[this]") +
-                     "() noexcept { return " + scopeExpression() + ".abandoningFrames(); });", indentation + 2);
-            else
-                line("[]() noexcept { return false; });", indentation + 2);
+    void emitLoopTransfer(bool continuing, unsigned indentation) {
+        const auto* region = asyncFinally_.loopTransfer(propagationContinueLabels_.size(), continuing);
+        if (region) {
+            line(region->exit + (continuing ? ".continuing();" : ".breaking();"), indentation);
+            line("goto " + region->label + ";", indentation);
+        } else if (continuing && !propagationContinueLabels_.empty() &&
+            !propagationContinueLabels_.back().empty()) {
+            line("goto " + propagationContinueLabels_.back() + ";", indentation);
+        } else {
+            line(continuing ? "continue;" : "break;", indentation);
         }
+    }
+    void emitResumableTry(const Statement& statement, unsigned indentation) {
+        const auto region = asyncFinally_.enter(propagationContinueLabels_.size());
+        std::ostringstream protectedBody;
+        {
+            struct OutputRestoration {
+                std::ostream*& selected;
+                std::ostream* previous;
+                ~OutputRestoration() { selected = previous; }
+            } restoreOutput{selectedOutput_, selectedOutput_};
+            selectedOutput_ = &protectedBody;
+            // Emit once so the existing transfer-routing seam determines storage.
+            // Nested regions restore this buffer; diagnostics restore its owner.
+            line("try {", indentation + 1);
+            emitProtectedTry(statement, indentation + 1, std::to_string(cleanupSequence_++));
+            line("} catch (...) {", indentation + 1);
+            line(region.exit + ".captureFailure();", indentation + 2);
+            line("}", indentation + 1);
+            // The label remains outside protected lexical scopes: a transfer
+            // destroys locals before cleanup and crosses no initialization.
+            line("goto " + region.label + ";", indentation + 1);
+            line(region.label + ":;", indentation + 1);
+        }
+        const auto completed = asyncFinally_.leave();
+        line("{", indentation);
+        const std::string storage = completed.returns ? "" : ", false";
+        line("pipelang::model::AsyncFinallyExit<" + cpp(method_->result.arguments[0]) + storage + "> " + region.exit + ";", indentation + 1);
+        *selectedOutput_ << protectedBody.view();
+        line("try {", indentation + 1);
+        line("auto pl_cleanupBudget = pl_budget.cleanup();", indentation + 2);
+        line("auto pl_cleanupTask = " + scopeExpression() + ".enterCleanup(pl_taskCancellation);", indentation + 2);
+        statements(statement.cleanup, indentation + 2);
+        line("} catch (...) {", indentation + 1);
+        line(region.exit + ".captureCleanupFailure();", indentation + 2);
+        line("}", indentation + 1);
+        line(region.exit + ".rethrowFailure();", indentation + 1);
+        if (completed.returns) {
+            line("if (" + region.exit + ".isReturn()) {", indentation + 1);
+            emitReturnValue("std::move(" + region.exit + ".returnValue())", true, indentation + 2);
+            line("}", indentation + 1);
+        }
+        if (completed.breaks) {
+            line("if (" + region.exit + ".isBreak()) {", indentation + 1);
+            emitLoopTransfer(false, indentation + 2);
+            line("}", indentation + 1);
+        }
+        if (completed.continues) {
+            line("if (" + region.exit + ".isContinue()) {", indentation + 1);
+            emitLoopTransfer(true, indentation + 2);
+            line("}", indentation + 1);
+        }
+        line("}", indentation);
+    }
+    void emitProtectedTry(const Statement& statement, unsigned indentation, const std::string& suffix) {
         if (statement.name.empty()) {
             line("{", indentation + 1);
             statements(statement.body, indentation + 2);
@@ -2761,9 +2889,39 @@ private:
             statements(statement.alternative, indentation + 2);
             line("}", indentation + 1);
         }
+    }
+    void emitTry(const Statement& statement, unsigned indentation) {
+        if (statement.hasFinally && program_.objectEnabled && method_->asynchronous && !workerEmission_) {
+            emitResumableTry(statement, indentation);
+            return;
+        }
+        const auto suffix = std::to_string(cleanupSequence_++);
+        line("{", indentation);
+        if (statement.hasFinally) {
+            line("[[maybe_unused]] auto pl_finally" + suffix + " = pipelang::model::Finally(", indentation + 1);
+            line("[&]() {", indentation + 2);
+            line("auto pl_cleanupRegion = pl_budget.cleanup();", indentation + 3);
+            statements(statement.cleanup, indentation + 3);
+            line("},", indentation + 2);
+            if (method_->asynchronous && !workerEmission_)
+                line(std::string(objectEmission_ ? "[&]" : "[this]") +
+                     "() noexcept { return " + scopeExpression() + ".abandoningFrames(); });", indentation + 2);
+            else
+                line("[]() noexcept { return false; });", indentation + 2);
+        }
+        emitProtectedTry(statement, indentation, suffix);
         line("}", indentation);
     }
-    void storeAwaited(const Statement& statement, const std::string& value, unsigned indentation) {
+    void storeAwaited(const Statement& statement, std::string value, unsigned indentation) {
+        // A materialized await uses a temporary of the raw awaited type.
+        // Authored locals and assignments use the checked destination type.
+        if (statement.kind == "local")
+            value = convertedExpression(std::move(value), statement.expression->type, statement.type);
+        else if (statement.kind == "assign")
+            value = convertedExpression(std::move(value), statement.expression->type, statement.target->type);
+        storeAwaitedValue(statement, value, indentation);
+    }
+    void storeAwaitedValue(const Statement& statement, const std::string& value, unsigned indentation) {
         if (statement.kind == "local")
             line(cpp(statement.type) + " " + statement.name + " = " + value + ";", indentation);
         else if (statement.kind == "assign" && objectFieldRoot(statement.target))
@@ -2811,7 +2969,7 @@ private:
     void emitAwait(const Statement& statement, unsigned indentation) {
         const auto& call = statement.expression->children[0];
         const auto& target = call->children[0];
-        if (call->resolution == "object_async" || call->resolution == "source_interface_async" || call->resolution == "class_virtual_async") {
+        if (call->resolution == "object_async" || call->resolution == "static_async" || call->resolution == "source_interface_async" || call->resolution == "class_virtual_async") {
             emitObjectAwait(statement, indentation);
             return;
         }
@@ -2842,6 +3000,16 @@ private:
             if (!arguments.empty())
                 arguments += ", ";
             arguments += "std::move(" + name + ")";
+        }
+        if (program_.objectEnabled) {
+            line(cancellation + " = pipelang::model::CancellationToken::combine(" + cancellation +
+                ", pipelang::model::currentPermit().cancellation());", indentation);
+            for (std::size_t index = 1; index < call->children.size(); ++index) {
+                if (call->children[index]->type.name == "CancellationToken") {
+                    const auto name = "pl_await" + suffix + "_argument" + std::to_string(index);
+                    line(name + " = " + cancellation + ";", indentation);
+                }
+            }
         }
         // Keep every owner-transfer boundary in a named coroutine local.
         // Nontrivial captured values must not depend on a temporary closure's
@@ -2878,7 +3046,7 @@ private:
             const auto name = "pl_child" + suffix + "_argument" + std::to_string(index);
             auto value = expression(call->children[index]);
             line("auto " + name + " = " + value + ";", indentation);
-            if (call->children[index]->type.name == "CancellationToken")
+            if (!program_.objectEnabled && call->children[index]->type.name == "CancellationToken")
                 line(cancellation + " = pipelang::model::CancellationToken::combine(" + cancellation + ", " + name + ");", indentation);
             if (!arguments.empty())
                 arguments += ", ";
@@ -2887,14 +3055,14 @@ private:
         if (!arguments.empty())
             arguments += ", ";
         for (std::size_t index = 1; index < call->children.size(); ++index) {
-            if (call->children[index]->type.name == "CancellationToken") {
+            if (!program_.objectEnabled && call->children[index]->type.name == "CancellationToken") {
                 const auto name = "pl_child" + suffix + "_argument" + std::to_string(index);
                 line(name + " = " + cancellation + ";", indentation);
             }
         }
         arguments += cancellation + ", &pl_budget";
         if (program_.objectEnabled && !objectEmission_)
-            arguments += ", &pl_transaction";
+            arguments += ", &pl_transaction, pl_execution.calls()";
         line(commitStatement(), indentation);
         const auto operation = "pl_child" + suffix + "_operation";
         const auto result = "pl_child" + suffix + "_result";
@@ -3026,7 +3194,7 @@ private:
             line("std::size_t pending() const { return pl_scope.pending(); }", 1);
         }
         for (const auto& method : declaration.methods) {
-            if (method.constructor || !method.visible)
+            if (method.constructor || method.staticMethod || !method.visible)
                 continue;
             method_ = &method;
             line(method.visible ? "public:" : "private:");
@@ -3051,10 +3219,16 @@ private:
         }
         line("private:");
         for (const auto& method : declaration.methods) {
+            if (method.staticMethod)
+                continue;
             method_ = &method;
             if (method.pure) {
                 beginMember(cpp(method.result), "pl_read_" + method.name, parameters(method, true),
                     usesSynchronousHosts() ? " const" : "", usesSynchronousHosts() ? "" : "static ");
+                if (program_.objectEnabled) {
+                    line("auto pl_execution = pl_parentExecution.enterCall();", 2);
+                    line("pl_budget.step();", 2);
+                }
                 line("(void)pl_state;", 2);
                 ignoreParallelParameters(2);
                 unusedParameters(method, 2);
@@ -3068,8 +3242,12 @@ private:
                 // owner scope. Older host-free/async-only output stays static.
                 beginMember(cpp(method.result), "pl_effect_" + method.name,
                     transactionType() + "& pl_transaction" + (usesBudget_ ? ", pipelang::model::EvaluationBudget& pl_budget" : "") + parallelParameters() +
-                    (program_.objectEnabled ? ", pipelang::model::ObjectExecution& pl_execution" : "") +
-                    (parameterText.empty() ? "" : ", " + parameterText), "", usesSynchronousHosts() ? "" : "static ");
+                    (program_.objectEnabled ? ", pipelang::model::ObjectExecution& pl_parentExecution" : "") +
+                    (parameterText.empty() ? "" : ", " + parameterText), "", (usesSynchronousHosts() || usesType("ContextOwner")) ? "" : "static ");
+                if (program_.objectEnabled) {
+                    line("auto pl_execution = pl_parentExecution.enterCall();", 2);
+                    line("pl_budget.step();", 2);
+                }
                 line("(void)pl_transaction;", 2);
                 ignoreParallelParameters(2);
                 unusedParameters(method, 2);
@@ -3081,17 +3259,31 @@ private:
                     line("throw pipelang::model::ExecutionFailure(\"unreachable compiler control flow\");", 2);
                 endMember();
             } else if (method.asynchronous) {
-                beginMember("pipelang::model::Coroutine<" + cpp(method.result.arguments[0]) + ">", "pl_async_" + method.name,
-                    parameters(method, false, true) + (localAsync_ ? ", pipelang::model::EvaluationBudget* pl_parentBudget = nullptr" : "") +
-                    (program_.objectEnabled ? ", pipelang::model::GraphModelTransaction<pl_State>* pl_parentTransaction = nullptr" : ""), "", "", "",
-                    parameters(method, false, true) + (localAsync_ ? ", pipelang::model::EvaluationBudget* pl_parentBudget" : "") +
-                    (program_.objectEnabled ? ", pipelang::model::GraphModelTransaction<pl_State>* pl_parentTransaction" : ""));
+                const auto returnType = "pipelang::model::Coroutine<" + cpp(method.result.arguments[0]) + ">";
+                const auto declarationParameters = parameters(method, false, true) +
+                    (localAsync_ ? ", pipelang::model::EvaluationBudget* pl_parentBudget = nullptr" : "") +
+                    (program_.objectEnabled ? ", pipelang::model::GraphModelTransaction<pl_State>* pl_parentTransaction = nullptr, pipelang::model::SourceCallContext pl_parentCalls = {}" : "");
+                const auto definitionParameters = parameters(method, false, true) +
+                    (localAsync_ ? ", pipelang::model::EvaluationBudget* pl_parentBudget" : "") +
+                    (program_.objectEnabled ? ", pipelang::model::GraphModelTransaction<pl_State>* pl_parentTransaction, pipelang::model::SourceCallContext pl_parentCalls" : "");
+                if (program_.objectEnabled) {
+                    beginMember(returnType, "pl_async_" + method.name, declarationParameters, "", "", "", definitionParameters);
+                    line("const auto pl_enteredCalls = pl_parentCalls.enter();", 2);
+                    auto arguments = argumentNames(method);
+                    if (!arguments.empty())
+                        arguments += ", ";
+                    arguments += "pl_taskCancellation, pl_parentBudget, pl_parentTransaction, pl_enteredCalls";
+                    line("return pl_async_body_" + method.name + "(" + arguments + ");", 2);
+                    endMember();
+                }
+                beginMember(returnType, (program_.objectEnabled ? "pl_async_body_" : "pl_async_") + method.name,
+                    program_.objectEnabled ? definitionParameters : declarationParameters, "", "", "", definitionParameters);
                 validateParameters(method, 2);
                 if (!localAsync_ && (containsStatement(method.body, "try") || containsStatement(method.body, "throw")))
                     line("(void)pl_taskCancellation;", 2);
                 if (localAsync_) {
                     line("(void)pl_taskCancellation;", 2);
-                    line("pipelang::model::EvaluationBudget pl_ownedBudget;", 2);
+                    line("auto pl_ownedBudget = pipelang::model::EvaluationBudget::forInvocation(pl_scope.evaluationStepsPerSegment());", 2);
                     line("auto& pl_budget = pl_parentBudget ? *pl_parentBudget : pl_ownedBudget;", 2);
                 } else {
                     declareBudget(2);
@@ -3104,16 +3296,14 @@ private:
                     line("auto& pl_transaction = pl_parentTransaction ? *pl_parentTransaction : *pl_ownedTransaction;", 2);
                     line("if (pl_parentTransaction)", 2);
                     line(refreshStatement(), 3);
-                    emitRootExecution(2);
+                    // The ordinary factory entered before allocating this
+                    // frame. The retained value survives every suspension.
+                    emitRootExecution(2, true, "pl_parentCalls", true);
                 } else {
                     line("pipelang::model::Transaction<pl_State> pl_transaction(pl_state);", 2);
                 }
-                if (hasFinally(method.body)) {
-                    if (program_.objectEnabled)
-                        line("pipelang::model::ObjectCommitOnReturn pl_returnCommit([&]() { pl_transaction.commit(); }, [this]() noexcept { return pl_scope.abandoningFrames(); });", 2);
-                    else
-                        line("pipelang::model::CommitOnReturn pl_returnCommit(pl_transaction, [this]() noexcept { return pl_scope.abandoningFrames(); });", 2);
-                }
+                if (!program_.objectEnabled && hasFinally(method.body))
+                    line("pipelang::model::CommitOnReturn pl_returnCommit(pl_transaction, [this]() noexcept { return pl_scope.abandoningFrames(); });", 2);
                 statements(method.body, 2);
                 if (containsStatement(method.body, "try") || containsStatement(method.body, "throw"))
                     line("co_return " + cpp(method.result.arguments[0]) + "::Failure(\"unreachable compiler control flow\");", 2);
@@ -3128,8 +3318,13 @@ private:
             workerCaptures_.clear();
             const auto parameterText = parameters(method);
             beginMember(cpp(method.result), "pl_worker_" + method.name,
-                "const pl_State& pl_workerState, pipelang::model::EvaluationBudget& pl_budget" +
+                std::string("const pl_State& pl_workerState, pipelang::model::EvaluationBudget& pl_budget") +
+                (program_.objectEnabled ? ", pipelang::model::SourceCallContext pl_parentCalls" : "") +
                 (parameterText.empty() ? "" : ", " + parameterText), "", "static ");
+            if (program_.objectEnabled) {
+                line("[[maybe_unused]] const auto pl_calls = pl_parentCalls.enter();", 2);
+                line("pl_budget.step();", 2);
+            }
             line("(void)pl_workerState;", 2);
             unusedParameters(method, 2);
             internalEffect_ = true;
@@ -3179,7 +3374,7 @@ private:
         cancellationContext(method, 2);
         line(transactionType() + " pl_transaction(pl_state" + (program_.objectEnabled ? ", pl_objects.domain()" : "") + ");", 2);
         if (program_.objectEnabled)
-            emitRootExecution(2);
+            emitRootExecution(2, true);
         for (std::size_t index = 0; index < declaration.fields.size(); ++index) {
             const auto& initializer = method.fieldInitializers[index];
             if (initializer)
@@ -3220,6 +3415,8 @@ private:
             line("return pl_return;", 3);
         else
             line("return " + result + "::Success(" + (method.result.name == "void" ? "" : "std::move(pl_return)") + ");", 3);
+        line("} catch (const pipelang::model::StaleContextCancelled& pl_error) {", 2);
+        line("return " + result + "::Cancelled(pipelang::model::safeErrorMessage(pl_error));", 3);
         if (classParallel_ || classSynchronization_ || usesSynchronousHosts()) {
             line("} catch (const pipelang::model::OperationCancelled& pl_error) {", 2);
             line("return " + result + "::Cancelled(pipelang::model::safeErrorMessage(pl_error));", 3);
@@ -3237,16 +3434,18 @@ private:
             capture += ", " + parameter.name + " = std::move(" + parameter.name + ")";
         line("return pl_scope.start<" + cpp(method.result.arguments[0]) + ">(", 2);
         line("[" + capture + "](pipelang::model::CancellationToken pl_taskCancellation) mutable {", 3);
-        if (localAsync_ || classSynchronization_) {
+        if (!program_.objectEnabled && (localAsync_ || classSynchronization_)) {
             for (const auto& parameter : method.parameters) {
                 if (parameter.type.name == "CancellationToken")
                     line("pl_taskCancellation = pipelang::model::CancellationToken::combine(pl_taskCancellation, " + parameter.name + ");", 4);
             }
         }
         for (const auto& parameter : method.parameters) {
-            if (parameter.type.name == "CancellationToken")
+            if (!program_.objectEnabled && parameter.type.name == "CancellationToken")
                 line(parameter.name + " = pipelang::model::CancellationToken::combine(" + parameter.name + ", pl_taskCancellation);", 4);
         }
+        // Modern source arguments are values, not implicit task policy. Concrete
+        // await/host/synchronization operations combine only their actual operands.
         auto arguments = argumentNames(method);
         if (!arguments.empty())
             arguments += ", ";
@@ -3284,6 +3483,7 @@ private:
     std::size_t awaitSequence_ = 0;
     std::size_t loopSequence_ = 0;
     std::size_t cleanupSequence_ = 0;
+    AsyncFinallyLowering asyncFinally_;
     bool objectEmission_ = false;
     bool lazyObjectBody_ = false;
     const Declaration* objectOwner_ = nullptr;
@@ -3318,6 +3518,8 @@ nlohmann::json methods(const Declaration& declaration) {
             result.push_back({{"name", method.name}, {"returnType", method.result.text()},
                               {"parameters", fields(method.parameters, false)},
                               {"pure", method.pure}, {"async", method.asynchronous}});
+            if (method.staticMethod)
+                result.back()["static"] = true;
             if (!method.sourceName.empty())
                 result.back()["sourceName"] = method.sourceName;
         }
@@ -3344,6 +3546,8 @@ std::string cppType(const Type& type, const Program& program) {
         return "pipelang::model::ByteBuffer";
     if (type.name == "CancellationToken")
         return "pipelang::model::CancellationToken";
+    if (type.name == "ContextOwner")
+        return "std::shared_ptr<pipelang::model::ContextOwner>";
     const auto* object = findType(program, type.name);
     if (program.objectEnabled && object && ((object->kind == "Class" && !object->modelExported) || object->sourceInterface))
         return "pipelang::model::ObjectRef<pl_object_tag_" + object->name + ">";

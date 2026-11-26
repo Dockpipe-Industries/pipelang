@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "composition.hpp"
+#include "CheckedProgram.hpp"
 #include "OutputBudgetStream.hpp"
 #include "CompositionPlanner.hpp"
 
@@ -22,15 +23,11 @@ void validateNamespace(const std::string& nameSpace) {
     parse("public Record " + nameSpace + " { }");
 }
 
-nlohmann::json compileProgram(Program program, const std::string& nameSpace,
+nlohmann::json compileProgram(const CheckedProgram& checked, const std::string& nameSpace,
                               const std::string& protocol,
-                              const std::vector<std::string>& models = {},
                               const std::string& emission = {},
                               bool emitCompositionFactory = false) {
-    program.objectEnabled = protocol == "pipelang.native-model.v3" || program.projectEnabled;
-    program.modelExports = models;
-    normalizeComposition(program);
-    check(program);
+    const auto& program = checked.definition();
     const auto plans = compositionPlans(program);
     if (emitCompositionFactory && program.compositions.empty())
         throw Diagnostic("composition factory emission requires a source composition declaration", 0);
@@ -78,13 +75,13 @@ nlohmann::json compile(const std::string& source, const std::string& nameSpace) 
     auto program = parse(source);
     if (!program.module.empty() || !program.imports.empty())
         throw Diagnostic("module and import declarations require pipelang.native-model.v2", 0);
-    return compileProgram(std::move(program), nameSpace, "pipelang.native-model.v1");
+    return compileProgram(CheckedProgram::complete(std::move(program)), nameSpace, "pipelang.native-model.v1");
 }
 
 nlohmann::json compileModules(const std::vector<ModuleSource>& modules, const std::string& entry,
                               const std::string& nameSpace) {
     validateNamespace(nameSpace);
-    return compileProgram(linkModules(modules, entry), nameSpace, "pipelang.native-model.v2");
+    return compileProgram(CheckedProgram::complete(linkModules(modules, entry)), nameSpace, "pipelang.native-model.v2");
 }
 
 nlohmann::json compileObjects(const std::string& source, const std::vector<std::string>& models,
@@ -93,26 +90,22 @@ nlohmann::json compileObjects(const std::string& source, const std::vector<std::
     auto program = parse(source, true);
     if (!program.module.empty() || !program.imports.empty())
         throw Diagnostic("v3 module/import declarations require a closed modules request", 0);
-    return compileProgram(std::move(program), nameSpace, "pipelang.native-model.v3", models);
+    return compileProgram(CheckedProgram::complete(std::move(program), true, models),
+                          nameSpace, "pipelang.native-model.v3");
 }
 
 nlohmann::json compileModuleObjects(const std::vector<ModuleSource>& modules, const std::string& entry,
                                     const std::vector<std::string>& models, const std::string& nameSpace) {
     validateNamespace(nameSpace);
-    return compileProgram(linkModules(modules, entry, true), nameSpace, "pipelang.native-model.v3", models);
+    return compileProgram(CheckedProgram::complete(linkModules(modules, entry, true), true, models),
+                          nameSpace, "pipelang.native-model.v3");
 }
 
 nlohmann::json compileProjectModules(const std::vector<ModuleSource>& modules, const std::string& entry,
                                     const std::string& nameSpace, bool activeHostNumericEnvironment) {
     validateNamespace(nameSpace);
-    auto program = linkModules(modules, entry, true, true);
-    program.activeHostNumericEnvironment = activeHostNumericEnvironment;
-    std::vector<std::string> models;
-    for (const auto& declaration : program.declarations) {
-        if (declaration.modelDeclared)
-            models.push_back(declaration.sourceName);
-    }
-    return compileProgram(std::move(program), nameSpace, "pipelang.native-model-project.v1", models);
+    return compileProgram(CheckedProgram::project(modules, entry, activeHostNumericEnvironment),
+                          nameSpace, "pipelang.native-model-project.v1");
 }
 
 nlohmann::json compileProjectImplementation(const std::vector<ModuleSource>& modules,
@@ -121,14 +114,8 @@ nlohmann::json compileProjectImplementation(const std::vector<ModuleSource>& mod
     validateNamespace(nameSpace);
     if (emission != "plan" && emission != "sources")
         throw Diagnostic("compiled project emission must be plan or sources", 0);
-    auto program = linkModules(modules, entry, true, true);
-    program.activeHostNumericEnvironment = activeHostNumericEnvironment;
-    std::vector<std::string> models;
-    for (const auto& declaration : program.declarations) {
-        if (declaration.modelDeclared)
-            models.push_back(declaration.sourceName);
-    }
-    return compileProgram(std::move(program), nameSpace, "pipelang.native-model-project.v2", models, emission);
+    return compileProgram(CheckedProgram::project(modules, entry, activeHostNumericEnvironment),
+                          nameSpace, "pipelang.native-model-project.v2", emission);
 }
 
 nlohmann::json compileProjectCompositionFactory(const std::vector<ModuleSource>& modules,
@@ -137,16 +124,10 @@ nlohmann::json compileProjectCompositionFactory(const std::vector<ModuleSource>&
     validateNamespace(nameSpace);
     if (!emission.empty() && emission != "plan" && emission != "sources")
         throw Diagnostic("compiled composition emission must be plan or sources", 0);
-    auto program = linkModules(modules, entry, true, true);
-    program.activeHostNumericEnvironment = activeHostNumericEnvironment;
-    std::vector<std::string> models;
-    for (const auto& declaration : program.declarations) {
-        if (declaration.modelDeclared)
-            models.push_back(declaration.sourceName);
-    }
     const std::string protocol = emission.empty()
         ? "pipelang.native-model-project.v1" : "pipelang.native-model-project.v2";
-    return compileProgram(std::move(program), nameSpace, protocol, models, emission, true);
+    return compileProgram(CheckedProgram::project(modules, entry, activeHostNumericEnvironment),
+                          nameSpace, protocol, emission, true);
 }
 
 }

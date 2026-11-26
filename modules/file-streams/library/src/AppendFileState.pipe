@@ -1,0 +1,7 @@
+module PipeLang.IO;
+
+// The last admitted extent and metadata observation of an existing file.
+public Record AppendFileState {
+    public int byteCount = 0;
+    public FileIdentity identity;
+}

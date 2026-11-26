@@ -5,7 +5,8 @@ root (conventionally `src`), indexes their existing `module` and `import` declar
 and compiles only the selected entry's transitive import closure. Consumers declare
 a project root and entry, not a list of files, module names or exported types.
 An entry can contain only imports, selecting several independently owned models.
-No project descriptor file or package resolution language is introduced.
+Local project discovery needs no project descriptor or package resolution language.
+Optional external source libraries use explicit pinned descriptors below.
 
 An explicit source composition root can select constructor bindings and service
 lifetimes. See [source dependency composition](dependency-injection.md) for the
@@ -160,11 +161,98 @@ concatenating or rewriting source text. File-local offsets and actual origins
 remain attached through linking, checking and generic normalization. Low-level
 legacy requests do not acquire the project path field or multi-file behavior.
 
-Projects presently resolve local modules under one source root. Versioned external
-language package/project references, binary module linking, partial type declarations, and
+Projects resolve local modules under one source root plus explicitly provisioned
+pinned source libraries. Package acquisition/version resolution, binary module linking, partial type declarations, and
 project-mode view bindings remain unsupported. Native consumers still pin installed
 SDK artifacts independently. A source project is not a package manager or an ABI
 promise across SDK versions.
+
+## Explicit pinned source libraries
+
+A project may additionally admit source libraries that Dockpipe or another host
+has already provisioned. Acquisition, credentials, archives and version selection
+remain host responsibilities. This SDK feature resolves source modules from exact
+local inputs; it does not download packages or solve dependency versions.
+
+```cmake
+pipelang_add_model(checks
+    PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+    ENTRY Entry.pipe
+    SOURCE_LIBRARIES "${CMAKE_CURRENT_BINARY_DIR}/provisioned/libraries.json"
+    NAMESPACE checks
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+```
+
+`SOURCE_LIBRARIES` names an explicit local references file. The SDK CLI's
+`project-info`, `project-compile-info` and `model-bindings` commands accept the same
+file through `--source-libraries FILE`; legacy `MODEL`/`SOURCE_SET` inputs and view
+bindings do not acquire this option. Existing projects omit it and retain their
+single-root behavior and receipts.
+
+```json
+{
+  "protocol": "pipelang.source-library-references.v1",
+  "libraries": [
+    {
+      "root": "/absolute/provisioned/contracts",
+      "descriptor": "library.json",
+      "sha256": "<exact lowercase SHA256 of library.json bytes>"
+    }
+  ]
+}
+```
+
+Each root must already exist as an absolute normalized nonsymbolic directory.
+`descriptor` is a portable path relative to that root. The exact descriptor hash
+is the admission authority, including its version identity and complete source
+inventory. The provisioner creates the references file for its own filesystem;
+absolute targets are not reusable library source configuration.
+
+```json
+{
+  "protocol": "pipelang.source-library.v1",
+  "name": "Example.Contracts",
+  "version": "0.1.0",
+  "source_root": "src",
+  "sources": [
+    {
+      "path": "Contract.pipe",
+      "sha256": "<exact lowercase SHA256 of Contract.pipe bytes>"
+    }
+  ]
+}
+```
+
+A library name is a bounded ASCII identity using letters, digits, dots, underscores
+or hyphens (excluding `.` and `..`). `version` is a bounded printable identity;
+there is no range or version precedence interpretation. `source_root` is relative
+to the library root. Inventory paths are relative to that source root, strictly
+sorted, unique even after ASCII case folding, and contain only `.pipe` files.
+Every discovered `.pipe` file must occur exactly once in the inventory, including
+unselected modules. Every file's bytes must match its pin. Unknown JSON fields,
+duplicate names (also after ASCII case folding), duplicate inputs, overlapping
+source roots, traversal, symlinks/reparse entries and checksum drift fail admission.
+Existing project path and aggregate resource budgets apply across all roots;
+metadata also consumes indexed-byte capacity. Descriptor count is bounded by
+`indexed_files`; source discovery uses shared indexed-file/directory-entry caps.
+
+Module declarations and imports remain ordinary PipeLang. A module's explicit
+parts may span files inside one owning source root. A module identity contributed
+by two roots is a collision even when both declarations are explicit; library
+order never shadows consumer or other library modules. Libraries are processed
+in stable name order, files in stable relative-path order, and the compiler still
+receives only the selected closed graph. It gains no filesystem or package access.
+In library-enabled projects diagnostics and closure inventories use
+`project/<path>` and `libraries/<name>/<path>` origins without rewriting source.
+
+Receipts retain the references-file hash and each library's name, version,
+provisioned root, source root and descriptor hash alongside the complete indexed
+source hashes. References, descriptors and sources are build dependencies.
+CMake watches each source directory for membership changes; newly introduced or
+removed library sources fail their existing inventory pins until the host
+explicitly provisions an updated descriptor/reference. Revalidation before
+publication rescans every root and compares the complete receipt. Generated output
+must remain outside all admitted source roots.
 
 ## Qualification
 
@@ -276,6 +364,24 @@ targets. Set a shared producer policy on the model facade; final consumers recei
 the same interface requirements, including link options. The SDK does not create
 a reverse library dependency or copy properties at configure time.
 
+The explicitly selected compiled mode precompiles its private `Objects.hpp` once
+per implementation target using that same effective producer policy. All body
+partitions, optimization, floating-point, sanitizer and resource-budget settings
+remain intact. This cache stays in the build tree and is not exported to archive
+owners or their consumers. CMake's standard `CMAKE_DISABLE_PRECOMPILE_HEADERS`
+setting can disable it; the public header-only default is unchanged.
+
+`BATCH_IMPLEMENTATIONS` explicitly selects paired native compilation for a compiled
+model. It keeps every generated source partition, receipt and plan identity, while
+compiling at most two generated partitions together. It does not batch application
+or native-owner sources. Actual native translation units and static archive members
+can therefore span two owners, exposing additional optimization opportunities and
+potentially pulling both owners' dependencies when either archive member is linked.
+The default remains partitioned compilation. An explicit `CMAKE_UNITY_BUILD=OFF`
+or conflicting global batch size is refused instead of overridden; the implementation
+target's standard `UNITY_BUILD` property remains available for a later opt-out.
+Compiler policies and physical resource limits still apply to each actual build.
+
 Generator expressions evaluate in each actual compiling target's context. A
 policy intentionally conditioned on properties unique to an executable cannot
 imply the same producer settings. Likewise, PRIVATE or per-source options on a
@@ -286,6 +392,67 @@ linked there. Directory/toolchain flags continue to apply normally. The generate
 target uses C++20, PIC and the installed ModelRuntime, without replacing
 optimization, floating-point or sanitizer flags. No prebuilt project binary is
 inserted into the PipeLang SDK.
+
+## Explicit native C++ compile-resource profile
+
+Native compiler GC policy is separate from PipeLang source admission and runtime
+limits. The installed SDK keeps the host compiler's defaults unless an operator
+selects `gnu-conservative-gc`:
+
+```sh
+cmake -S /project -B /build \
+    -DCMAKE_PREFIX_PATH=/qualified/sdk \
+    -DPipeLangModel_CXX_RESOURCE_PROFILE=gnu-conservative-gc
+```
+
+`PipeLangModel_CXX_RESOURCE_PROFILE` is an explicit normal or cache CMake variable.
+When defined, it overrides `PIPELANG_CXX_RESOURCE_PROFILE` in the environment.
+When neither is defined, the selection is `system`. Both selectors accept only
+`system` and `gnu-conservative-gc`; an explicit empty or unknown value is an error.
+Environment selections are not copied into the CMake cache: reconfiguration reads
+the current environment unless a CMake value overrides it. Use an explicit cache
+value when automatic reconfiguration must retain the choice independently of the
+build process's environment.
+
+The GNU profile requires CMake's actual `GNU` C++ compiler identity. Clang and
+other compiler profiles refuse it, including compilers offering GNU-compatible
+options. The selected artifact is
+`share/pipelang-model/compiler-profiles/gnu-conservative-gc.rsp`, containing only:
+
+```text
+--param=ggc-min-expand=10
+--param=ggc-min-heapsize=4096
+```
+
+The SDK manifest covers this file and the package's compile-resource helper.
+`PipeLangModel_CXX_RESOURCE_PROFILE_DIRECTORY` identifies the installed profile
+directory after relocation. CMake copies the exact response bytes into a
+content-addressed build directory, passes one quoted `@response` argument to each
+C++ compilation, and watches the canonical file for reconfiguration. Changing its
+content changes compile commands even when generated C++ is unchanged. Model
+generation also depends on the canonical artifact, so generation rechecks the
+selected SDK's manifest. Paths containing spaces are supported.
+
+The profile applies to `pipelang_add_model` and `pipelang_add_model_bindings`
+facades. Header consumers inherit it; compiled-project implementations mirror it
+through their existing facade policy, and final consumers receive the same choice.
+When explicitly selected while building the SDK itself, the same response file
+applies to that build's native C++ targets. It does not become an installed
+`PipeLang::ModelRuntime` default or an installed native archive's usage requirement.
+Raw C++ invocations can use the installed response file as one quoted argument,
+after checking the actual GNU compiler and verifying the selected SDK.
+
+These parameters trade more frequent GCC garbage collection for a lower retained
+compiler heap; they do not disable instrumentation, change optimization, or raise
+resource caps. One original async-finally fixture under its unchanged 1 GiB unit
+limit and `-O1 -g1 -fsanitize=address,undefined` compiled in 46.599 seconds with a
+650,801,152-byte aggregate peak, then passed all 56 runtime assertions with leak
+detection. The corresponding untuned compile exceeded its 900-second limit under
+memory pressure. This establishes a bounded profile-specific result, not a general
+speed or memory guarantee, and the untuned limitation remains recorded. The staged
+SDK integration and cross-platform policy contracts require their own runs.
+
+## Installing a private compiled implementation
 
 A package exposing an opaque native STATIC component can install its private
 compiled model dependency through the SDK-owned helper:
@@ -345,3 +512,65 @@ all generated implementation units and consumers. The baseline-comparison tool
 mode checks complete default responses against the prior qualified compiler.
 These routes are staged contracts until their actual contained runs pass; Linux
 results do not establish Windows/macOS or hosted qualification.
+
+
+## Opt-in linked native runtime
+
+Header-only SDK runtime bodies remain the default. A Linux CMake consumer may
+explicitly compile the SDK's canonical runtime bodies once into a STATIC archive
+and share that archive across compiled models in one executable link domain:
+
+```cmake
+add_library(runtime_policy INTERFACE)
+target_compile_options(runtime_policy INTERFACE -O2 -Wall -Wextra -Werror)
+pipelang_add_linked_runtime(native_runtime POLICY_TARGET runtime_policy)
+pipelang_add_model(project_model
+    PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" ENTRY Entry.pipe
+    NAMESPACE example_model
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    COMPILATION COMPILED RUNTIME_TARGET native_runtime)
+```
+
+Finalize the explicit INTERFACE policy graph before declaring the runtime. The
+SDK requires an immutable, supported static policy graph, applies the same policy
+to runtime and generated implementation units, and rejects registered conflicts
+in ownership, profile or linkage. Dynamic policy dependency expressions are
+refused. This does not universally detect late manual linking or raw-object
+mixing. Public layouts, Result representation and template contracts are unchanged.
+Do not mix header-only and linked runtime bodies within the executable domain.
+
+The runtime sources are installed under
+`share/pipelang-model/native-runtime`. SDK manifest checks and CMake configure
+dependencies cover the runtime sources, headers and policy artifacts. Runtime
+compilation is a separate input to the consumer's complete build/link budget;
+measure it together with generated models, final linking and execution.
+
+`pipelang_install_model_implementation` supports an opaque native STATIC owner
+with private compiled models and their single shared runtime archive. The native
+package retains its public headers and host dependencies; it exports the archive
+closure without private generated headers, SDK lookup or producer policy paths.
+Match normal and sanitizer producer/consumer policy explicitly. The Linux fixture
+qualifies two models sharing one runtime, relocated consumer execution and ten
+specific refusal cases, in normal and full `-O1 -g` ASan/UBSan/LSan builds with
+leak detection and the explicit GNU GC profile. This is one executable STATIC
+link-domain evidence; it makes no DSO, shared-library, LTO or other-platform claim.
+
+The Linux native test workflow accepts
+`PIPELANG_NATIVE_RUNTIME_LINKAGE=linked`; unset or `header-only` retains the
+existing default. Normal generated-consumer builds retain `-O2`; sanitizer
+builds retain `-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer`.
+The installed-owner policy fixture independently uses full-debug `-O1 -g` in
+both modes. Workflow runtime archives are built with matching normal/sanitizer
+policy. Standalone fast-math stays header-only. Explicit linked selection is
+refused by Windows/macOS workflow routes. No installed default or SDK pin changes.
+
+The historical `-g1` profile result above remains historical. The original
+header-only full-`-g` project gate remains unqualified, including with the GNU
+profile. The opt-in linked-runtime project gate passed the unchanged 58 assertions
+with full debug, ASan/UBSan/LSan and `detect_leaks=1`, including both runtime
+compilations, archive/link and execution in one 900-second contained workload.
+The selected source preserves the baseline compiler/generator; this qualification
+does not depend on the parked compiler IR experiments. The exact final SDK also passed the complete declared Linux regression with
+all subset selectors unset and explicit linked mode, plus separate normal and
+full producer/consumer sanitizer runs of the first Dockpipe local-host product
+journey. These results remain local and profile-specific.

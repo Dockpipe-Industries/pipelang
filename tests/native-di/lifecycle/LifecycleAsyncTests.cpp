@@ -104,7 +104,7 @@ void PendingSourceTaskAndObserverDoNotRetainDroppedOwner() {
         "retained task/observer kept execution owner alive or leaked owned resources");
 }
 
-void PrecancelledAuthoredAndBoundaryTokensRefuseBeforeSourceWork() {
+void AuthoredAndBoundaryCancellationRemainDistinct() {
     auto trace = std::make_shared<ResourceTrace>();
     auto port = std::make_shared<lifecycle_test::ResourcePortAdapter>(trace);
     auto root = checks.Value(Startup::Create(port), "create precancelled async root");
@@ -112,16 +112,21 @@ void PrecancelledAuthoredAndBoundaryTokensRefuseBeforeSourceWork() {
     auto service = checks.Value(scope->ResolveIScopedResource(), "precancelled async service");
     pipelang::model::CancellationSource cancellation;
     cancellation.cancel();
-    checks.Require(service.Work(cancellation.token()).is_cancelled(),
-        "pre-cancelled authored token admitted source work");
+    auto authored = checks.Value(service.Work(cancellation.token()), "admit authored cancelled token");
+    Finish(root, authored);
+    checks.Require(authored.result().is_cancelled(), "authored token did not cancel its concrete host operation");
     checks.Require(service.Work(pipelang::model::CancellationToken{}, cancellation.token()).is_cancelled(),
         "pre-cancelled boundary token admitted source work");
     checks.Require(checks.Value(root->Pending(), "precancelled pending count") == 0,
         "pre-cancelled async admission created a retained task");
+    int cleanupEvents = 0;
     for (const auto& event : trace->Events()) {
-        checks.Require(event.operation != "wait-enter" && event.operation != "work-finally",
-            "pre-cancelled admission entered source/host work");
+        checks.Require(event.operation != "wait-enter", "cancelled concrete host operation was entered");
+        if (event.operation == "work-finally")
+            ++cleanupEvents;
     }
+    checks.Require(cleanupEvents == 1,
+        "authored cancellation skipped source cleanup or boundary refusal entered source");
     checks.Success(root->Close(), "close precancelled async root");
 }
 
@@ -222,7 +227,7 @@ int main() {
     try {
         LocalTasksHaveIndependentScopeCancellation();
         PendingSourceTaskAndObserverDoNotRetainDroppedOwner();
-        PrecancelledAuthoredAndBoundaryTokensRefuseBeforeSourceWork();
+        AuthoredAndBoundaryCancellationRemainDistinct();
 #if !defined(__EMSCRIPTEN__) && !defined(__wasm__)
         HostWorkCancelsAndDrainsBeforeResourceClose();
         AuthoritativeHostSuccessDrainsThroughSourceFinallyBeforeRootClose();

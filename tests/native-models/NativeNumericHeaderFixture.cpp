@@ -7,7 +7,7 @@ using namespace pipelang::tools;
 void invoke(const std::vector<std::string>& command)
 {
     const auto result = process(command, {}, std::chrono::seconds(90), 4U << 20);
-    require(result.exit == 0, "standalone numeric header failed: " + result.output + result.diagnostic);
+    require(result.exit == 0, "standalone numeric header failed (exit " + std::to_string(result.exit) + "): " + result.output + result.diagnostic);
 }
 }
 
@@ -159,10 +159,14 @@ std::int64_t secondTranslationUnit() {
 }
 )cpp");
     const auto executable = nativeExecutable(output / "standalone");
-    const std::vector<std::string> command{nativeTool("c++").string(), "-std=c++20", "-O2",
+    std::vector<std::string> command{nativeTool("c++").string(), "-std=c++20", "-O2",
         "-Wall", "-Wextra", "-Werror", "-ffp-contract=fast", "-I" + (prefix / "include").string(),
         "-I" + output.string(), (output / "standalone.cpp").string(), (output / "second.cpp").string(),
         "-o", executable.string()};
+#ifdef _WIN32
+    // Match the installed Windows SDK and other numeric consumer fixtures.
+    command.push_back("-static");
+#endif
     invoke(command);
     invoke({executable.string()});
     atomicWrite(output / "acceptance.json", canonical({{"status", "passed"},

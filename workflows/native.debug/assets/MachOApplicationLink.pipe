@@ -1,0 +1,8 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.MachOApplicationLink;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int input) {
+        return Result<int,string>.Success(input);
+    }
+}

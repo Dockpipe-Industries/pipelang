@@ -2,6 +2,8 @@
 #pragma once
 
 #include "result.hpp"
+#include "cancellation.hpp"
+#include "context.hpp"
 #include "limits.hpp"
 #include "task_group.hpp"
 
@@ -17,50 +19,22 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace pipelang::model {
 
-class CancellationToken {
-public:
-    bool is_cancelled() const {
-        for (const auto& flag : flags_) {
-            if (flag->load(std::memory_order_acquire))
-                return true;
-        }
-        return false;
-    }
-    static CancellationToken combine(CancellationToken left, const CancellationToken& right) {
-        for (const auto& flag : right.flags_) {
-            if (std::find(left.flags_.begin(), left.flags_.end(), flag) == left.flags_.end())
-                left.flags_.push_back(flag);
-        }
-        if (left.flags_.size() > 64)
-            throw ExecutionFailure("cancellation ancestry limit exceeded");
-        return left;
-    }
-private:
-    friend class CancellationSource;
-    std::vector<std::shared_ptr<std::atomic<bool>>> flags_;
-};
-
-class CancellationSource {
-public:
-    CancellationSource() : flag_(std::make_shared<std::atomic<bool>>(false)) {}
-    CancellationToken token() const {
-        CancellationToken result;
-        result.flags_.push_back(flag_);
-        return result;
-    }
-    void cancel() const { flag_->store(true, std::memory_order_release); }
-private:
-    std::shared_ptr<std::atomic<bool>> flag_;
-};
+namespace detail {
+struct NativeTaskPollAccess;
+}
 
 struct TaskOptions {
     std::size_t capacity = 4;
     std::size_t initializationSteps = defaultEvaluationSteps;
+    std::size_t evaluationStepsPerSegment = defaultEvaluationSteps;
     static constexpr std::size_t maximumCapacity = 32;
+    static constexpr std::size_t maximumEvaluationStepsPerSegment = pipelang::model::maximumEvaluationStepsPerSegment;
     static constexpr std::size_t maximumInitializationSteps = pipelang::model::maximumInitializationSteps;
 };
 
@@ -100,6 +74,10 @@ struct Coroutine {
     struct promise_type {
         std::shared_ptr<TaskState<T>> state = std::make_shared<TaskState<T>>();
         std::optional<T> pendingResult;
+        // Native task observation keeps its Result contract. A source parent
+        // awaiting this frame must retain the terminal identity of exhaustion,
+        // rather than treating it as an authored recoverable Failure value.
+        std::exception_ptr terminalFailure;
         Coroutine get_return_object() {
             return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this));
         }
@@ -127,6 +105,9 @@ struct Coroutine {
                 throw;
             } catch (const OperationCancelled& error) {
                 pendingResult = T::Cancelled(safeErrorMessage(error));
+            } catch (const EvaluationLimitFailure& error) {
+                terminalFailure = std::current_exception();
+                pendingResult = T::Failure(safeErrorMessage(error));
             } catch (const std::exception& error) {
                 pendingResult = T::Failure(safeErrorMessage(error));
             } catch (...) {
@@ -159,6 +140,8 @@ struct Coroutine {
             return child_;
         }
         T await_resume() {
+            if (child_.promise().terminalFailure)
+                std::rethrow_exception(child_.promise().terminalFailure);
             if (!child_.promise().state->result)
                 throw ExecutionFailure("child coroutine completed without a result");
             // The awaiter retains exclusive frame ownership through result
@@ -182,6 +165,17 @@ struct Coroutine {
 // Host jobs and completions have FIFO order. Worker callbacks never access model
 // state. The owner must pump poll(); no continuation runs on the worker or another owner.
 class TaskScope {
+    // One admitted root owns this state throughout symmetric child transfers.
+    // Only owner-thread continuations touch it. Await descriptors retain their
+    // entry explicitly; no cleanup flag is left active on the owner executor.
+    struct Execution {
+        std::size_t waits = 0;
+        unsigned cleanupDepth = 0;
+        std::shared_ptr<const unsigned char> cleanupPhase;
+        bool settled = false;
+        void (*pollCheck)() = nullptr;
+    };
+
     struct PollState {
         std::function<std::optional<bool>()> check;
         CancellationToken cancellation;
@@ -191,9 +185,46 @@ class TaskScope {
         bool cancelled = false;
         bool active = false;
         std::shared_ptr<TaskGroup> group;
+        InvocationPermit permit;
+        std::shared_ptr<Execution> execution;
+        std::shared_ptr<const unsigned char> cleanupPhase;
     };
 
 public:
+    class CleanupRegion {
+    public:
+        CleanupRegion(const CleanupRegion&) = delete;
+        CleanupRegion& operator=(const CleanupRegion&) = delete;
+        ~CleanupRegion() {
+            cancellation_ = std::move(previousCancellation_);
+            if (--execution_->cleanupDepth == 0)
+                execution_->cleanupPhase.reset();
+        }
+
+    private:
+        friend class TaskScope;
+        CleanupRegion(std::shared_ptr<Execution> execution, CancellationToken& cancellation)
+            : execution_(std::move(execution)), cancellation_(cancellation),
+              previousCancellation_(cancellation) {
+            // Nested cleanup and its source callees retain an explicitly chosen
+            // cleanup token. Only the first region shields normal cancellation.
+            if (execution_->cleanupDepth == 0) {
+                // A retained native await descriptor cannot carry this authority
+                // into a later phase of the same task. Retention prevents identity
+                // reuse without a wrapping generation counter.
+                execution_->cleanupPhase = std::make_shared<const unsigned char>(0);
+                cancellation_ = {};
+            }
+            ++execution_->cleanupDepth;
+        }
+
+        std::shared_ptr<Execution> execution_;
+        CancellationToken& cancellation_;
+        CancellationToken previousCancellation_;
+    };
+
+    [[nodiscard]] CleanupRegion enterCleanup(CancellationToken& cancellation);
+
     // Only the external callback is guarded. Source helpers remain in their
     // existing outer transaction; this guard neither commits nor rolls back
     // model state or external effects. The scope must outlive the guard.
@@ -235,15 +266,15 @@ public:
         TaskScope* scope_;
     };
 
-    [[nodiscard]] SynchronousHostCallGuard enterSynchronousHostCall() {
-        return SynchronousHostCallGuard(*this);
-    }
+    [[nodiscard]] SynchronousHostCallGuard enterSynchronousHostCall();
 
     // A synchronous host boundary stays on the owner thread. It owns no
     // worker job or commit point, and preserves cancellation as a distinct fault.
     template<class Callback>
     auto invokeSynchronousHost(Callback&& callback) {
         auto guard = enterSynchronousHostCall();
+        if (cleanupActive())
+            currentPermit().requireCurrent();
         try {
             auto result = std::invoke(std::forward<Callback>(callback));
             validate(result);
@@ -260,199 +291,60 @@ public:
     }
 
     static constexpr std::size_t maximumPollingWaits = 32;
-    explicit TaskScope(TaskOptions options = {})
-        : owner_(std::this_thread::get_id()), capacity_(options.capacity) {
-        if (capacity_ == 0 || capacity_ > TaskOptions::maximumCapacity)
-            throw ExecutionFailure("task capacity must be between 1 and 32");
-        requireInitializationSteps(options.initializationSteps);
-    }
+    std::shared_ptr<ContextOwner> createContextOwner();
+
+    explicit TaskScope(TaskOptions options = {});
     TaskScope(const TaskScope&) = delete;
     TaskScope& operator=(const TaskScope&) = delete;
-    ~TaskScope() {
-        // A model must be destroyed on its owner. Failing closed here avoids a
-        // destructor racing a continuation or destroying an active frame.
-        if (owner_ != std::this_thread::get_id() || synchronousHostCallActive_)
-            std::terminate();
-        shutdown();
-    }
+    ~TaskScope();
     // Idempotent owner-only cancellation/drain, reused by composed owners before
     // their resource graph is destroyed. Host callbacks must honor cancellation
     // or their own bounded deadlines; arbitrary native work cannot be force-killed.
-    void shutdown() {
-        requireOwner();
-        if (resumeDepth_ != 0)
-            throw ExecutionFailure("task shutdown during an active continuation");
-        if (shutdownComplete_)
-            return;
-        for (auto& entry : entries_)
-            entry.cancel();
-        {
-            std::lock_guard lock(mutex_);
-            stopping_ = true;
-        }
-        wake_.notify_one();
-        if (worker_.joinable())
-            worker_.join();
-        // Preserve authoritative host outcomes already produced, including a
-        // successful external commit whose completion has not yet been polled.
-        // The generated owner destroys this scope before its state and services.
-        // Closing awaits complete immediately as Cancelled, so these finite
-        // source continuations cannot create more host work during teardown.
-        std::deque<std::function<void()>> finalCompletions;
-        {
-            std::lock_guard lock(mutex_);
-            finalCompletions.swap(completed_);
-        }
-        for (auto& completion : finalCompletions)
-            completion();
-        // Closing never calls a polling predicate: a semaphore permit must not
-        // be consumed by a wait that is being cancelled during owner teardown.
-        const auto closingWaits = polling_;
-        for (const auto& state : closingWaits) {
-            if (state && state->active) {
-                evaluatePoll(*state, true);
-                completePoll(state);
-            }
-        }
-        abandoningFrames_ = true;
-        for (auto& entry : entries_) {
-            entry.abandon();
-            entry.handle.destroy();
-        }
-        entries_.clear();
-        abandoningFrames_ = false;
-        shutdownComplete_ = true;
-    }
-    bool abandoningFrames() const noexcept { return abandoningFrames_; }
-    void requireOwner() const {
-        if (owner_ != std::this_thread::get_id())
-            throw ExecutionFailure("model accessed from a different owner thread");
-        if (synchronousHostCallActive_)
-            throw ExecutionFailure("model reentry during a synchronous host callback");
-    }
-    std::size_t pending() const {
-        requireOwner();
-        return entries_.size();
-    }
-    std::shared_ptr<TaskGroup> createGroup(std::shared_ptr<TaskGroup> parent = {}) {
-        requireOwner();
-        if (stopping_)
-            throw ExecutionFailure("task owner is closing");
-        if (parent)
-            requireGroup(parent);
-        std::size_t depth = 0;
-        for (auto ancestor = parent; ancestor; ancestor = ancestor->parent_) {
-            if (++depth >= 64)
-                throw ExecutionFailure("task group ancestry limit exceeded");
-        }
-        if (groupClosing(parent))
-            throw ExecutionFailure("task group is closing");
-        if (!groupIdentity_)
-            groupIdentity_ = std::make_shared<unsigned char>(0);
-        return std::shared_ptr<TaskGroup>(new TaskGroup(groupIdentity_, std::move(parent)));
-    }
-    void closeGroup(const std::shared_ptr<TaskGroup>& group) {
-        requireOwner();
-        requireGroup(group);
-        group->closing_ = true;
-        for (auto& entry : entries_) {
-            if (belongsTo(entry.group, group))
-                entry.cancel();
-        }
-    }
-    std::size_t pending(const std::shared_ptr<TaskGroup>& group) const {
-        requireOwner();
-        requireGroup(group);
-        return static_cast<std::size_t>(std::count_if(entries_.begin(), entries_.end(), [&](const auto& entry) {
-            return belongsTo(entry.group, group);
-        }));
-    }
+    void shutdown();
+    bool abandoningFrames() const noexcept;
+    void requireOwner() const;
+    std::size_t evaluationStepsPerSegment() const;
+    std::size_t pending() const;
+    std::shared_ptr<TaskGroup> createGroup(std::shared_ptr<TaskGroup> parent = {});
+    void closeGroup(const std::shared_ptr<TaskGroup>& group);
+    std::size_t pending(const std::shared_ptr<TaskGroup>& group) const;
     // Drain one lifetime subtree without stopping independent groups. Cancellation
     // is cooperative; host work must supply its own bounded I/O deadline.
-    void drainGroup(const std::shared_ptr<TaskGroup>& group) {
-        requireOwner();
-        if (resumeDepth_ != 0)
-            throw ExecutionFailure("task drain during an active continuation");
-        closeGroup(group);
-        while (pending(group) != 0) {
-            poll();
-            if (pending(group) == 0)
-                break;
-            std::unique_lock lock(mutex_);
-            wake_.wait_for(lock, std::chrono::milliseconds(1), [this] { return !completed_.empty(); });
-        }
-    }
+    void drainGroup(const std::shared_ptr<TaskGroup>& group);
     template<class T, class Factory>
     Result<Task<T>> tryStart(const std::shared_ptr<TaskGroup>& group, Factory factory) {
-        requireOwner();
-        if (group)
-            requireGroup(group);
-        reap();
-        if (stopping_ || groupClosing(group))
-            return Result<Task<T>>::Failure("task group is closing");
-        if (entries_.size() >= capacity_)
-            return Result<Task<T>>::Failure("task capacity exceeded");
-        CancellationSource cancellation;
-        auto coroutine = factory(cancellation.token());
-        auto handle = coroutine.handle;
-        auto state = handle.promise().state;
-        state->cancellation = cancellation;
-        Entry entry;
-        entry.handle = handle;
-        entry.group = group;
-        entry.cancel = [state] { state->cancellation.cancel(); };
-        entry.abandon = [state] {
-            if (!state->result)
-                state->result = T::Cancelled("task owner destroyed");
+        using Callable = std::remove_reference_t<decltype(factory)>;
+        using CreatedCoroutine = std::remove_cvref_t<decltype(factory(
+            CancellationToken::combine(std::declval<const CancellationSource&>().token(),
+                                       std::declval<const InvocationPermit&>().cancellation())))>;
+        const BorrowedFactory<CreatedCoroutine> invocation{
+            // Restore the original callable cv qualification in the thunk.
+            const_cast<void*>(static_cast<const volatile void*>(std::addressof(factory))),
+            [](void* context, const CancellationSource& cancellation,
+               const InvocationPermit& permit) -> CreatedCoroutine {
+                auto& callable = *static_cast<Callable*>(context);
+                return callable(CancellationToken::combine(cancellation.token(), permit.cancellation()));
+            }
         };
-        entries_.push_back(std::move(entry));
-        coroutine.release();
-        resume(handle, group);
-        reap();
-        return Result<Task<T>>::Success(Task<T>(std::move(state)));
+        return tryStartCore<T>(group, invocation);
     }
     template<class T, class Factory>
     Task<T> start(Factory factory) {
         const auto admitted = tryStart<T>(activeGroup_, std::move(factory));
-        if (!admitted.is_success()) {
-            auto state = std::make_shared<TaskState<T>>();
-            state->result = T::Failure(admitted.error());
-            return Task<T>(std::move(state));
-        }
-        return admitted.value();
+        return taskFromAdmission(admitted);
     }
-    std::size_t poll() {
-        requireOwner();
-        // Capture registrations before host continuations run. A continuation
-        // may register another wait, which belongs to the next owner poll.
-        const auto pollingSnapshot = polling_;
-        // Only the queue present at entry is delivered. Jobs submitted by these
-        // continuations are delivered on a later poll, avoiding an unbounded pump.
-        std::deque<std::function<void()>> ready;
-        {
-            std::lock_guard lock(mutex_);
-            ready.swap(completed_);
-        }
-        auto count = ready.size();
-        for (auto& completion : ready)
-            completion();
-        for (const auto& state : pollingSnapshot) {
-            if (state && state->active && evaluatePoll(*state, stopping_ || groupClosing(state->group))) {
-                completePoll(state);
-                ++count;
-            }
-        }
-        reap();
-        return count;
-    }
+    std::size_t poll();
     class PollingAwaitable {
     public:
         PollingAwaitable(TaskScope& scope, std::function<std::optional<bool>()> check,
                          CancellationToken cancellation)
             : scope_(scope), state_(std::make_shared<PollState>()) {
             state_->check = std::move(check);
-            state_->cancellation = std::move(cancellation);
+            state_->permit = currentPermit();
+            state_->cancellation = CancellationToken::combine(std::move(cancellation), state_->permit.cancellation());
             state_->group = scope_.activeGroup_;
+            state_->execution = scope_.activeExecution_;
+            state_->cleanupPhase = scope_.activeCleanupPhase();
         }
 
         PollingAwaitable(const PollingAwaitable&) = delete;
@@ -463,6 +355,8 @@ public:
             if (state_) {
                 // Frame destruction invalidates a registration even if its
                 // slot remains in an already captured poll snapshot.
+                if (state_->active && state_->execution)
+                    --state_->execution->waits;
                 state_->active = false;
                 state_->continuation = {};
                 state_->check = {};
@@ -470,13 +364,18 @@ public:
         }
 
         bool await_ready() {
-            scope_.requireOwner();
-            return scope_.evaluatePoll(*state_, scope_.stopping_ || scope_.groupClosing(state_->group));
+            scope_.requireAwaitOwner(state_->execution, state_->cleanupPhase);
+            return scope_.evaluatePoll(*state_, scope_.closingWait(state_->group, state_->execution, state_->cleanupPhase));
         }
 
         bool await_suspend(std::coroutine_handle<> continuation) {
-            scope_.requireOwner();
-            if (scope_.stopping_ || scope_.groupClosing(state_->group)) {
+            scope_.requireAwaitOwner(state_->execution, state_->cleanupPhase);
+            if (!state_->execution && scope_.activeExecution_) {
+                state_->execution = scope_.activeExecution_;
+                state_->group = scope_.activeGroup_;
+                state_->cleanupPhase = scope_.activeCleanupPhase();
+            }
+            if (scope_.closingWait(state_->group, state_->execution, state_->cleanupPhase)) {
                 scope_.evaluatePoll(*state_, true);
                 return false;
             }
@@ -484,6 +383,8 @@ public:
                 if (!slot || !slot->active) {
                     state_->continuation = continuation;
                     state_->active = true;
+                    if (state_->execution)
+                        ++state_->execution->waits;
                     slot = state_;
                     *suspended_ = true;
                     return true;
@@ -513,25 +414,30 @@ public:
     };
 
     PollingAwaitable pollUntil(std::function<std::optional<bool>()> check,
-                              CancellationToken cancellation = {}) {
-        requireOwner();
-        return PollingAwaitable(*this, std::move(check), std::move(cancellation));
-    }
+                              CancellationToken cancellation = {});
     template<class T>
     class HostAwaitable {
     public:
         HostAwaitable(TaskScope& scope, std::function<T()> function, CancellationToken cancellation)
             : scope_(scope), function_(std::move(function)), cancellation_(std::move(cancellation)),
-              group_(scope.activeGroup_) {}
+              group_(scope.activeGroup_), permit_(currentPermit()),
+              execution_(scope.activeExecution_), cleanupPhase_(scope.activeCleanupPhase()) {
+            cancellation_ = CancellationToken::combine(std::move(cancellation_), permit_.cancellation());
+        }
         bool await_ready() {
-            scope_.requireOwner();
-            if (!scope_.stopping_ && !scope_.groupClosing(group_))
+            scope_.requireAwaitOwner(execution_, cleanupPhase_);
+            if (!scope_.closingWait(group_, execution_, cleanupPhase_))
                 return false;
             *result_ = T::Cancelled("task owner is closing");
             return true;
         }
         bool await_suspend(std::coroutine_handle<> continuation) {
-            scope_.requireOwner();
+            scope_.requireAwaitOwner(execution_, cleanupPhase_);
+            if (!execution_ && scope_.activeExecution_) {
+                execution_ = scope_.activeExecution_;
+                group_ = scope_.activeGroup_;
+                cleanupPhase_ = scope_.activeCleanupPhase();
+            }
             try {
                 auto result = result_;
                 auto cancellation = cancellation_;
@@ -551,7 +457,16 @@ public:
                     } catch (...) {
                         *result = T::Failure("unexpected host service failure");
                     }
-                }, [scope = &scope_, continuation, group = group_] { scope->resume(continuation, group); });
+                }, [scope = &scope_, continuation, group = group_, permit = permit_, execution = execution_] {
+                    if (execution) {
+                        --execution->waits;
+                        if (execution->settled)
+                            return;
+                    }
+                    scope->resume(continuation, group, permit, execution);
+                }, execution_, cleanupPhase_);
+                if (execution_)
+                    ++execution_->waits;
                 *suspended_ = true;
                 return true;
             } catch (const std::exception& error) {
@@ -571,6 +486,9 @@ public:
         std::function<T()> function_;
         CancellationToken cancellation_;
         std::shared_ptr<TaskGroup> group_;
+        InvocationPermit permit_;
+        std::shared_ptr<Execution> execution_;
+        std::shared_ptr<const unsigned char> cleanupPhase_;
         std::shared_ptr<std::optional<T>> result_ = std::make_shared<std::optional<T>>();
         std::shared_ptr<bool> suspended_ = std::make_shared<bool>(false);
     };
@@ -579,127 +497,121 @@ public:
         return HostAwaitable<T>(*this, std::move(function), std::move(cancellation));
     }
 private:
-    bool evaluatePoll(PollState& state, bool closing) {
-        try {
-            if (closing || state.cancellation.is_cancelled()) {
-                state.cancelled = true;
-                return true;
-            }
-            state.result = state.check();
-            return state.result.has_value();
-        } catch (...) {
-            state.failure = std::current_exception();
-            return true;
-        }
+    friend struct detail::NativeTaskPollAccess;
+
+    // A source invocation can validate the owner environment before a poll
+    // consumes a queued completion or evaluates a wait.
+    void setCurrentExecutionPollCheck(void (*check)()) {
+        requireOwner();
+        if (!activeExecution_ || activeExecution_->settled || !check)
+            throw ExecutionFailure("poll validation requires an active task execution");
+        if (activeExecution_->pollCheck && activeExecution_->pollCheck != check)
+            throw ExecutionFailure("task execution already has a different poll check");
+        activeExecution_->pollCheck = check;
     }
 
-    void completePoll(const std::shared_ptr<PollState>& state) {
-        // Unregister before resuming: the continuation may destroy this awaiter
-        // and immediately reuse a slot for a different operation.
-        state->active = false;
-        for (auto& slot : polling_) {
-            if (slot == state)
-                slot.reset();
-        }
-        auto continuation = std::exchange(state->continuation, {});
-        state->check = {};
-        if (continuation)
-            resume(continuation, state->group);
+    // The factory is borrowed only for synchronous admission. Keeping its type
+    // out of the owning algorithm shares entry callbacks across factory closures.
+    template<class CreatedCoroutine>
+    struct BorrowedFactory {
+        void* context;
+        CreatedCoroutine (*invoke)(void*, const CancellationSource&, const InvocationPermit&);
+    };
+
+    template<class T, class CreatedCoroutine>
+    Result<Task<T>> tryStartCore(const std::shared_ptr<TaskGroup>& group,
+                                BorrowedFactory<CreatedCoroutine> factory) {
+        requireOwner();
+        if (group)
+            requireGroup(group);
+        reap();
+        if (closing_ || groupClosing(group))
+            return Result<Task<T>>::Failure("task group is closing");
+        if (entries_.size() >= capacity_)
+            return Result<Task<T>>::Failure("task capacity exceeded");
+        const auto permit = currentPermit();
+        if (!permit.is_current())
+            return Result<Task<T>>::Cancelled("context.stale");
+        CancellationSource cancellation;
+        auto coroutine = factory.invoke(factory.context, cancellation, permit);
+        auto handle = coroutine.handle;
+        auto state = handle.promise().state;
+        state->cancellation = cancellation;
+        Entry entry;
+        entry.execution = std::make_shared<Execution>();
+        entry.handle = handle;
+        entry.group = group;
+        entry.permit = permit;
+        entry.cancel = [state] { state->cancellation.cancel(); };
+        entry.abandon = [state] {
+            if (!state->result)
+                state->result = T::Cancelled("task owner destroyed");
+        };
+        const auto execution = entry.execution;
+        entries_.push_back(std::move(entry));
+        coroutine.release();
+        resume(handle, group, permit, execution);
+        reap();
+        return Result<Task<T>>::Success(Task<T>(std::move(state)));
     }
 
-    void requireGroup(const std::shared_ptr<TaskGroup>& group) const {
-        if (!group || group->identity_ != groupIdentity_)
-            throw ExecutionFailure("task group belongs to a different owner");
-    }
-    static bool belongsTo(std::shared_ptr<TaskGroup> candidate, const std::shared_ptr<TaskGroup>& ancestor) {
-        while (candidate) {
-            if (candidate == ancestor)
-                return true;
-            candidate = candidate->parent_;
+    template<class T>
+    static Task<T> taskFromAdmission(const Result<Task<T>>& admitted) {
+        if (!admitted.is_success()) {
+            auto state = std::make_shared<TaskState<T>>();
+            if (admitted.is_cancelled())
+                state->result = T::Cancelled(admitted.error());
+            else
+                state->result = T::Failure(admitted.error());
+            return Task<T>(std::move(state));
         }
-        return false;
+        return admitted.value();
     }
-    static bool groupClosing(std::shared_ptr<TaskGroup> group) {
-        while (group) {
-            if (group->closing_)
-                return true;
-            group = group->parent_;
-        }
-        return false;
-    }
-    void resume(std::coroutine_handle<> continuation, const std::shared_ptr<TaskGroup>& group) {
-        struct RestoreGroup {
-            std::shared_ptr<TaskGroup>& active;
-            std::shared_ptr<TaskGroup> previous;
-            std::size_t& depth;
-            ~RestoreGroup() {
-                active = std::move(previous);
-                --depth;
-            }
-        } restore{activeGroup_, std::exchange(activeGroup_, group), resumeDepth_};
-        ++resumeDepth_;
-        continuation.resume();
-    }
+
+    bool evaluatePoll(PollState& state, bool closing);
+
+    void completePoll(const std::shared_ptr<PollState>& state);
+
+    void requireGroup(const std::shared_ptr<TaskGroup>& group) const;
+    static bool belongsTo(std::shared_ptr<TaskGroup> candidate, const std::shared_ptr<TaskGroup>& ancestor);
+    static bool groupClosing(std::shared_ptr<TaskGroup> group);
+    void requireAwaitOwner(const std::shared_ptr<Execution>& captured,
+        const std::shared_ptr<const unsigned char>& cleanupPhase) const;
+    std::shared_ptr<const unsigned char> activeCleanupPhase() const noexcept;
+    bool cleanupActive() const noexcept;
+    bool closingWait(const std::shared_ptr<TaskGroup>& group,
+        const std::shared_ptr<Execution>& execution,
+        const std::shared_ptr<const unsigned char>& cleanupPhase) const;
+    void resume(std::coroutine_handle<> continuation, const std::shared_ptr<TaskGroup>& group,
+        InvocationPermit permit, const std::shared_ptr<Execution>& execution);
 
     struct Entry {
         std::coroutine_handle<> handle;
         std::function<void()> cancel;
         std::function<void()> abandon;
         std::shared_ptr<TaskGroup> group;
+        InvocationPermit permit;
+        std::shared_ptr<Execution> execution;
     };
     struct Job {
         std::function<void()> execute;
         std::function<void()> complete;
     };
-    void reap() {
-        auto entry = entries_.begin();
-        while (entry != entries_.end()) {
-            if (entry->handle.done()) {
-                entry->handle.destroy();
-                entry = entries_.erase(entry);
-            } else {
-                ++entry;
-            }
-        }
-    }
-    void submit(std::function<void()> execute, std::function<void()> complete) {
-        std::lock_guard lock(mutex_);
-        if (stopping_ || jobs_.size() >= capacity_)
-            throw ExecutionFailure("host queue unavailable");
-        jobs_.push_back({std::move(execute), std::move(complete)});
-        if (!worker_.joinable()) {
-            try {
-                // Hold the queue lock until startup succeeds: a failed thread
-                // construction must leave no job or continuation admitted.
-                worker_ = std::thread([this] { work(); });
-            } catch (...) {
-                jobs_.pop_back();
-                throw;
-            }
-        }
-        wake_.notify_one();
-    }
-    void work() {
-        for (;;) {
-            Job job;
-            {
-                std::unique_lock lock(mutex_);
-                wake_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
-                if (jobs_.empty())
-                    return;
-                job = std::move(jobs_.front());
-                jobs_.pop_front();
-            }
-            job.execute();
-            {
-                std::lock_guard lock(mutex_);
-                completed_.push_back(std::move(job.complete));
-            }
-            wake_.notify_all();
-        }
-    }
+    void reap();
+    // Native clients may deliberately suspend without registering a wakeup.
+    // Generated source cannot: its leaf awaits are host/polling registrations.
+    // Preserve the SDK's nonthrowing abandonment fallback for those dormant frames.
+    void abandonDormant(const std::shared_ptr<TaskGroup>& group = {});
+    void submit(std::function<void()> execute, std::function<void()> complete,
+        const std::shared_ptr<Execution>& execution,
+        const std::shared_ptr<const unsigned char>& cleanupPhase);
+    void work();
+    inline static thread_local TaskScope* resumingScope_ = nullptr;
     std::thread::id owner_;
+    InvocationPermit lifetimePermit_;
+    std::unique_ptr<ContextOwner> contextRoot_;
     std::size_t capacity_;
+    const std::size_t evaluationStepsPerSegment_;
     std::thread worker_;
     std::vector<Entry> entries_;
     std::array<std::shared_ptr<PollState>, maximumPollingWaits> polling_{};
@@ -707,13 +619,21 @@ private:
     std::condition_variable wake_;
     std::deque<Job> jobs_;
     std::deque<std::function<void()>> completed_;
+    bool closing_ = false;
     bool stopping_ = false;
     bool abandoningFrames_ = false;
     bool synchronousHostCallActive_ = false;
     bool shutdownComplete_ = false;
     std::shared_ptr<const void> groupIdentity_;
     std::shared_ptr<TaskGroup> activeGroup_;
+    std::shared_ptr<Execution> activeExecution_;
     std::size_t resumeDepth_ = 0;
 };
 
 }
+
+#if !defined(PIPELANG_MODEL_LINKED_RUNTIME) || !PIPELANG_MODEL_LINKED_RUNTIME
+#define PIPELANG_MODEL_RUNTIME_INLINE inline
+#include "detail/task_scope_impl.hpp"
+#undef PIPELANG_MODEL_RUNTIME_INLINE
+#endif

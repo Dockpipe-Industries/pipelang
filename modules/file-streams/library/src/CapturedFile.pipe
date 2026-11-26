@@ -1,0 +1,6 @@
+module PipeLang.IO;
+
+public Record CapturedFile {
+    public int snapshotId = 0;
+    public FileDigest file;
+}

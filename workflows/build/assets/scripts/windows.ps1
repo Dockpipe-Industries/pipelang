@@ -1,6 +1,14 @@
 param([switch] $Inside)
 . (Join-Path $PSScriptRoot 'windows-common.ps1')
 
+$nativeObjects = [Environment]::GetEnvironmentVariable('PIPELANG_BUILD_NATIVE_OBJECT_PROOF')
+if (!$nativeObjects) {
+    $nativeObjects = 'ON'
+}
+if ($nativeObjects -cnotin @('ON', 'OFF')) {
+    throw 'PIPELANG_BUILD_NATIVE_OBJECT_PROOF must be ON or OFF'
+}
+
 if (!$Inside) {
     $proof = [Environment]::GetEnvironmentVariable('PIPELANG_NATIVE_TOOLCHAIN_PROOF')
     if (!$proof) {
@@ -61,10 +69,11 @@ Set-WindowsTools $tools
 Initialize-Units $proof $runner
 $build = Join-Path $proof 'build'
 $sdk = Join-Path $proof 'sdk'
-Invoke-Unit 'configure' $tools.cmake @('-S', (Join-Path $script:SourceRoot 'sdk/pipeview/model'), '-B', $build,
+$configureArguments = @('-S', (Join-Path $script:SourceRoot 'sdk/pipeview/model'), '-B', $build,
     '-G', 'Ninja', "-DCMAKE_CXX_COMPILER:FILEPATH=$($tools.cxx.Replace('\', '/'))", "-DCMAKE_MAKE_PROGRAM:FILEPATH=$($tools.ninja.Replace('\', '/'))",
     "-DCMAKE_RC_COMPILER:FILEPATH=$($tools.rc.Replace('\', '/'))", '-DCMAKE_BUILD_TYPE=Release', '-DPIPELANG_BUILD_SDK_TOOL_TESTS=ON',
-    '-DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON')
+    '-DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON', "-DPIPELANG_BUILD_NATIVE_OBJECT_PROOF=$nativeObjects")
+Invoke-Unit 'configure' $tools.cmake $configureArguments
 Invoke-Unit 'build' $tools.cmake @('--build', $build, '--parallel', '1') 1800
 Invoke-Unit 'install' $tools.cmake @('--install', $build, '--prefix', $sdk)
 $tool = Join-Path $sdk 'bin/pipelang-sdk-tool.exe'

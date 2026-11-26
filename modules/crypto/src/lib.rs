@@ -4,6 +4,8 @@
 //! values never carry these pointers. Invalid addresses remain a trusted caller
 //! contract; pointer/length checks cannot prove arbitrary foreign memory is valid.
 
+mod stream;
+
 use sha2::{Digest, Sha256};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 

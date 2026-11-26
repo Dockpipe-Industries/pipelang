@@ -1,0 +1,9 @@
+module PipeLang.IO;
+
+// Each call writes at most one bounded fragment at the current end of an
+// existing file. A partial or interrupted effect requires separate read-back.
+public Interface ExistingFileAppend {
+    Result<AppendFileState,IoFailure> InspectAppendTarget(string relative, int maximumBytes, CancellationToken token);
+    Result<AppendFileState,IoFailure> AppendExistingFile(string relative, AppendFileState expected,
+                                                        int maximumBytes, ByteBuffer bytes, CancellationToken token);
+}

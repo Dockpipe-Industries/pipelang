@@ -12,6 +12,33 @@ target_link_libraries(pipelang_sdk_tools PUBLIC pipelang_tool_support pipelang_m
 add_executable(pipelang-sdk-tool main.cpp inventory.cpp)
 target_include_directories(pipelang-sdk-tool PRIVATE ../support)
 target_link_libraries(pipelang-sdk-tool PRIVATE pipelang_sdk_tools)
+option(PIPELANG_BUILD_NATIVE_OBJECT_PROOF "Include the PipeLang native object compiler" ON)
+if(PIPELANG_BUILD_NATIVE_OBJECT_PROOF)
+    add_executable(pipelang-objectc
+        ../model-compiler/native-ir/ApplicationLink.cpp
+        ../model-compiler/native-ir/ObjectMain.cpp
+        ../model-compiler/native-ir/ScalarLowering.cpp
+        ../model-compiler/native-ir/LlvmIrEmitter.cpp
+        ../model-compiler/native-ir/Target.cpp)
+    target_include_directories(pipelang-objectc PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/pipeview/model/native/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/pipeview/model/native/include")
+    target_link_libraries(pipelang-objectc PRIVATE pipelang_sdk_tools)
+    set_target_properties(pipelang-objectc PROPERTIES CXX_EXTENSIONS OFF)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(pipelang-objectc PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # Keep the host lowering compiler within the bounded SDK build profile.
+        # LLVM still applies the selected optimization profile to PipeLang code.
+        get_filename_component(lowering_resource_profile
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../sdk/pipeview/model/compiler-profiles/gnu-conservative-gc.rsp" ABSOLUTE)
+        set_property(SOURCE ../model-compiler/native-ir/ScalarLowering.cpp APPEND PROPERTY
+            COMPILE_OPTIONS "$<$<CONFIG:Release>:-O2;@${lowering_resource_profile}>")
+        set_property(SOURCE ../model-compiler/native-ir/ScalarLowering.cpp APPEND PROPERTY
+            OBJECT_DEPENDS "${lowering_resource_profile}")
+    endif()
+endif()
 foreach(target pipelang_tool_support pipelang_sdk_tools pipelang-sdk-tool)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -84,6 +111,7 @@ if(PIPELANG_BUILD_SDK_TOOL_TESTS)
     endif()
     add_executable(pipelang-sdk-tool-tests ../../../tests/native-models/sdk_tools_tests.cpp ../../../tests/native-models/ProjectTests.cpp ../../../tests/native-models/NativeNumericExportTests.cpp ../../../tests/native-models/NativeNumericRecordFixture.cpp
         ../../../tests/native-models/NativeNumericResultFixture.cpp ../../../tests/native-models/NativeNumericArrayFixture.cpp ../../../tests/native-models/NativeNumericFloatingFixture.cpp ../../../tests/native-models/NativeNumericEnvironmentFixture.cpp ../../../tests/native-models/NativeNumericCountedArrayFixture.cpp ../../../tests/native-models/NativeNumericIntegerFixture.cpp ../../../tests/native-models/NativeObservationFixture.cpp ../../../tests/native-models/NativeActiveNumericFixture.cpp ../../../tests/native-models/NativeExponentFixture.cpp ../../../tests/native-models/NativeByteTextFixture.cpp ../../../tests/native-models/NativeNumericHeaderFixture.cpp ../../../tests/native-models/CompiledProjectTests.cpp ../../../tests/native-models/CompiledOwnerFixture.cpp ../../../tests/native-models/CompiledImplementationUnitTests.cpp ../../../tests/native-models/ProjectModuleTests.cpp ../../../tests/native-models/ProjectFacetFixture.cpp)
+    target_sources(pipelang-sdk-tool-tests PRIVATE ../../../tests/native-models/LinkedRuntimeFixture.cpp)
     target_link_libraries(pipelang-sdk-tool-tests PRIVATE pipelang_sdk_tools)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(pipelang-sdk-tool-tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -105,4 +133,16 @@ if(PIPELANG_BUILD_SDK_TOOL_TESTS)
         ../../../tests/native-models/NativeStructuredValueFixture.cpp
         ../../../tests/native-models/NativeFixedArrayFixture.cpp
         ../../../tests/native-models/NativeForLoopFixture.cpp)
+endif()
+
+if(PIPELANG_BUILD_SDK_TOOL_TESTS)
+    add_executable(pipelang-context-source-profile-tests ../../../tests/native-models/ContextOwnerSourceProfileTests.cpp)
+    target_link_libraries(pipelang-context-source-profile-tests PRIVATE pipelang_model_compiler)
+    foreach(suite ContextOwnership ContextPublication)
+        add_executable("pipelang-${suite}-tests" "../../../tests/native-models/${suite}Tests.cpp")
+        target_link_libraries("pipelang-${suite}-tests" PRIVATE PipeLang::ModelRuntime Threads::Threads)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options("pipelang-${suite}-tests" PRIVATE -Wall -Wextra -Wpedantic -Werror)
+        endif()
+    endforeach()
 endif()

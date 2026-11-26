@@ -76,6 +76,7 @@ public:
     Arguments(int argc, char** argv, int first = 1);
     std::string take(const std::string& name);
     std::string optional(const std::string& name, const std::string& fallback = {});
+    std::vector<std::string> repeated(const std::string& name);
     bool flag(const std::string& name);
     std::vector<std::string> rest();
     void finish() const;

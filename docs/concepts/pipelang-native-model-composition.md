@@ -2,7 +2,8 @@
 
 The explicitly selected C++20 ordinary-model compiler supports closed source
 modules, exact method/constructor overloads, generic owned records and local
-generic methods. These capabilities belong to `src/native/model-compiler`; they
+generic methods. V3 and project compilation also admit explicit closed generic
+instance calls on concrete source classes. These capabilities belong to `src/native/model-compiler`; they
 do not extend the Go/Core compiler, historical view source profiles or the
 experimental admitted-Core emitter. Source-owned headless compilation/runtime fixtures cover these contracts.
 Qualification and its platform limits are described in
@@ -11,6 +12,9 @@ Qualification and its platform limits are described in
 [Source objects and interfaces](pipelang-objects.md) are an explicit v3
 continuation. That profile distinguishes exported model roots from ordinary
 instances and separates owner-confined reference containers from owned values.
+
+Local declarations can use [checked local type inference](pipelang-local-inference.md)
+with `var`; API types remain explicit.
 
 ## Closed modules
 
@@ -72,6 +76,16 @@ still requires a direct `import Values;`. Parameter/local bindings retain their
 lexical scopes, including loop items, catch bindings and finally blocks. Host
 interface methods must be public; existing class member visibility still applies.
 
+Modern object/project return-flow checking recognizes a literal `true` condition
+on `while` and `for`, including an omitted `for` condition. A loop with no break
+that targets it cannot fall through to the next statement. A reachable break
+restores that exit; nested loops consume their own break/continue paths and
+finally retains its existing transfer rules. Unknown or nonliteral conditions
+and foreach remain conservatively zero-trip. The legacy profile is unchanged.
+Non-fallthrough does not guarantee a returned value: the existing condition and
+statement evaluation checkpoints still bound infinite loops, including empty
+bodies, and concrete awaited operations retain their own cancellation policy.
+
 Every source diagnostic retains its original module-local byte offset. V2
 diagnostics additionally identify the source module. Imported declarations lower
 through compiler-owned native identities; entry classes retain their authored
@@ -114,8 +128,38 @@ instantiated. This is a closed
 specialization contract, rather than universal validation of every possible
 type argument.
 
-Generic classes/interfaces, class inheritance, constraints, inference and generic
-instance-member dispatch remain unsupported. Recursion that changes an active
+V3 and project callers may select a public generic method through a concrete
+instance, including a parameter, local, field, constructed value or call result:
+
+```pipelang
+public Class Assertions {
+    public pure bool Equal<T>(T expected, T actual, string message) => expected == actual;
+}
+
+public Class Checks {
+    public pure bool Run(Assertions assertions) {
+        return assertions.Equal<int>(3, 3, "matching values");
+    }
+}
+```
+
+The ordinary checker owns receiver typing, overload selection, access, effects,
+closed dispatch and call-cycle checks. The receiver is retained as one ordinary
+call expression and evaluated once at runtime. Public imported methods and
+inherited nonvirtual generic methods follow the same rules as ordinary members;
+private/protected access does not become public through specialization. Generic
+virtual methods and generic calls through interface receivers remain unsupported.
+Generic classes/interfaces, constraints and inference remain unsupported.
+
+Member specialization uses bounded checker discovery. Every trial checks a deep
+clone; discovery discards all partial semantic metadata before adding the required
+closed methods. Clones and specialized bodies share the existing cumulative
+65,536 AST/type-copy budget, and the existing 256 closed-method limit remains in
+force. This additional accounting applies only when instance generic applications
+are present. A large request can reach the AST-copy budget before the method cap.
+No whole-program receiver inference or application-specific intrinsic is added.
+
+Recursion that changes an active
 template's arguments refuses. Existing record-layout and method-call cycle
 checks also reject recursive concrete graphs.
 

@@ -1,0 +1,56 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ScopedCollections;
+
+public Record Bundle {
+    public string name;
+    public List<string> labels;
+    public Array<int> values;
+    public HashSet<string> tags;
+    public Queue<int> queue;
+    public Stack<int> stack;
+    public Dictionary<string,int> lookup;
+}
+
+public Class Consumer {
+    private Bundle bundle;
+
+    public Consumer(Bundle incoming) {
+        bundle = incoming;
+        var initial = bundle;
+        bundle.labels.Add("constructed");
+        bundle.values.Set(0, initial.values.At(0) + 1);
+        bundle.tags.Add("constructor");
+    }
+
+    public pure Bundle Read() => bundle;
+
+    public void Update(Bundle incoming) {
+        bundle = incoming;
+    }
+}
+
+public model Class Root {
+    private SemaphoreSlim permits = SemaphoreSlim.Create(0, 1);
+
+    public pure Bundle Read(Consumer consumer) => consumer.Read();
+
+    public void Update(Consumer consumer, Bundle incoming) {
+        consumer.Update(incoming);
+    }
+
+    public async Task<Result<Bundle,string>> Hold(Consumer consumer, CancellationToken token) {
+        var prior = consumer.Read();
+        await permits.WaitAsync(token);
+        return Result<Bundle,string>.Success(prior);
+    }
+
+    public void Release() {
+        permits.Release();
+    }
+}
+
+public composition Startup {
+    scoped input Bundle;
+    scoped Consumer = Consumer;
+    export Consumer;
+}

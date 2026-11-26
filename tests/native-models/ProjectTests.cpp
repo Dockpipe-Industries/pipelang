@@ -5,6 +5,7 @@
 #include "PureHostProjectFixture.hpp"
 #include "../../src/native/sdk-tools/SourceProject.hpp"
 #include "../../src/native/sdk-tools/bindings.hpp"
+#include "../../src/native/model-compiler/ScopedResourceBudget.hpp"
 
 #include <iostream>
 
@@ -229,10 +230,9 @@ public model Class Root {
     }
 }
 )pipe";
-    const auto recursiveRefusal = compile(prefix, recursiveRoot);
-    require(recursiveRefusal.at("ok") == false &&
-            recursiveRefusal.at("diagnostics").dump().find("recursive local call graph") != std::string::npos,
-            "source object facet bypassed the static constructor recursion bound");
+    const auto recursiveAdmission = compile(prefix, recursiveRoot);
+    require(recursiveAdmission.at("ok") == true,
+            "source object facet rejected runtime-bounded constructor recursion");
     auto privateAccess = library;
     privateAccess["modules"][0]["source"] = "module Library; public model Class Root { private int secret; } public model Class Other { private Root item = new Root(); public pure int Read() => item.secret; }";
     const auto privateRefusal = compile(prefix, privateAccess);
@@ -330,6 +330,180 @@ public model Class Root {
     require(compile(prefix, legacyModifier).at("ok") == false, "project modifier changed old protocol grammar");
 }
 
+void sourceLibraryAdmission(const fs::path& prefix, const fs::path& root) {
+    const auto projectRoot = root / "application";
+    const auto libraryRoot = root / "library";
+    const auto referencesPath = root / "libraries.json";
+    const auto descriptorPath = libraryRoot / "library.json";
+    fs::create_directories(projectRoot / "src");
+    fs::create_directories(libraryRoot / "src");
+    atomicWrite(projectRoot / "src/Entry.pipe",
+                "module App; import Library.Contracts; public model Class Root { private First value; public Root() { value = new First(); } public pure int Value() => value.Read(); }\n");
+    atomicWrite(libraryRoot / "src/First.pipe", "module Library.Contracts; public Class First { public First() {} public pure int Read() => 7; }\n");
+    atomicWrite(libraryRoot / "src/Second.pipe", "module Library.Contracts; public Record Second {}\n");
+    Json descriptor{{"protocol", "pipelang.source-library.v1"}, {"name", "Library.Contracts"},
+                    {"version", "0.1.0"}, {"source_root", "src"}, {"sources", Json::array()}};
+    for (const auto& name : {"First.pipe", "Second.pipe"})
+        descriptor["sources"].push_back({{"path", name}, {"sha256", fileHash(libraryRoot / "src" / name)}});
+    Json references{{"protocol", "pipelang.source-library-references.v1"}, {"libraries", Json::array()}};
+    const auto pinDescriptor = [&] {
+        atomicWrite(descriptorPath, canonical(descriptor));
+        references["libraries"] = Json::array({{{"root", libraryRoot.generic_string()},
+            {"descriptor", "library.json"}, {"sha256", fileHash(descriptorPath)}}});
+        atomicWrite(referencesPath, canonical(references));
+    };
+    const auto load = [&] { return SourceProject::load(projectRoot, "src", "Entry.pipe", referencesPath); };
+    pinDescriptor();
+    const auto originalDescriptor = descriptor;
+    const auto originalReferences = references;
+    const auto project = load();
+    require(project.request("source_library").at("modules").size() == 3,
+            "source libraries did not contribute all selected explicit module parts");
+    require(project.dependencies().size() == 5 && project.sourceDirectories().size() == 2,
+            "source library metadata or source dependencies were omitted");
+    require(project.receipt().at("source_libraries")[0].at("version") == "0.1.0",
+            "source library receipt omitted version identity");
+    require(project.receipt().at("closure_sources") == Json::array({"project/Entry.pipe",
+                "libraries/Library.Contracts/First.pipe", "libraries/Library.Contracts/Second.pipe"}),
+            "source library diagnostics lost deterministic source ownership");
+    require(compile(prefix, project.request("source_library")).at("ok") == true,
+            "closed project compiler transport refused source library modules");
+    project.verifyUnchanged();
+    auto limitedBudget = pipelang::models::resourceBudget();
+    limitedBudget.indexedFiles = 2;
+    {
+        const pipelang::models::ScopedResourceBudget limit(limitedBudget);
+        expectRefusal(load, "indexed_files resource budget exceeded");
+    }
+    limitedBudget = pipelang::models::resourceBudget();
+    limitedBudget.directoryEntries = 2;
+    {
+        const pipelang::models::ScopedResourceBudget limit(limitedBudget);
+        expectRefusal(load, "directory_entries resource budget exceeded");
+    }
+
+    atomicWrite(libraryRoot / "src/Extra.pipe", "module Unselected; public Record Extra {}\n");
+    expectRefusal(load, "pinned inventory membership mismatch");
+    expectRefusal([&] { project.verifyUnchanged(); }, "pinned inventory membership mismatch");
+    fs::remove(libraryRoot / "src/Extra.pipe");
+    const auto sourcePath = libraryRoot / "src/First.pipe";
+    const auto originalSource = readFile(sourcePath, 65536);
+    atomicWrite(sourcePath, originalSource + "// drift\n");
+    expectRefusal(load, "source SHA256 mismatch");
+    expectRefusal([&] { project.verifyUnchanged(); }, "source SHA256 mismatch");
+    atomicWrite(sourcePath, originalSource);
+    fs::rename(sourcePath, libraryRoot / "First.saved");
+    expectRefusal(load, "pinned inventory membership mismatch");
+    fs::rename(libraryRoot / "First.saved", sourcePath);
+    atomicWrite(descriptorPath, canonical(descriptor) + "\n");
+    expectRefusal(load, "descriptor SHA256 mismatch");
+    pinDescriptor();
+    atomicWrite(referencesPath, canonical(references) + "\n");
+    expectRefusal([&] { project.verifyUnchanged(); }, "changed during compilation");
+    atomicWrite(referencesPath, canonical(references));
+
+    references["libraries"][0]["root"] = "relative/library";
+    atomicWrite(referencesPath, canonical(references));
+    expectRefusal(load, "absolute and normalized");
+    references = originalReferences;
+    references["libraries"][0]["descriptor"] = "../library.json";
+    atomicWrite(referencesPath, canonical(references));
+    expectRefusal(load, "path escapes");
+    references = originalReferences;
+    descriptor["source_root"] = "../src";
+    pinDescriptor();
+    expectRefusal(load, "path escapes");
+    descriptor = originalDescriptor;
+    descriptor["sources"][0]["path"] = "../First.pipe";
+    pinDescriptor();
+    expectRefusal(load, "path escapes");
+    descriptor = originalDescriptor;
+    descriptor["sources"][1]["path"] = "first.pipe";
+    pinDescriptor();
+    expectRefusal(load, "case-folded source path collision");
+    descriptor = originalDescriptor;
+    std::swap(descriptor["sources"][0], descriptor["sources"][1]);
+    pinDescriptor();
+    expectRefusal(load, "unique sorted paths");
+    descriptor = originalDescriptor;
+    descriptor["unexpected"] = true;
+    pinDescriptor();
+    expectRefusal(load, "unexpected field");
+    descriptor = originalDescriptor;
+    pinDescriptor();
+    references["libraries"].push_back(references["libraries"][0]);
+    atomicWrite(referencesPath, canonical(references));
+    expectRefusal(load, "duplicate source library name");
+    pinDescriptor();
+
+    atomicWrite(sourcePath, "module App; public Record Conflicting {}\n");
+    descriptor["sources"][0]["sha256"] = fileHash(sourcePath);
+    pinDescriptor();
+    expectRefusal(load, "module ownership collision: App");
+    atomicWrite(sourcePath, originalSource);
+    descriptor = originalDescriptor;
+    pinDescriptor();
+    const auto secondRoot = root / "second-library";
+    fs::create_directories(secondRoot / "src");
+    atomicWrite(secondRoot / "src/Part.pipe", "module Library.Contracts; public Record Third {}\n");
+    Json secondDescriptor{{"protocol", "pipelang.source-library.v1"}, {"name", "Another.Library"},
+        {"version", "0.2.0"}, {"source_root", "src"}, {"sources", Json::array({
+            {{"path", "Part.pipe"}, {"sha256", fileHash(secondRoot / "src/Part.pipe")}}})}};
+    atomicWrite(secondRoot / "library.json", canonical(secondDescriptor));
+    references["libraries"].push_back({{"root", secondRoot.generic_string()}, {"descriptor", "library.json"},
+                                     {"sha256", fileHash(secondRoot / "library.json")}});
+    atomicWrite(referencesPath, canonical(references));
+    expectRefusal(load, "module ownership collision: Library.Contracts");
+    atomicWrite(secondRoot / "src/Part.pipe", "module Additional.Contracts; public Record Third {}\n");
+    secondDescriptor["sources"][0]["sha256"] = fileHash(secondRoot / "src/Part.pipe");
+    atomicWrite(secondRoot / "library.json", canonical(secondDescriptor));
+    references["libraries"][1]["sha256"] = fileHash(secondRoot / "library.json");
+    atomicWrite(referencesPath, canonical(references));
+    const auto orderedRequest = load().request("source_library");
+    std::swap(references["libraries"][0], references["libraries"][1]);
+    atomicWrite(referencesPath, canonical(references));
+    require(load().request("source_library") == orderedRequest, "library reference order changed compiler inputs");
+    std::swap(references["libraries"][0], references["libraries"][1]);
+    secondDescriptor = originalDescriptor;
+    secondDescriptor["name"] = "Another.Library";
+    atomicWrite(libraryRoot / "another.json", canonical(secondDescriptor));
+    references["libraries"][1] = {{"root", libraryRoot.generic_string()}, {"descriptor", "another.json"},
+                                 {"sha256", fileHash(libraryRoot / "another.json")}};
+    atomicWrite(referencesPath, canonical(references));
+    expectRefusal(load, "roots must not overlap");
+    pinDescriptor();
+#ifndef _WIN32
+    fs::create_symlink(sourcePath, libraryRoot / "src/Linked.pipe");
+    expectRefusal(load, "symbolic or reparse");
+    fs::remove(libraryRoot / "src/Linked.pipe");
+    fs::create_directory_symlink(libraryRoot, root / "linked-library");
+    references["libraries"][0]["root"] = (root / "linked-library").generic_string();
+    atomicWrite(referencesPath, canonical(references));
+    expectRefusal(load, "symbolic or reparse");
+    fs::remove(root / "linked-library");
+    pinDescriptor();
+#endif
+    const auto manifest = prefix / "share/pipelang-model/sdk-manifest.json";
+    const auto compiler = nativeExecutable(prefix / "bin/pipelang-modelc");
+    const auto sdkHash = fileHash(manifest);
+    const auto information = projectInformation(prefix, manifest, sdkHash, projectRoot, "src", "Entry.pipe", referencesPath);
+    require(information.at("source_directories").size() == 2,
+            "project information omitted library membership watches");
+    const auto generated = generateProjectBindings(prefix, manifest, sdkHash, compiler,
+        projectRoot, "src", "Entry.pipe", "source_library", root / "generated", {}, false, false, referencesPath);
+    require(generated.at("project") == project.receipt(), "binding receipt lost source library pins");
+    expectRefusal([&] {
+        generateProjectBindings(prefix, manifest, sdkHash, compiler, projectRoot, "src", "Entry.pipe",
+            "source_library", libraryRoot / "src/generated", {}, false, false, referencesPath);
+    }, "outputs must be outside");
+    const auto plan = compiledProjectInformation(prefix, manifest, sdkHash, compiler,
+        projectRoot, "src", "Entry.pipe", "source_library_compiled", {}, false, referencesPath);
+    const auto compiled = generateCompiledProjectBindings(prefix, manifest, sdkHash, compiler,
+        projectRoot, "src", "Entry.pipe", "source_library_compiled", root / "compiled",
+        plan.at("plan_sha256").get<std::string>(), {}, false, false, referencesPath);
+    require(compiled.at("project") == project.receipt(), "compiled binding receipt lost source library pins");
+}
+
 void writeConsumer(const fs::path& root, bool compiled = false) {
     writeProjectFacetConsumer(root);
     std::string buildDescription = R"cmake(cmake_minimum_required(VERSION 3.21.1)
@@ -349,13 +523,16 @@ endif()
         const std::string selection = "pipelang_add_model(project_model ";
         const auto position = buildDescription.find(selection);
         require(position != std::string::npos, "compiled fixture lost its model declaration");
-        buildDescription.insert(position + selection.size(), "COMPILATION COMPILED ");
+        buildDescription.insert(position + selection.size(), "COMPILATION COMPILED BATCH_IMPLEMENTATIONS ");
         buildDescription += R"cmake(
 add_executable(compiled_peer compiled-main.cpp compiled-peer.cpp)
 target_link_libraries(compiled_peer PRIVATE project_model)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set_property(TARGET project_model_implementation consumer types_consumer compiled_peer
     PROPERTY EXPORT_COMPILE_COMMANDS ON)
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/implementation-sources.txt"
+    CONTENT "$<JOIN:$<FILTER:$<TARGET_PROPERTY:project_model_implementation,SOURCES>,INCLUDE,Implementation_[0-9]+[.]cpp$>,\n>\n"
+    NEWLINE_STYLE UNIX)
 add_library(compiled_policy INTERFACE)
 target_compile_definitions(compiled_policy INTERFACE PIPELANG_COMPILED_TRANSITIVE_DEFINITION=19)
 target_compile_options(compiled_policy INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-DPIPELANG_COMPILED_TRANSITIVE_OPTION=31>")
@@ -479,6 +656,16 @@ void installedConsumer(const fs::path& prefix, const fs::path& root) {
 }
 }
 
+void sourceLibraryContracts(const std::filesystem::path& prefix, const std::filesystem::path& output) {
+    require(!fs::exists(output), "source library test output must be fresh");
+    fs::create_directories(output);
+    sourceLibraryAdmission(prefix, output);
+    atomicWrite(output / "acceptance.json", canonical({{"status", "passed"},
+        {"pinned_source_libraries", true}, {"closed_compiler_transport", true},
+        {"inventory_hash_path_and_ownership_refusals", true},
+        {"header_and_compiled_publication", true}}));
+}
+
 void generateProjectFixture(const std::filesystem::path& prefix, const std::filesystem::path& output) {
     require(!fs::exists(output), "project fixture output must be fresh");
     fs::create_directories(output);
@@ -495,6 +682,7 @@ void projectContracts(const std::filesystem::path& prefix, const std::filesystem
     fs::create_directories(output);
     writeSources(output);
     admission(prefix, output);
+    sourceLibraryAdmission(prefix, output / "source-libraries");
     installedConsumer(prefix, output);
     atomicWrite(output / "acceptance.json", canonical({{"status", "passed"},
         {"project_discovery_and_import_closure", true}, {"stable_native_source_names", true},

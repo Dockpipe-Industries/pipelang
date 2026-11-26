@@ -204,6 +204,7 @@ void writeProjectFacetConsumer(const std::filesystem::path& root) {
 #include <limits>
 #include <vector>
 #include <pipelang/model/binary32_operations.hpp>
+#include <pipelang/model/context.hpp>
 #include <chrono>
 #include <thread>
 #include <memory>
@@ -391,10 +392,20 @@ inline void verifyParallelFacetNormals() {
         }
         pipelang::model::CancellationSource cancellation;
         cancellation.cancel();
-        require(native.ParallelNormals(inputs, cancellation.token()).is_cancelled() &&
-                group.ParallelNormals(inputs, cancellation.token()).is_cancelled() &&
+        require(native.ParallelNormals(inputs, cancellation.token()).is_success() &&
+                group.ParallelNormals(inputs, cancellation.token()).is_success() &&
                 native.Read() == 100 && group.Read() == 100,
-                "parallel helper cancellation lost outcome or committed owner mutation");
+                "parallel helper inferred cancellation from an unused authored token");
+        {
+            pipelang::model::ContextOwner authority;
+            pipelang::model::InvocationContextScope invocation(authority.capture().permit());
+            authority.invalidate();
+            require(native.ParallelNormals(inputs, {}).is_cancelled() &&
+                    group.ParallelNormals(inputs, {}).is_cancelled(),
+                    "parallel helper lost invocation-context cancellation");
+        }
+        require(native.Read() == 100 && group.Read() == 100,
+                "cancelled parallel helper committed owner mutation");
         auto faults = List<NormalInput>::Empty();
         auto firstFault = inputs.values()[0];
         firstFault.fault = 1;

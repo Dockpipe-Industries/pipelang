@@ -42,6 +42,18 @@ CompositionMethod CompositionFactoryProfile::checkedMethod(const std::string& id
     return found->second;
 }
 
+bool CompositionFactoryProfile::closedSourceInterfaceCall(const Expr& expression,
+        const CompositionOrigin& origin) const {
+    if (expression->resolution != "source_interface_call" && expression->resolution != "source_interface_async")
+        return false;
+    const auto contract = methods_.find(expression->callable);
+    if (contract == methods_.end() || !contract->second.owner->sourceInterface ||
+        contract->second.method->constructor ||
+        contract->second.method->asynchronous != (expression->resolution == "source_interface_async"))
+        refuse(origin, "unresolved checked source interface contract");
+    return true;
+}
+
 void CompositionFactoryProfile::admitFactoryCleanupSubtypes(const CompositionGraph& graph,
         const CompositionService& service) {
     for (const auto& candidate : program_.declarations) {
@@ -145,7 +157,8 @@ void CompositionFactoryProfile::inspectFactory(const std::string& identity, cons
                 !expression->children.empty() && !expression->children[0]->children.empty())
                 admitWrite(expression->children[0]->children[0]);
             pending.insert(pending.end(), expression->targets.begin(), expression->targets.end());
-            if (expression->targets.empty() && !expression->callable.empty() && methods_.contains(expression->callable))
+            if (expression->targets.empty() && !closedSourceInterfaceCall(expression, methodOrigin) &&
+                !expression->callable.empty())
                 pending.push_back(expression->callable);
             expressions.insert(expressions.end(), expression->children.begin(), expression->children.end());
         }
@@ -181,7 +194,7 @@ const std::vector<CompositionMethod>& CompositionFactoryProfile::methods(const T
     const auto* owner = declaration(type);
     while (owner) {
         for (const auto& method : owner->methods) {
-            if (method.constructor || !method.visible || method.protectedMember)
+            if (method.constructor || method.staticMethod || !method.visible || method.protectedMember)
                 continue;
             std::string signature = method.name;
             for (const auto& parameter : method.parameters)
@@ -260,7 +273,8 @@ void CompositionFactoryProfile::inspectExpression(const Expr& expression, const 
             refuse(origin, "constructor async work requires the later lifecycle profile");
         for (const auto& target : current->targets)
             queue(target, origin);
-        if (current->targets.empty() && !current->callable.empty() && methods_.contains(current->callable))
+        if (current->targets.empty() && !closedSourceInterfaceCall(current, origin) &&
+            !current->callable.empty())
             queue(current->callable, origin);
         pending.insert(pending.end(), current->children.begin(), current->children.end());
     }

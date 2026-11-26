@@ -310,8 +310,13 @@ public model Class RecursiveArrayHelper {
 )pipe";
     const auto compiled = process({nativeExecutable(prefix / "bin/pipelang-modelc").string()},
                                   invalid.dump(), std::chrono::seconds(45), 4U << 20);
-    require(compiled.exit == 0 && parseJson(compiled.output, 4U << 20).at("ok") == false,
-            "recursive private-array helper graph was accepted");
+    require(compiled.exit == 0, "recursive private-array request failed to execute");
+    const auto response = parseJson(compiled.output, 4U << 20);
+    require(response.at("ok") == true, "bounded recursive private-array source was refused");
+    for (const auto& item : response.at("manifest").at("nativeNumericExports")) {
+        require(item.at("owner") != "Numeric.RecursiveArrayHelper",
+                "recursive private-array closure escaped through an unguarded native export");
+    }
 }
 
 std::string nativeNumericCountedArrayConsumer()

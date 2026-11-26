@@ -25,6 +25,13 @@ struct ObjectRequired<ObjectRef<Tag>> {
     }
 };
 
+template<>
+struct ObjectRequired<std::shared_ptr<ContextOwner>> {
+    static void validate(const std::shared_ptr<ContextOwner>& value) {
+        pipelang::model::validate(value);
+    }
+};
+
 template<class T>
 struct ObjectRequired<Optional<T>> {
     static void validate(const typename ObjectStorage<Optional<T>>::Stored& value) {
@@ -109,10 +116,12 @@ public:
         using pipelang::model::validate;
         validate(root_.state());
         graph_.prepareCommit();
+        root_.requirePublication();
+        graph_.requirePublication();
         // Root validation, graph cloning and tracing precede publication.
         // Transaction's only publication operation is a nonthrowing state swap.
-        graph_.commit([this]() noexcept {
-            root_.commit();
+        graph_.publishUnchecked([this]() noexcept {
+            root_.publishUnchecked();
         });
     }
 

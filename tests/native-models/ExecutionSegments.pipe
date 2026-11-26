@@ -1,0 +1,139 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Interface SegmentHost {
+    Task<Result<int,string>> Pause(CancellationToken token);
+    Result<void,string> Mark(int value);
+}
+
+public Record WorkSeed {
+    public int iterations;
+}
+
+public Class SegmentMath {
+    public static pure int Loop(int iterations) {
+        int completed = 0;
+        while (completed < iterations)
+            completed = completed + 1;
+
+        return completed;
+    }
+}
+
+public source Interface ISegmentWork {
+    pure int Read(int iterations);
+    pure int Seed();
+    Task<Result<int,string>> ReadAsync(int iterations);
+}
+
+public Class SegmentWork : ISegmentWork {
+    private int initial;
+
+    public SegmentWork(WorkSeed seed) {
+        initial = SegmentMath.Loop(seed.iterations);
+    }
+
+    public pure int Read(int iterations) => SegmentMath.Loop(iterations);
+    public pure int Seed() => initial;
+
+    public async Task<Result<int,string>> ReadAsync(int iterations) {
+        int result = SegmentMath.Loop(iterations);
+        return Result<int,string>.Success(result);
+    }
+}
+
+public Class App {
+    private SegmentHost host;
+    private ISegmentWork work;
+    private SemaphoreSlim permits = SemaphoreSlim.Create(0, 1);
+    public int marker = 0;
+
+    public App(SegmentHost host) {
+        this.host = host;
+        work = new SegmentWork(WorkSeed(0));
+        Result<void,string> entered = host.Mark(0);
+    }
+
+    public pure int Query(int iterations) => work.Read(iterations);
+
+    public int Shared(int iterations) => work.Read(iterations) + work.Read(iterations);
+
+    public int Change(int iterations) {
+        marker = 41;
+        try {
+            return work.Read(iterations);
+        } finally {
+            Result<void,string> marked = host.Mark(7);
+        }
+    }
+
+    public void PrimaryFailure(int cleanupIterations) {
+        try {
+            throw Error("primary segment failure");
+        } finally {
+            int completed = SegmentMath.Loop(cleanupIterations);
+            Result<void,string> marked = host.Mark(completed);
+        }
+    }
+
+    private async Task<Result<int,string>> Immediate() {
+        return Result<int,string>.Success(0);
+    }
+
+    public async Task<Result<int,string>> ImmediateSegments(int iterations) {
+        marker = 51;
+        int first = SegmentMath.Loop(iterations);
+        Result<int,string> ready = await Immediate();
+        int second = SegmentMath.Loop(iterations);
+        return Result<int,string>.Success(first + second + ready.Value);
+    }
+
+    public async Task<Result<int,string>> SharedAsync(int iterations) {
+        int first = SegmentMath.Loop(iterations);
+        try {
+            Result<int,string> second = await work.ReadAsync(iterations);
+            if (second.IsFailure)
+                return Result<int,string>.Success(999);
+
+            return Result<int,string>.Success(first + second.Value);
+        } catch (Error error) {
+            return Result<int,string>.Success(998);
+        }
+    }
+
+    public async Task<Result<int,string>> HostSegments(int iterations, CancellationToken token) {
+        marker = 1;
+        try {
+            int first = SegmentMath.Loop(iterations);
+            Result<int,string> paused = await host.Pause(token);
+            if (!paused.IsSuccess)
+                return paused;
+
+            marker = 2;
+            int second = SegmentMath.Loop(iterations);
+            return Result<int,string>.Success(first + second);
+        } finally {
+            Result<void,string> marked = host.Mark(8);
+        }
+    }
+
+    public async Task<Result<int,string>> SemaphoreSegments(int iterations, CancellationToken token) {
+        int first = SegmentMath.Loop(iterations);
+        await permits.WaitAsync(token);
+        int second = SegmentMath.Loop(iterations);
+        return Result<int,string>.Success(first + second);
+    }
+
+    public void ReleasePermit() {
+        permits.Release();
+    }
+
+    public async Task<Result<int,string>> CleanupSegments() {
+        try {
+            return Result<int,string>.Success(3);
+        } finally {
+            int first = SegmentMath.Loop(5000);
+            Result<int,string> paused = await host.Pause(CancellationToken.None);
+            int second = SegmentMath.Loop(5000);
+            Result<void,string> marked = host.Mark(first + second);
+        }
+    }
+}

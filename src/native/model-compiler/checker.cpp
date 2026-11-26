@@ -27,7 +27,8 @@ const Type cancellationType{"CancellationToken", {}};
 
 class Checker {
 public:
-    explicit Checker(Program& program) : program_(program) {}
+    explicit Checker(Program& program, const GenericMemberResolver& genericMembers)
+        : program_(program), genericMembers_(genericMembers) {}
     void run() {
         for (auto& declaration : program_.declarations) {
             owner_ = &declaration;
@@ -36,7 +37,7 @@ public:
                 declaration.name == "Optional" || declaration.name == "List" || declaration.name == "CancellationToken" ||
                 declaration.name == "FixedArray" ||
                 declaration.name == "Atomic" || extended(declaration.name) || isConcurrentCollection(declaration.name) ||
-                isSynchronizationHandle(declaration.name))
+                isSynchronizationHandle(declaration.name) || declaration.name == "ContextOwner")
                 fail("duplicate or reserved type '" + declaration.name + "'", declaration.offset);
             types_[declaration.name] = &declaration;
         }
@@ -130,12 +131,26 @@ public:
                         fail("base initializer requires a base class", method.offset);
                     }
                     method.fieldInitializers.clear();
+                    // Initializers retain their declared member bindings while
+                    // preserving existing constructor inputs with distinct names.
+                    // Constructor bodies continue to prefer lexical parameters.
+                    const auto constructorParameters = locals_;
+                    if (program_.objectEnabled) {
+                        for (auto parameter = locals_.begin(); parameter != locals_.end();) {
+                            if (field(declaration, parameter->first) || constant(declaration, parameter->first))
+                                parameter = locals_.erase(parameter);
+                            else
+                                ++parameter;
+                        }
+                    }
                     for (const auto& field : declaration.fields) {
                         auto initializer = cloneInitializer(field.initializer);
                         if (initializer)
                             sameExpression(initializer, field.type);
                         method.fieldInitializers.push_back(std::move(initializer));
                     }
+                    if (program_.objectEnabled)
+                        locals_ = constructorParameters;
                 }
                 const auto flow = statements(method.body);
                 const Type expected = method.asynchronous ? method.result.arguments[0] : method.result;
@@ -280,16 +295,10 @@ private:
                 [&](const Type& implemented) { return implemented == expected; });
     }
     Type sequenceItem(const Type& sequence, std::size_t offset) const {
-        if (sequence.name == "ByteBuffer")
-            return Type{"uint32", {}};
         if (isConcurrentCollection(sequence.name) && method_->pure)
             fail("pure methods cannot observe concurrent collection state", offset);
-        if (sequence.name == "Dictionary" || sequence.name == "ConcurrentDictionary")
-            return {"KeyValuePair", sequence.arguments};
-        if (sequence.name == "List" || sequence.name == "Array" || sequence.name == "FixedArray" || sequence.name == "HashSet" ||
-            sequence.name == "Queue" || sequence.name == "Stack" ||
-            sequence.name == "ConcurrentQueue" || sequence.name == "ConcurrentStack")
-            return sequence.arguments.at(0);
+        if (const auto item = sequenceElementType(sequence))
+            return *item;
         fail("foreach requires an owned sequence collection", offset);
     }
     Expr cloneInitializer(const Expr& original) {
@@ -311,11 +320,19 @@ private:
         return found == types_.end() ? nullptr : found->second;
     }
     void type(const Type& value, std::size_t offset, bool allowVoid = false, bool allowTask = false) {
+        if (value.name == "var" && !declaration("var"))
+            fail("var is only valid for inferred locals; API types must be explicit", offset);
+
         if (value.fixedExtent && value.name != "FixedArray")
             fail("only FixedArray accepts a literal extent", offset);
         if (value.name == "void") {
             if (!allowVoid || !value.arguments.empty())
                 fail("void is not a value type", offset);
+            return;
+        }
+        if (value.name == "ContextOwner") {
+            if (!value.arguments.empty())
+                fail("ContextOwner does not accept type arguments", offset);
             return;
         }
         if (isSynchronizationHandle(value.name)) {
@@ -639,6 +656,8 @@ private:
                 fail("exported model snapshot fields must recursively contain owned values", field.offset);
             if (isConcurrentCollection(field.type.name) && field.visible)
                 fail("concurrent collection fields must be private and cannot enter owned snapshots", field.offset);
+            if (field.type.name == "ContextOwner" && (field.visible || field.protectedMember))
+                fail("context owner fields must be private and cannot enter owned snapshots", field.offset);
             if (isSynchronizationHandle(field.type.name) && field.visible)
                 fail("synchronization fields must be private and cannot enter owned snapshots", field.offset);
             if (field.type.name == "Atomic" && field.visible)
@@ -666,6 +685,9 @@ private:
                 method.identity = owner.name + '.' + method.identity;
             if (!identities.insert(method.identity).second)
                 fail("duplicate method signature; return types do not distinguish overloads", method.offset);
+            if (method.staticMethod && (!program_.objectEnabled || owner.kind != "Class" ||
+                method.constructor || method.virtualMethod || method.overrideMethod))
+                fail("static methods require an ordinary v3 class method without constructor or virtual dispatch", method.offset);
             if (method.protectedMember && !objectClass(owner))
                 fail("protected members require an ordinary source class", method.offset);
             if (!program_.objectEnabled && (method.virtualMethod || method.overrideMethod || method.baseConstructor))
@@ -684,6 +706,10 @@ private:
                     fail("pure method requires a synchronous value return", method.offset);
                 if (isConcurrentCollection(method.result.name))
                     fail("methods cannot return concurrent collection handles", method.offset);
+                if (method.result.name == "ContextOwner" &&
+                    (owner.kind != "Class" || !method.visible || !method.pure ||
+                     method.asynchronous || !method.parameters.empty() || !method.typeParameters.empty()))
+                    fail("ContextOwner returns require a public synchronous pure zero-argument getter", method.offset);
                 if (isSynchronizationHandle(method.result.name))
                     fail("methods cannot return synchronization handles", method.offset);
                 if (service(method.result) || method.result.name == "Atomic" || method.result.name == "CancellationToken")
@@ -703,6 +729,8 @@ private:
             std::set<std::string> parameters;
             for (const auto& parameter : method.parameters) {
                 type(parameter.type, parameter.offset);
+                if (parameter.type.name == "ContextOwner")
+                    fail("context owners are framework bindings, not method arguments", parameter.offset);
                 if (!parameters.insert(parameter.name).second)
                     fail("duplicate parameter", parameter.offset);
                 if (owner.kind == "Interface" && !owner.sourceInterface && containsResultInterface(parameter.type))
@@ -716,7 +744,7 @@ private:
                     fail("pure host arguments require deeply owned values without object references or handles", parameter.offset);
                 if (service(parameter.type) && !method.constructor)
                     fail("service references enter through constructors only", parameter.offset);
-                if (field(owner, parameter.name))
+                if (!program_.objectEnabled && field(owner, parameter.name))
                     fail("parameters must not shadow model fields", parameter.offset);
             }
         }
@@ -809,6 +837,14 @@ private:
         return nullptr;
     }
     void checkImplementations() {
+        // A source contract has one closed implementation set even when that
+        // set is empty. Missing metadata must not silently become EMPTY later.
+        for (const auto& contract : program_.declarations) {
+            if (!contract.sourceInterface)
+                continue;
+            for (const auto& required : contract.methods)
+                dispatch_.try_emplace(required.identity);
+        }
         for (auto& concrete : program_.declarations) {
             if (concrete.sourceInterface)
                 continue;
@@ -825,7 +861,7 @@ private:
                 for (const auto& required : contract->methods) {
                     Method* found = nullptr;
                     for (auto* candidate : effectiveMethods(concrete)) {
-                        if (!candidate->constructor && sameSlot(*candidate, required)) {
+                        if (!candidate->constructor && !candidate->staticMethod && sameSlot(*candidate, required)) {
                             found = candidate;
                             break;
                         }
@@ -855,11 +891,13 @@ private:
             candidates.push_back(&method);
         return overload(candidates, name, node);
     }
-    Method* overload(Declaration& owner, const std::string& name, const Expr& node) {
+    Method* overload(Declaration& owner, const std::string& name, const Expr& node,
+                     const std::string& diagnosticName = {}) {
         auto candidates = effectiveMethods(owner);
-        return overload(candidates, name, node);
+        return overload(candidates, name, node, diagnosticName);
     }
-    Method* overload(const std::vector<Method*>& methods, const std::string& name, const Expr& node) {
+    Method* overload(const std::vector<Method*>& methods, const std::string& name, const Expr& node,
+                     const std::string& diagnosticName = {}) {
         std::vector<Type> actual;
         for (std::size_t index = 1; index < node->children.size(); ++index)
             actual.push_back(expression(node->children[index]));
@@ -896,7 +934,7 @@ private:
             }
         }
         if (!selected)
-            fail("no exact matching method overload for '" + name + "'", node->offset);
+            fail("no exact matching method overload for '" + (diagnosticName.empty() ? name : diagnosticName) + "'", node->offset);
         for (std::size_t index = 0; index < actual.size(); ++index) {
             if (actual[index] != selected->parameters[index].type)
                 node->children[index + 1]->convertTo = selected->parameters[index].type;
@@ -955,17 +993,19 @@ private:
         return receiver;
     }
     Type objectCall(const Expr& node, const Type& receiverType, bool allowServiceCall,
-                    const Method* preselected = nullptr) {
+                    const Method* preselected = nullptr, const std::string& diagnosticName = {}) {
         if (parallelDepth_ != 0 && !node->implicitObjectCall)
             fail("owner-confined object calls cannot enter parallel workers", node->offset);
         auto* receiver = declaration(receiverType.name);
         const auto& target = node->children[0];
-        const auto* selected = preselected ? preselected : overload(*receiver, target->text, node);
+        const auto* selected = preselected ? preselected : overload(*receiver, target->text, node, diagnosticName);
         const auto& declaring = declaringMethod(*selected);
         if (parallelDepth_ != 0) {
             checkStatelessWorkerSelection(*selected, node->offset);
             node->statelessWorkerCall = true;
         }
+        if (selected->staticMethod)
+            fail("static methods require a type-qualified call", target->offset);
         if (selected->constructor || !accessible(selected->visible, selected->protectedMember, declaring))
             fail("unknown or private object method", target->offset);
         if (method_->pure && !selected->pure)
@@ -975,9 +1015,10 @@ private:
         node->owner = declaring.name;
         node->callable = selected->identity;
         if (receiver->sourceInterface) {
-            multipleTargets(node, dispatch_[selected->identity]);
-            if (node->targets.empty())
-                fail("source interface call has no closed implementation targets", target->offset);
+            const auto implementations = dispatch_.find(selected->identity);
+            if (implementations == dispatch_.end())
+                fail("source interface call lost its checked closed implementation set", target->offset);
+            multipleTargets(node, implementations->second);
             node->resolution = selected->asynchronous ? "source_interface_async" : "source_interface_call";
         } else if (selected->virtualMethod && target->children[0]->kind != "base") {
             multipleTargets(node, dispatch_[selected->identity]);
@@ -989,7 +1030,27 @@ private:
         trackCalls(node->targets);
         return selected->result;
     }
+    bool explicitModelMember(const Expr& node) const {
+        return program_.objectEnabled && owner_->modelExported &&
+            (node->kind == "member" || node->kind == "generic_member") &&
+            node->children.size() == 1 && node->children.front()->kind == "this";
+    }
+
+    void bindModelMember(const Expr& node) const {
+        if (method_->staticMethod)
+            fail("static methods cannot access this or instance members", node->offset);
+
+        // A native owner has a fixed receiver, not an ObjectRef that can escape.
+        // Retain explicit selection as a distinct bound leaf so a later check
+        // cannot resolve this member as a same-name parameter or constant.
+        node->kind = "model_member";
+        node->children.clear();
+        node->owner = owner_->name;
+    }
+
     Type expression(const Expr& node, bool allowAwait = false, bool allowServiceCall = false) {
+        if (node->kind == "member" && explicitModelMember(node))
+            bindModelMember(node);
         Type result;
         if (node->kind == "propagate") {
             if (!method_ || method_->constructor)
@@ -1047,12 +1108,16 @@ private:
         } else if (node->kind == "boolean") {
             result = booleanType;
         } else if (node->kind == "base") {
+            if (method_->staticMethod)
+                fail("static methods cannot access base", node->offset);
             if (!objectClass(*owner_) || owner_->baseClass.empty() || checkingBaseArguments_ || parallelDepth_ != 0)
                 fail("base requires an ordinary derived instance outside workers and base arguments", node->offset);
             result = nominal(*declaration(owner_->baseClass));
             node->resolution = "base";
             node->owner = owner_->baseClass;
         } else if (node->kind == "this") {
+            if (method_->staticMethod)
+                fail("static methods cannot access this", node->offset);
             if (checkingBaseArguments_)
                 fail("base arguments cannot access the instance", node->offset);
             if (!objectClass(*owner_))
@@ -1062,15 +1127,23 @@ private:
             result = nominal(*owner_);
             node->resolution = "this";
             node->owner = owner_->name;
-        } else if (node->kind == "name") {
-            if (auto* value = constant(*owner_, node->text))
-                return constantExpression(node, *value);
-            if (auto local = locals_.find(node->text); local != locals_.end()) {
+        } else if (node->kind == "name" || node->kind == "model_member") {
+            const bool lexicalName = node->kind == "name";
+            if (lexicalName && node->text == inferringLocal_)
+                fail("cannot infer a local from its own initializer", node->offset);
+
+            if (lexicalName && (!program_.objectEnabled || !locals_.contains(node->text))) {
+                if (auto* value = constant(*owner_, node->text))
+                    return constantExpression(node, *value);
+            }
+            if (auto local = locals_.find(node->text); lexicalName && local != locals_.end()) {
                 result = local->second;
                 node->resolution = "local";
                 if (parallelDepth_ != 0 && parallelOuter_.contains(node->text))
                     parallelUsed_.insert(node->text);
             } else if (const auto* found = field(*owner_, node->text)) {
+                if (method_->staticMethod)
+                    fail("static methods cannot access instance fields", node->offset);
                 if (checkingConstant_)
                     fail("constant initializer cannot reference model state", node->offset);
                 if (checkingBaseArguments_ || !accessible(found->visible, found->protectedMember,
@@ -1084,6 +1157,8 @@ private:
             } else {
                 fail("unknown value '" + node->text + "'", node->offset);
             }
+            if (parallelDepth_ != 0 && result.name == "ContextOwner")
+                fail("context owners cannot enter parallel workers", node->offset);
             if (parallelDepth_ != 0 && (node->resolution == "object_field" || referenceBearing(result)))
                 fail("owner-confined object references cannot enter parallel workers", node->offset);
         } else if (node->kind == "unary") {
@@ -1200,7 +1275,9 @@ private:
                 node->type = result;
                 return result;
             }
-            const auto* named = receiver->kind == "name" ? declaration(receiver->text) : nullptr;
+            const bool lexicalReceiver = program_.objectEnabled && receiver->kind == "name" &&
+                (locals_.contains(receiver->text) || field(*owner_, receiver->text));
+            const auto* named = receiver->kind == "name" && !lexicalReceiver ? declaration(receiver->text) : nullptr;
             if (named) {
                 if (auto* value = constant(*declaration(named->name), node->text))
                     return constantExpression(node, *value);
@@ -1337,7 +1414,7 @@ private:
                 fail("lock bodies cannot suspend", node->offset);
             if (parallelDepth_ != 0)
                 fail("parallel workers cannot await", node->offset);
-            if (finallyDepth_ != 0)
+            if (finallyDepth_ != 0 && !program_.objectEnabled)
                 fail("finally cannot suspend", node->offset);
             if (!allowAwait || !method_->asynchronous)
                 fail("await must be a complete local initializer or assignment in an async method", node->offset);
@@ -1395,25 +1472,68 @@ private:
         return unsignedType;
     }
 
+    Type staticCall(const Expr& node, const Method& selected, bool allowServiceCall) {
+        const auto& declaring = declaringMethod(selected);
+        if (!accessible(selected.visible, selected.protectedMember, declaring))
+            fail("unknown or private static method", node->children[0]->offset);
+
+        if (method_->pure && !selected.pure)
+            fail("pure methods cannot call static effects", node->offset);
+
+        if (selected.asynchronous && (!allowServiceCall || !method_->asynchronous))
+            fail("async static calls must be directly awaited in an async method", node->offset);
+
+        if (parallelDepth_ != 0)
+            fail("static calls are not admitted in parallel workers", node->offset);
+
+        node->resolution = selected.asynchronous ? "static_async" : "static_call";
+        node->owner = declaring.name;
+        node->callable = selected.identity;
+        singleTarget(node, selected.identity);
+        trackCalls(node->targets);
+        return selected.result;
+    }
+
+    Declaration* qualifiedCallOwner(const Expr& receiver) const {
+        if (receiver->kind != "name" || locals_.contains(receiver->text) || field(*owner_, receiver->text))
+            return nullptr;
+
+        auto* owner = declaration(receiver->text);
+        return owner && owner->kind == "Class" ? owner : nullptr;
+    }
+
     Type call(const Expr& node, bool allowServiceCall) {
         const auto& target = node->children[0];
-        if (target->kind == "name") {
-            if (target->text == "Error") {
+        if (explicitModelMember(target)) {
+            if (target->kind == "generic_member") {
+                if (!genericMembers_)
+                    fail("generic instance members require closed specialization resolution", target->offset);
+                target->text = genericMembers_(owner_->name, target->text,
+                    target->typeArguments, *owner_, target->offset);
+                target->typeArguments.clear();
+            }
+            bindModelMember(target);
+        }
+        if (target->kind == "name" || target->kind == "model_member") {
+            if (target->kind == "name" && target->text == "Error") {
                 arguments(node, {{stringType, "message", true, node->offset}});
                 node->resolution = "error_construct";
                 return errorType;
             }
-            const auto* record = declaration(target->text);
+            const auto* record = target->kind == "name" ? declaration(target->text) : nullptr;
             if (record && record->kind == "Record") {
                 arguments(node, record->fields);
                 node->resolution = "construct";
                 return nominal(*record);
             }
-            if (checkingBaseArguments_)
-                fail("base arguments cannot call instance methods", node->offset);
+
             const auto* found = overload(*owner_, target->text, node);
             if (!found || found->constructor)
                 fail("unknown local method", target->offset);
+            if (found->staticMethod)
+                return staticCall(node, *found, allowServiceCall);
+            if (method_->staticMethod || checkingBaseArguments_)
+                fail("static methods and base arguments cannot call instance methods", node->offset);
             if (found->asynchronous && (!allowServiceCall || !method_->asynchronous))
                 fail("local async calls must be directly awaited in an async method", target->offset);
             if (method_->pure && !found->pure)
@@ -1437,6 +1557,35 @@ private:
             trackCalls(node->targets);
             return found->result;
         }
+        if (target->kind == "generic_member" && qualifiedCallOwner(target->children[0])) {
+            if (!genericMembers_)
+                fail("generic static members require closed specialization resolution", target->offset);
+            const auto* receiver = qualifiedCallOwner(target->children[0]);
+            target->text = genericMembers_(receiver->name, target->text,
+                target->typeArguments, *owner_, target->offset);
+            target->typeArguments.clear();
+            target->kind = "member";
+        }
+        if (target->kind == "generic_member") {
+            if (!genericMembers_)
+                fail("generic instance members require closed specialization resolution", target->offset);
+            const auto receiverType = expression(target->children[0]);
+            const auto* receiver = declaration(receiverType.name);
+            if (!receiver || !objectClass(*receiver))
+                fail("generic instance calls require a concrete source class receiver", target->offset);
+            std::string diagnosticName = target->text + '<';
+            for (std::size_t index = 0; index < target->typeArguments.size(); ++index) {
+                if (index != 0)
+                    diagnosticName += ',';
+                diagnosticName += target->typeArguments[index].displayText();
+            }
+            diagnosticName += '>';
+            target->text = genericMembers_(receiverType.name, target->text,
+                target->typeArguments, *owner_, target->offset);
+            target->typeArguments.clear();
+            target->kind = "member";
+            return objectCall(node, receiverType, allowServiceCall, nullptr, diagnosticName);
+        }
         if (target->kind != "member")
             fail("unsupported call target", node->offset);
         const auto& receiver = target->children[0];
@@ -1451,10 +1600,11 @@ private:
             node->resolution = "floating_environment_observe";
             return unsignedType;
         }
-        auto* qualifiedOwner = receiver->kind == "name" &&
-            !locals_.contains(receiver->text) && !field(*owner_, receiver->text)
-            ? declaration(receiver->text) : nullptr;
+        auto* qualifiedOwner = qualifiedCallOwner(receiver);
         if (qualifiedOwner && qualifiedOwner->kind == "Class") {
+            const auto* staticCandidate = overload(*qualifiedOwner, target->text, node);
+            if (staticCandidate->staticMethod)
+                return staticCall(node, *staticCandidate, allowServiceCall);
             if (parallelDepth_ != 0)
                 fail("qualified pure calls are not admitted in parallel workers", node->offset);
             // A fieldless exported model has a receiver-free pure facet. This
@@ -1470,7 +1620,7 @@ private:
                     candidate.baseConstructor || !candidate.fieldInitializers.empty()))
                     fail("qualified pure calls cannot bypass authored constructor policy", node->offset);
             }
-            const auto* selected = overload(*qualifiedOwner, target->text, node);
+            const auto* selected = staticCandidate;
             if (!selected || !selected->visible || !selected->pure || selected->asynchronous ||
                 selected->constructor || selected->virtualMethod || selected->overrideMethod ||
                 !selected->typeParameters.empty() || selected->sourceName.find('<') != std::string::npos)
@@ -1481,6 +1631,16 @@ private:
             singleTarget(node, selected->identity);
             trackCalls(node->targets);
             return selected->result;
+        }
+        if (receiver->kind == "type" && receiver->type.name == "ContextOwner") {
+            type(receiver->type, receiver->offset);
+            if (method_->pure || parallelDepth_ != 0)
+                fail("context owner construction requires an owner effect", node->offset);
+            if (target->text != "Create")
+                fail("unknown context owner constructor", target->offset);
+            arguments(node, {});
+            node->resolution = "context_construct";
+            return receiver->type;
         }
         if (receiver->kind == "type" && isSynchronizationHandle(receiver->type.name)) {
             type(receiver->type, receiver->offset);
@@ -1726,6 +1886,20 @@ private:
         const auto receiverType = expression(receiver);
         if (objectReference(receiverType))
             return objectCall(node, receiverType, allowServiceCall);
+        if (receiverType.name == "ContextOwner") {
+            if (method_->pure || parallelDepth_ != 0)
+                fail("context owner mutation requires an owner effect", node->offset);
+            if (target->text != "Replace" && target->text != "Invalidate" && target->text != "Close")
+                fail("unknown context owner operation", target->offset);
+            arguments(node, {});
+            if (target->text == "Replace")
+                node->resolution = "context_replace";
+            else if (target->text == "Invalidate")
+                node->resolution = "context_invalidate";
+            else
+                node->resolution = "context_close";
+            return voidType;
+        }
         if (receiverType.name == "SemaphoreSlim")
             return semaphoreCall(node, allowServiceCall);
         if (isConcurrentCollection(receiverType.name))
@@ -1827,7 +2001,8 @@ private:
         if (asynchronous) {
             if (!allowServiceCall || !method_->asynchronous)
                 fail("SemaphoreSlim.WaitAsync must be directly awaited in an async method", node->offset);
-            if (lockDepth_ != 0 || finallyDepth_ != 0 || parallelDepth_ != 0)
+            if (lockDepth_ != 0 || parallelDepth_ != 0 ||
+                (finallyDepth_ != 0 && !program_.objectEnabled))
                 fail("SemaphoreSlim.WaitAsync cannot suspend in lock, finally or parallel work", node->offset);
         } else if (method_->asynchronous || lockDepth_ != 0 || finallyDepth_ != 0) {
             fail("blocking SemaphoreSlim.Wait is forbidden in async methods, lock bodies and finally", node->offset);
@@ -2037,7 +2212,8 @@ private:
         return true;
     }
 
-    void checkStatelessObjectWorker(Method& target, std::set<std::string>& checked) {
+    void checkStatelessObjectWorkerBody(Method& target, std::set<std::string>& checked,
+                                        std::vector<Method*>& pending) {
         if (!checked.insert(target.identity).second)
             return;
         OwnerContext scope(owner_, methodOwner(target));
@@ -2057,7 +2233,7 @@ private:
             if (node->resolution == "object_call" && node->implicitObjectCall) {
                 auto& callee = *method(node->callable);
                 checkStatelessWorkerSelection(callee, node->offset);
-                checkStatelessObjectWorker(callee, checked);
+                pending.push_back(&callee);
                 node->statelessWorkerCall = true;
                 // The synthetic `this` is not a value capture. The admitted
                 // worker function has no receiver; all authored arguments still
@@ -2068,8 +2244,8 @@ private:
             }
             if (node->resolution == "floating_environment_observe")
                 fail("parallel helpers cannot observe the floating environment", node->offset);
-            if (node->resolution == "qualified_pure")
-                fail("parallel helpers cannot use qualified pure calls", node->offset);
+            if (node->resolution == "qualified_pure" || node->resolution == "static_call" || node->resolution == "static_async")
+                fail("parallel helpers cannot use qualified pure or static calls", node->offset);
             if (!statelessWorkerValue(node->type) || node->resolution == "field" ||
                 node->resolution == "object_field" || node->resolution == "this" ||
                 node->resolution == "base" || node->resolution == "service" ||
@@ -2099,9 +2275,19 @@ private:
         target.statelessWorkerCallable = true;
     }
 
+    void checkStatelessObjectWorker(Method& root, std::set<std::string>& checked) {
+        std::vector<Method*> pending{&root};
+        while (!pending.empty()) {
+            auto* target = pending.back();
+            pending.pop_back();
+            checkStatelessObjectWorkerBody(*target, checked, pending);
+        }
+    }
+
     void checkWorkerCalls(Declaration& owner) {
         std::set<std::string> checked;
         std::set<std::string> statelessChecked;
+        std::vector<Method*> pendingWorkers;
         std::function<void(Method&)> worker;
         std::function<void(const Expr&)> inspectExpression;
         std::function<void(const std::vector<Statement>&)> inspectStatements;
@@ -2110,18 +2296,20 @@ private:
                 return;
             if (node->resolution == "floating_environment_observe")
                 fail("parallel helpers cannot observe the floating environment", node->offset);
-            if (node->resolution == "qualified_pure")
-                fail("parallel helpers cannot use qualified pure calls", node->offset);
+            if (node->resolution == "qualified_pure" || node->resolution == "static_call" || node->resolution == "static_async")
+                fail("parallel helpers cannot use qualified pure or static calls", node->offset);
+            if (node->type.name == "ContextOwner" || node->resolution.starts_with("context_"))
+                fail("parallel helper cannot access context owners", node->offset);
             if (referenceBearing(node->type) || node->resolution == "this" || node->resolution == "object_field")
                 fail("parallel helper cannot access owner-confined objects", node->offset);
             if (node->resolution == "service" || node->resolution == "host" || node->resolution == "host_sync" || node->resolution == "local_async" || node->kind == "await")
                 fail("parallel helper cannot access host services or suspend", node->offset);
             if (node->kind == "call" && (node->resolution == "pure" || node->resolution == "effect")) {
                 if (node->targets.empty())
-                    worker(*method(node->callable));
+                    pendingWorkers.push_back(method(node->callable));
                 else {
                     for (const auto& identity : node->targets)
-                        worker(*method(identity));
+                        pendingWorkers.push_back(method(identity));
                 }
             }
             if ((node->resolution == "list_add" || node->resolution.starts_with("collection_mutate_")) && node->kind == "call") {
@@ -2169,9 +2357,15 @@ private:
         };
         for (const auto& target : owner.methods) {
             for (const auto& identity : target.parallelCalls)
-                worker(*method(identity));
+                pendingWorkers.push_back(method(identity));
+        }
+        while (!pendingWorkers.empty()) {
+            auto* target = pendingWorkers.back();
+            pendingWorkers.pop_back();
+            worker(*target);
         }
         std::set<std::string> cleanupChecked;
+        std::vector<const Method*> pendingCleanup;
         std::function<void(const Method&)> cleanup = [&](const Method& target) {
             if (!cleanupChecked.insert(target.identity).second)
                 return;
@@ -2189,17 +2383,23 @@ private:
             };
             inspect(target.body);
             for (const auto& identity : target.calls)
-                cleanup(*method(identity));
+                pendingCleanup.push_back(method(identity));
         };
         for (const auto& target : owner.methods) {
             for (const auto& identity : target.cleanupCalls)
-                cleanup(*method(identity));
+                pendingCleanup.push_back(method(identity));
+        }
+        while (!pendingCleanup.empty()) {
+            const auto* target = pendingCleanup.back();
+            pendingCleanup.pop_back();
+            cleanup(*target);
         }
     }
     void checkSynchronizationCalls(const Declaration& owner) {
         enum class Context { Async, Lock, Cleanup };
         auto checkClosure = [&](const Method& root, Context context) {
             std::set<std::string> checked;
+            std::vector<const Method*> pending{&root};
             std::function<void(const Method&)> visit;
             std::function<void(const Expr&)> inspectExpression;
             std::function<void(const std::vector<Statement>&)> inspectStatements;
@@ -2241,9 +2441,13 @@ private:
                 for (const auto& initializer : target.fieldInitializers)
                     inspectExpression(initializer);
                 for (const auto& identity : target.calls)
-                    visit(*method(identity));
+                    pending.push_back(method(identity));
             };
-            visit(root);
+            while (!pending.empty()) {
+                const auto* target = pending.back();
+                pending.pop_back();
+                visit(*target);
+            }
         };
         for (const auto& target : owner.methods) {
             if (target.asynchronous)
@@ -2277,7 +2481,8 @@ private:
                 fail("object host service identity is fixed by its constructor", root->offset);
             return;
         }
-        if (root->kind != "name" || (root->resolution != "field" && root->resolution != "local" && root->resolution != "service"))
+        if ((root->kind != "name" && root->kind != "model_member") ||
+            (root->resolution != "field" && root->resolution != "local" && root->resolution != "service"))
             fail("invalid assignment target", root->offset);
         if (root->resolution == "local" &&
             std::find(caughtErrors_.begin(), caughtErrors_.end(), root->text) != caughtErrors_.end())
@@ -2286,6 +2491,8 @@ private:
             fail("parallel workers cannot mutate ordinary outer captures or model state", root->offset);
         if (root->resolution == "field" && isConcurrentCollection(root->type.name) && !method_->constructor)
             fail("concurrent collection field identity is fixed by the constructor", root->offset);
+        if (root->resolution == "field" && root->type.name == "ContextOwner" && !method_->constructor)
+            fail("context owner field identity is fixed by the constructor", root->offset);
         if (root->resolution == "field" && isSynchronizationHandle(root->type.name) && !method_->constructor)
             fail("synchronization field identity is fixed by the constructor", root->offset);
         if (root->resolution == "field" && root->type.name == "Atomic" && !method_->constructor)
@@ -2307,6 +2514,17 @@ private:
         Broken = 8,
         Continued = 16
     };
+    unsigned loopExitFlow(const Expr& condition, unsigned bodyFlow) const {
+        unsigned exits = bodyFlow & (Returned | Thrown);
+        const bool literalTrue = program_.objectEnabled && condition &&
+            condition->kind == "boolean" && condition->text == "true";
+        // Fallthrough/continue in a literal-true body return to the loop header.
+        // Only a break targeting this loop reaches the statement after it.
+        // Nested loops have already consumed their own break/continue paths.
+        if (!literalTrue || (bodyFlow & Broken) != 0)
+            exits |= Fallthrough;
+        return exits;
+    }
     unsigned statements(std::vector<Statement>& body) {
         unsigned flow = Fallthrough;
         for (auto& statement : body) {
@@ -2314,11 +2532,34 @@ private:
                 fail("unreachable statement", statement.offset);
             unsigned next = Fallthrough;
             if (statement.kind == "local") {
+                if (statement.type.name.empty()) {
+                    if (const auto* named = declaration("var"))
+                        statement.type = nominal(*named);
+                }
+                const bool inferred = statement.type.name.empty();
+                if (inferred) {
+                    if (locals_.contains(statement.name) || field(*owner_, statement.name))
+                        fail("local must have a unique unshadowed name", statement.offset);
+                    if (!statement.expression)
+                        fail("var local declarations require an initializer", statement.offset);
+
+                    statement.inferredType = true;
+                    inferringLocal_ = statement.name;
+                    statement.type = expression(statement.expression, true);
+                    inferringLocal_.clear();
+                    if (statement.type.name == "$null")
+                        fail("cannot infer var from null; declare an explicit nullable type", statement.offset);
+                    if (statement.type.name.empty() || statement.type.name == "void")
+                        fail("var initializer must resolve to a non-void static type", statement.offset);
+                }
+
                 type(statement.type, statement.offset);
                 if ((!sourceValue(statement.type) && !isSharedHandle(statement.type)) ||
                     locals_.contains(statement.name) || field(*owner_, statement.name))
                     fail("local must be an owned value with a unique unshadowed name", statement.offset);
-                sameExpression(statement.expression, statement.type, true);
+                if (!inferred)
+                    sameExpression(statement.expression, statement.type, true);
+
                 locals_[statement.name] = statement.type;
             } else if (statement.kind == "expression") {
                 const bool awaited = statement.expression->kind == "await";
@@ -2362,8 +2603,17 @@ private:
             } else if (statement.kind == "parallel_foreach") {
                 if (method_->pure || parallelDepth_ != 0 || finallyDepth_ != 0 || lockDepth_ != 0)
                     fail("parallel foreach requires an effect method outside workers, cleanup and lock bodies", statement.offset);
-                type(statement.type, statement.offset);
                 const auto sequence = expression(statement.expression);
+                if (statement.type.name.empty()) {
+                    if (const auto* named = declaration("var"))
+                        statement.type = nominal(*named);
+                    else {
+                        statement.type = sequenceItem(sequence, statement.offset);
+                        statement.inferredType = true;
+                    }
+                }
+
+                type(statement.type, statement.offset);
                 if (sequence.name == "ByteBuffer")
                     fail("parallel foreach does not support ByteBuffer inputs", statement.offset);
                 same(sequenceItem(sequence, statement.offset), statement.type, statement.offset);
@@ -2412,16 +2662,24 @@ private:
                 const auto iterationFlow = statements(statement.iteration);
                 --loopDepth_;
                 locals_ = std::move(outer);
-                // As with while, even a constant condition does not establish
-                // a return. Loop-local break/continue are consumed here.
-                next = Fallthrough | ((initializationFlow | loopFlow | iterationFlow) & (Returned | Thrown));
+                next = loopExitFlow(statement.expression, loopFlow) |
+                    ((initializationFlow | iterationFlow) & (Returned | Thrown));
             } else if (statement.kind == "while" || statement.kind == "foreach") {
                 auto outer = locals_;
                 if (statement.kind == "while") {
                     same(expression(statement.expression), booleanType, statement.offset);
                 } else {
-                    type(statement.type, statement.offset);
                     const auto itemType = sequenceItem(expression(statement.expression), statement.offset);
+                    if (statement.type.name.empty()) {
+                        if (const auto* named = declaration("var"))
+                            statement.type = nominal(*named);
+                        else {
+                            statement.type = itemType;
+                            statement.inferredType = true;
+                        }
+                    }
+
+                    type(statement.type, statement.offset);
                     same(itemType, statement.type, statement.offset);
                     if (itemType != statement.type)
                         statement.itemConvertTo = statement.type;
@@ -2433,9 +2691,10 @@ private:
                 const auto loopFlow = statements(statement.body);
                 --loopDepth_;
                 locals_ = std::move(outer);
-                // A loop may execute zero times. Local break/continue are
-                // consumed here rather than proving an enclosing return.
-                next = Fallthrough | (loopFlow & (Returned | Thrown));
+                if (statement.kind == "while")
+                    next = loopExitFlow(statement.expression, loopFlow);
+                else
+                    next = Fallthrough | (loopFlow & (Returned | Thrown));
             } else if (statement.kind == "lock") {
                 if (method_->pure)
                     fail("pure methods cannot acquire locks", statement.offset);
@@ -2463,6 +2722,7 @@ private:
                 statement.bodyFallsThrough = (next & Fallthrough) != 0;
                 locals_ = outer;
                 if (!statement.name.empty()) {
+                    type(statement.type, statement.offset);
                     same(statement.type, errorType, statement.offset);
                     if (locals_.contains(statement.name) || field(*owner_, statement.name))
                         fail("catch requires a unique unshadowed Error binding", statement.offset);
@@ -2608,7 +2868,12 @@ private:
                 node->resolution == "object_async" || node->resolution == "source_interface_call" ||
                 node->resolution == "source_interface_async" || node->resolution == "class_virtual_call" ||
                 node->resolution == "class_virtual_async";
-            if (localCall || objectCall) {
+            // v3 executes calls against an inherited runtime work budget and
+            // immutable ancestry. The closed target union still owns effect
+            // and worker checks, but is not a proof of an actual receiver path.
+            // Retain per-body structural admission here and frozen expanded
+            // call-graph admission for earlier profiles.
+            if (!program_.objectEnabled && (localCall || objectCall)) {
                 std::size_t maximum = 0;
                 if (node->targets.empty())
                     maximum = visit(*this->method(node->callable)).work;
@@ -2640,13 +2905,13 @@ private:
                 fail("recursive local call graph", method.offset);
             if (auto found = costs.find(method.identity); found != costs.end())
                 return found->second;
-            if (program_.objectEnabled && visiting.size() >= 32)
-                fail("local call depth limit exceeded", method.offset);
             visiting.insert(method.identity);
             Cost cost;
             cost.depth = 1;
-            for (const auto& name : method.calls)
-                cost.depth = std::max(cost.depth, visit(*this->method(name)).depth + 1);
+            if (!program_.objectEnabled) {
+                for (const auto& name : method.calls)
+                    cost.depth = std::max(cost.depth, visit(*this->method(name)).depth + 1);
+            }
             if (cost.depth > 32)
                 fail("local call depth limit exceeded", method.offset);
             cost.work = statementCost(method.body);
@@ -2668,6 +2933,7 @@ private:
     std::size_t callEdges_ = 0;
     std::size_t callIdentityBytes_ = 0;
     Program& program_;
+    const GenericMemberResolver& genericMembers_;
     std::map<const Field*, unsigned> constantStates_;
     unsigned constantDepth_ = 0;
     bool checkingConstant_ = false;
@@ -2677,6 +2943,7 @@ private:
     Declaration* owner_ = nullptr;
     Method* method_ = nullptr;
     std::map<std::string, Type> locals_;
+    std::string inferringLocal_;
     unsigned loopDepth_ = 0;
     unsigned finallyDepth_ = 0;
     unsigned parallelDepth_ = 0;
@@ -2688,8 +2955,8 @@ private:
 
 }
 
-void check(Program& program) {
-    Checker(program).run();
+void check(Program& program, const GenericMemberResolver& genericMembers) {
+    Checker(program, genericMembers).run();
 }
 
 }

@@ -18,7 +18,7 @@ cp "$PIPELANG_NATIVE_BOOTSTRAP_ARCHIVE" "$bootstrap/seed.tar"
 test "$(sha256sum "$bootstrap/seed.tar" | cut -d' ' -f1)" = "$PIPELANG_NATIVE_BOOTSTRAP_ARCHIVE_SHA256"
 chmod 0444 "$bootstrap/seed.tar"
 mkdir "$bootstrap/sdk"
-/usr/bin/strace -f -e trace=execve -s 4096 -o "$bootstrap/extract.exec" \
+/usr/bin/sh "$script_directory/trace-executions.sh" "$bootstrap/extract.exec" \
     /usr/bin/cmake -E chdir "$bootstrap/sdk" /usr/bin/cmake -E tar xf "$bootstrap/seed.tar"
 test "$(sha256sum "$bootstrap/seed.tar" | cut -d' ' -f1)" = "$PIPELANG_NATIVE_BOOTSTRAP_ARCHIVE_SHA256"
 seed_manifest="$bootstrap/sdk/share/pipelang-model/sdk-manifest.json"

@@ -152,15 +152,19 @@ public model Class Constructed {
         "\npublic model Class Recursive { public pure float32 Read(float32 value) => Read(value); }\n";
     const auto recursion = process({nativeExecutable(prefix / "bin/pipelang-modelc").string()},
                                   recursive.dump(), std::chrono::seconds(45), 4U << 20);
-    require(recursion.exit == 0 && parseJson(recursion.output, 4U << 20).at("ok") == false,
-            "recursive helper graph unexpectedly admitted");
+    require(recursion.exit == 0, "recursive numeric request failed to execute");
+    const auto recursiveResponse = parseJson(recursion.output, 4U << 20);
+    require(recursiveResponse.at("ok") == true, "bounded recursive numeric source was refused");
+    for (const auto& item : recursiveResponse.at("manifest").at("nativeNumericExports")) {
+        require(item.at("owner") != "Numeric.Recursive",
+                "recursive numeric closure escaped through an unguarded native export");
+    }
     for (const auto& invalidBody : {
         "public pure uint32 Read(uint32 value) => float32.ToBits(value);",
         "public pure float32 Read(float32 value) => float32.FromBits(value);",
         "public pure uint32 Read(float value) => float.ToBits(value);",
         "public pure Result<uint32,uint32> Read(uint32 value) => Result<uint32,uint32>.Failure(value);",
         "public async Task<Result<uint32,ClosedError>> Read(uint32 value) { return Result<uint32,ClosedError>.Success(value); }",
-        "public Result<uint32,ClosedError> Read(uint32 value) => Result<uint32,ClosedError>.Success(value);",
         "public pure uint32 Read(Result<uint32,ClosedError> result) { if (result.IsSuccess) { Result<uint32,ClosedError> result = Result<uint32,ClosedError>.Failure(ClosedError.Invalid); return result.Value; } return 0u; }"}) {
         auto invalidBits = request;
         invalidBits["modules"][0]["source"] = invalidBits["modules"][0]["source"].get<std::string>() +
@@ -168,7 +172,21 @@ public model Class Constructed {
         const auto rejected = process({nativeExecutable(prefix / "bin/pipelang-modelc").string()},
                                       invalidBits.dump(), std::chrono::seconds(45), 4U << 20);
         require(rejected.exit == 0 && parseJson(rejected.output, 4U << 20).at("ok") == false,
-                "numeric capability admitted an invalid primitive or unsupported Result boundary");
+                "numeric capability admitted an invalid primitive or unsupported Result boundary: " +
+                    std::string(invalidBody));
+    }
+    auto ordinaryResult = request;
+    ordinaryResult["modules"][0]["source"] = ordinaryResult["modules"][0]["source"].get<std::string>() +
+        "\npublic model Class InvalidBits { "
+        "public Result<uint32,ClosedError> Read(uint32 value) => Result<uint32,ClosedError>.Success(value); }\n";
+    const auto ordinaryCompiled = process({nativeExecutable(prefix / "bin/pipelang-modelc").string()},
+                                         ordinaryResult.dump(), std::chrono::seconds(45), 4U << 20);
+    require(ordinaryCompiled.exit == 0, "ordinary Result method compiler transport failed");
+    const auto ordinaryResponse = parseJson(ordinaryCompiled.output, 4U << 20);
+    require(ordinaryResponse.at("ok") == true, "valid ordinary Result method was rejected");
+    for (const auto& item : ordinaryResponse.at("manifest").at("nativeNumericExports")) {
+        require(item.at("owner") != "Numeric.InvalidBits",
+                "non-pure Result method escaped through a pure native numeric export");
     }
     const auto manifest = prefix / "share/pipelang-model/sdk-manifest.json";
     generateProjectBindings(prefix, manifest, fileHash(manifest),

@@ -1,0 +1,10 @@
+module PipeLang.IO;
+
+// Creation makes the name visible before commit. A failed or cancelled
+// operation can leave a partial file that the caller must reconcile.
+public Interface ExclusiveFileOutput {
+    Result<int,IoFailure> BeginExclusiveOutput(string relative, int maximumBytes, CancellationToken token);
+    Result<void,IoFailure> AppendOutput(int output, ByteBuffer bytes, CancellationToken token);
+    Result<FileDigest,IoFailure> CommitOutput(int output, CancellationToken token);
+    Result<OutputEffect,IoFailure> CloseOutput(int output);
+}

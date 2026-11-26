@@ -1,0 +1,7 @@
+module PipeLang.IO.Tests;
+import PipeLang.Testing;
+
+public Record FileReport {
+    public bool allPassed;
+    public List<TestResult> results;
+}

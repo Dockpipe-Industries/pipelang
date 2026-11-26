@@ -2,7 +2,7 @@
 #pragma once
 
 #include "manifest.hpp"
-#include "../model-compiler/ResourceBudget.hpp"
+#include "../model-compiler/compiler.hpp"
 
 namespace pipelang::tools {
 // One closed filesystem input inventory. Language imports and exported model
@@ -12,6 +12,9 @@ public:
     static SourceSet load(const fs::path& descriptor);
     const std::vector<fs::path>& dependencies() const;
     const std::string& compilerProtocol() const;
+    const std::string& entryModule() const;
+    std::vector<models::ModuleSource> sourceModules() const;
+    std::vector<std::string> exportedModels() const;
     Json request(const std::string& nameSpace) const;
     Json receipt() const;
     Json information() const;

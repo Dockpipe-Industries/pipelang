@@ -7,6 +7,14 @@ There is no independent 64 KiB file or closure ceiling. Explicit resource policy
 bounds input storage, discovery, token allocation, semantic structure and output.
 These are admission budgets, not source-representation or integer-width limits.
 
+Native C++ compiler heap policy is a separate, explicit SDK selection. The
+[`gnu-conservative-gc` compile-resource profile](pipelang-projects.md#explicit-native-c-compile-resource-profile)
+controls GCC garbage collection during generated-code compilation. It does not
+change `SourceAdmissionBudget`, accepted programs, or runtime execution limits.
+[Source execution segments](source-execution-limits.md) use a separate explicit
+C++ host `TaskOptions::evaluationStepsPerSegment` selection; it is not a field in
+the compiler resource profile.
+
 ## Select a profile
 
 The SDK CLI accepts an absolute JSON profile path:

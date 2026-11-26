@@ -1,0 +1,74 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ParallelWorkers;
+
+public Record Word {
+    public string name;
+    public int amount;
+}
+
+public model Class Session {
+    public Session() {}
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        List<int> values = List<int>.Empty();
+        for (int index = 0; index < 4; index = index + 1) {
+            values.Add(index);
+        }
+
+        Atomic<int> total = Atomic<int>.Create(0);
+        Atomic<int> cleanup = Atomic<int>.Create(0);
+        Lock sharedLock = Lock.Create();
+        var completed = SemaphoreSlim.Create(0, 4);
+        int factor = 7;
+        bool failing = true;
+        try {
+            parallel foreach (int item in values) {
+                try {
+                    lock (sharedLock) {
+                        lock (sharedLock) {
+                            total.Add(item * factor);
+                            completed.Release();
+                        }
+                    }
+                    if (failing && item == 0)
+                        throw Error("first source fault");
+                    if (failing && item == 2)
+                        throw Error("later source fault");
+                } finally {
+                    cleanup.Increment();
+                }
+            }
+            return Result<int,string>.Failure("parallel failures were lost");
+        } catch (Error error) {
+            if (error.Message != "first source fault")
+                return Result<int,string>.Failure(error.Message);
+        }
+
+        if (cleanup.Load() != 4 || completed.CurrentCount != 4)
+            return Result<int,string>.Failure("parallel cleanup was lost");
+        Atomic<int> visited = Atomic<int>.Create(0);
+        List<string> labels = List<string>.Empty();
+        labels.Add("ready");
+        Word word = new Word {name = "ready", amount = 3};
+        Array<Word> records = Array<Word>.Create(2, word);
+        parallel foreach (Word record in records) {
+            if (record.name == labels.At(0))
+                visited.Add(record.amount);
+        }
+
+        Dictionary<string,int> entries = Dictionary<string,int>.Empty();
+        entries.Add("matched", 36);
+        string selected = "matched";
+        parallel foreach (KeyValuePair<string,int> pair in entries) {
+            if (pair.Key == selected)
+                visited.Add(pair.Value);
+        }
+        if (visited.Load() != total.Load())
+            return Result<int,string>.Failure("parallel ownership changed a captured value");
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(4, token);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected permit");
+        return Result<int,string>.Success(total.Load());
+    }
+}

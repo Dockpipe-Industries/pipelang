@@ -1,9 +1,5 @@
 set(model_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
-set(model_include_root "@CMAKE_INSTALL_INCLUDEDIR@/pipelang/model")
-if(IS_DIRECTORY "${model_prefix}/@CMAKE_INSTALL_INCLUDEDIR@/pipelang/di")
-    # Inventory optional DI headers without increasing the existing root budget.
-    set(model_include_root "@CMAKE_INSTALL_INCLUDEDIR@/pipelang")
-endif()
+set(model_include_root "@CMAKE_INSTALL_INCLUDEDIR@/pipelang")
 execute_process(COMMAND "${model_prefix}/@CMAKE_INSTALL_BINDIR@/pipelang-sdk-tool@CMAKE_EXECUTABLE_SUFFIX@" manifest
     --prefix "${model_prefix}"
     --manifest "${model_prefix}/@CMAKE_INSTALL_DATADIR@/pipelang-model/sdk-manifest.json"
@@ -19,6 +15,7 @@ execute_process(COMMAND "${model_prefix}/@CMAKE_INSTALL_BINDIR@/pipelang-sdk-too
         "@CMAKE_INSTALL_BINDIR@/pipelang-native-cpp@CMAKE_EXECUTABLE_SUFFIX@"
         "${model_include_root}"
         "@CMAKE_INSTALL_LIBDIR@/cmake/PipeLangModel"
+        "@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@pipelang_json_reader@CMAKE_STATIC_LIBRARY_SUFFIX@"
         "lib/cmake/PipeLangNativeDependencies"
         "share/pipelang-native-dependencies"
         "@CMAKE_INSTALL_DATADIR@/pipelang-model"

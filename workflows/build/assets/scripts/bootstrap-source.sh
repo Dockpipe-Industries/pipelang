@@ -7,7 +7,7 @@ mkdir "$bootstrap"
     -p MemorySwapMax=0 -p TasksMax=128 -p RuntimeMaxSec=900 \
     -p KillMode=control-group -p TimeoutStopSec=2 \
     --working-directory="$PWD" --setenv="PATH=$PATH" \
-    /usr/bin/strace -f -e trace=execve -s 4096 -o "$bootstrap/build.exec" \
+    /usr/bin/sh "$script_directory/trace-executions.sh" "$bootstrap/build.exec" \
     /usr/bin/sh "$script_directory/bootstrap-source-unit.sh" "$PWD" "$bootstrap" \
     > "$bootstrap/build.log" 2>&1
 runner="$bootstrap/build/containedexec/pipelang-contained"

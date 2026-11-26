@@ -1,0 +1,21 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedSynchronous;
+
+public model Class Session {
+    private int count = 0;
+
+    public Session() {}
+
+    public Result<int,string> Run(int increment) {
+        if (increment == 0)
+            return Result<int,string>.Failure("increment required");
+        if (increment == -2)
+            return Result<int,string>.Cancelled("increment cancelled");
+        if (increment < 0) {
+            count = count + 100;
+            throw Error("increment rolled back");
+        }
+        count = count + increment;
+        return Result<int,string>.Success(count);
+    }
+}

@@ -36,4 +36,4 @@ unit build /usr/bin/cmake --build "$PIPELANG_CRYPTO_PROOF/build" --parallel 1
 unit native-boundary "$PIPELANG_CRYPTO_PROOF/build/crypto-native-boundary"
 unit install /usr/bin/cmake --install "$PIPELANG_CRYPTO_PROOF/build"
 cp "$PIPELANG_CRYPTO_PROOF/build/native-dependencies/pipelang_crypto/build-receipt.json" "$PIPELANG_CRYPTO_PROOF/install/build-receipt.json"
-(cd "$PIPELANG_CRYPTO_PROOF/install" && sha256sum include/pipelang_crypto.h lib/libpipelang_crypto.a Cargo.lock > SHA256SUMS)
+(cd "$PIPELANG_CRYPTO_PROOF/install" && sha256sum include/pipelang_crypto.h include/pipelang_crypto_stream.h lib/libpipelang_crypto.a Cargo.lock > SHA256SUMS)

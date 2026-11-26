@@ -1,0 +1,58 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedReport;
+
+public Enum TestOutcome { Passed, Failed }
+
+public Record TestFailure {
+    public string message;
+    public int code;
+}
+
+public Record TestCase {
+    public TestOutcome outcome;
+    public TestFailure? failure;
+    public Result<void,TestFailure> verification;
+}
+
+public Record HarnessReport {
+    public List<TestCase> cases;
+    public bool success;
+    public Error observed;
+    public HashSet<string> tags;
+}
+
+public model Class Session {
+    private int code;
+
+    public Session(int input) {
+        this.code = input;
+    }
+
+    public async Task<Result<HarnessReport,string>> Run(int scenario) {
+        if (scenario == 1)
+            return Result<HarnessReport,string>.Failure("report failed");
+        if (scenario == 2)
+            return Result<HarnessReport,string>.Cancelled("report cancelled");
+
+        var verdict = List<TestCase>.Empty();
+        var observed = Error("unobserved");
+        try {
+            var gate = SemaphoreSlim.Create(0, 1);
+            var ready = await gate.WaitAsync(30);
+            throw Error("étape échouée");
+        } catch (Error error) {
+            observed = error;
+        }
+
+        if (scenario != 3) {
+            var failure = TestFailure(observed.Message, code);
+            verdict.Add(TestCase(TestOutcome.Passed, null, Result<void,TestFailure>.Success()));
+            verdict.Add(TestCase(TestOutcome.Failed, failure, Result<void,TestFailure>.Failure(failure)));
+        }
+        var tags = HashSet<string>.Empty();
+        tags.Add("ét" + "ape");
+        tags.Add("verified");
+        tags.Add("étape");
+        return Result<HarnessReport,string>.Success(HarnessReport(verdict, scenario == 3, observed, tags));
+    }
+}

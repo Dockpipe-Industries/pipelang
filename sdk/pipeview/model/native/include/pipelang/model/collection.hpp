@@ -101,6 +101,14 @@ public:
         return budget;
     }
 
+    static EvaluationBudget forInvocation(std::size_t requested) {
+        requireEvaluationStepsPerSegment(requested);
+        EvaluationBudget budget;
+        budget.remaining_ = requested;
+        budget.normalResetSteps_ = requested;
+        return budget;
+    }
+
     class CleanupRegion {
     public:
         explicit CleanupRegion(EvaluationBudget& budget) : budget_(budget) { ++budget_.cleanupDepth_; }
@@ -124,6 +132,16 @@ public:
         }
         slowStep();
     }
+
+    void chargeSteps(std::size_t count) {
+        if (cleanupDepth_ == 0 && !cancellationCheck_ && !shared_ && remaining_ >= count) {
+            remaining_ -= count;
+            return;
+        }
+        for (std::size_t index = 0; index < count; ++index)
+            step();
+    }
+
 private:
 #if defined(_MSC_VER)
     __declspec(noinline)
@@ -156,10 +174,14 @@ public:
     }
     CleanupRegion cleanup() { return CleanupRegion(*this); }
     void reset() {
-        remaining_ = maximumSteps;
+        // A suspension inside cleanup is not a new cleanup allowance. Awaited
+        // source descendants share this region and the same finite reserve.
+        if (cleanupDepth_ != 0)
+            return;
+        remaining_ = normalResetSteps_;
         cleanupRemaining_ = maximumSteps;
         if (shared_) {
-            shared_->normal.store(maximumSteps, std::memory_order_relaxed);
+            shared_->normal.store(normalResetSteps_, std::memory_order_relaxed);
             shared_->cleanup.store(maximumSteps, std::memory_order_relaxed);
         }
     }
@@ -174,6 +196,7 @@ public:
             throw ExecutionFailure("parallel budget must be prepared before worker creation");
         EvaluationBudget child;
         child.shared_ = shared_;
+        child.normalResetSteps_ = normalResetSteps_;
         child.cancellationCheck_ = cancellationCheck_;
         return child;
     }
@@ -197,9 +220,26 @@ private:
     };
     std::shared_ptr<SharedCounters> shared_;
     std::function<bool()> cancellationCheck_;
+    std::size_t normalResetSteps_ = maximumSteps;
     std::size_t remaining_ = maximumSteps;
     std::size_t cleanupRemaining_ = maximumSteps;
     unsigned cleanupDepth_ = 0;
+};
+
+struct ListOwnership {
+    std::size_t bytes;
+    std::size_t elements;
+
+    ListOwnership appended(std::size_t itemBytes, std::size_t itemElements) const {
+        const auto elementCost = boundedOwnedSum(1, itemElements, maximumListElements);
+        const auto nextElements = boundedOwnedSum(elements, elementCost, maximumListElements);
+        const auto nextBytes = boundedOwnedSum(bytes, itemBytes, maximumListBytes);
+        if (nextElements > maximumListElements)
+            throw ExecutionFailure("list aggregate element limit exceeded");
+        if (nextBytes > maximumListBytes)
+            throw ExecutionFailure("list owned byte limit exceeded");
+        return {nextBytes, nextElements};
+    }
 };
 
 template<class T>
@@ -211,18 +251,12 @@ public:
         validate(value);
         using pipelang::model::ownedBytes;
         using pipelang::model::ownedElements;
-        const auto elementCost = boundedOwnedSum(1, ownedElements(value), maximumListElements);
-        const auto nextElements = boundedOwnedSum(elements_, elementCost, maximumListElements);
-        const auto nextBytes = boundedOwnedSum(bytes_, ownedBytes(value), maximumListBytes);
-        if (nextElements > maximumListElements)
-            throw ExecutionFailure("list aggregate element limit exceeded");
-        if (nextBytes > maximumListBytes)
-            throw ExecutionFailure("list owned byte limit exceeded");
+        const auto next = ListOwnership{bytes_, elements_}.appended(ownedBytes(value), ownedElements(value));
         // vector append has the strong exception guarantee for compiler-admitted
         // copyable owned values. Cost counters change only after append succeeds.
         values_.push_back(std::move(value));
-        elements_ = nextElements;
-        bytes_ = nextBytes;
+        elements_ = next.elements;
+        bytes_ = next.bytes;
     }
     std::int64_t count() const { return static_cast<std::int64_t>(values_.size()); }
     T at(std::int64_t index) const {

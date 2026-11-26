@@ -1,0 +1,43 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedResultInterface;
+
+public model Class Session {
+    private IResult<string>? saved;
+    private IResult<string> baseline;
+
+    public Session(bool initialize) {
+        if (initialize)
+            baseline = Result<int,string>.Failure("retained error");
+    }
+
+    public async Task<Result<IResult<string>,string>> Run(int scenario, IResult<string>? incoming) {
+        if (scenario == 0)
+            return Result<IResult<string>,string>.Success(saved.Value);
+        if (scenario == 5)
+            return Result<IResult<string>,string>.Success(baseline);
+
+        IResult<string> fresh = Result<int,string>.Failure("retained error");
+        if (scenario == 1)
+            saved = fresh;
+        if (scenario == 2) {
+            if (saved.Value != incoming.Value || fresh == saved.Value)
+                return Result<IResult<string>,string>.Failure("retained identity changed");
+            return Result<IResult<string>,string>.Success(saved.Value);
+        }
+        if (scenario == 3) {
+            if (fresh == incoming.Value)
+                return Result<IResult<string>,string>.Failure("an independent conversion reused the incoming identity");
+            saved = incoming.Value;
+        }
+
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(2);
+        if (opened)
+            return Result<IResult<string>,string>.Failure("unexpected gate");
+        if (scenario == 4) {
+            saved = fresh;
+            throw Error("discard this result interface");
+        }
+        return Result<IResult<string>,string>.Success(saved.Value);
+    }
+}

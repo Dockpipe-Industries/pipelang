@@ -1,0 +1,6 @@
+module PipeLang.Json.Tests;
+
+public Record JsonScenario {
+    public int id = 0;
+    public string error = "";
+}

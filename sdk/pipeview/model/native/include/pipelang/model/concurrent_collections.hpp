@@ -97,13 +97,43 @@ public:
     }
 
     bool tryUpdate(K key, V replacement, V comparison) const {
+        return tryUpdateMatching(std::move(key), std::move(replacement),
+                                 [&](const V& current) { return current == comparison; });
+    }
+
+    template<class Matches>
+    bool tryUpdateMatching(K key, V replacement, Matches matches) const {
         auto& cell = checkedCell();
         std::lock_guard lock(cell.mutex);
         auto current = cell.collection.tryGet(key);
-        if (!current.has_value() || !(current.value() == comparison))
+        if (!current.has_value() || !matches(current.value()))
             return false;
         cell.collection.set(std::move(key), std::move(replacement));
         return true;
+    }
+
+    template<class Project>
+    void tryRemoveProjected(const K& key, Project project) const {
+        auto& cell = checkedCell();
+        std::lock_guard lock(cell.mutex);
+        const auto result = cell.collection.tryGet(key);
+        project(result);
+        if (result.has_value())
+            cell.collection.remove(key);
+    }
+
+    template<class Project>
+    void getOrAddProjected(K key, V value, Project project) const {
+        auto& cell = checkedCell();
+        std::lock_guard lock(cell.mutex);
+        const auto current = cell.collection.tryGet(key);
+        if (current.has_value()) {
+            project(current.value());
+            return;
+        }
+
+        project(value);
+        cell.collection.add(std::move(key), std::move(value));
     }
 
     std::int64_t count() const {
@@ -174,6 +204,20 @@ public:
         auto& cell = checkedCell();
         std::lock_guard lock(cell.mutex);
         cell.collection.enqueue(std::move(value));
+    }
+
+    template<class Project>
+    void tryDequeueProjected(Project project) const {
+        auto& cell = checkedCell();
+        std::lock_guard lock(cell.mutex);
+        if (cell.collection.count() == 0) {
+            project(Optional<T>::None());
+            return;
+        }
+
+        // A bridge can materialize its owned return value before removal.
+        project(Optional<T>::Some(cell.collection.peek()));
+        (void)cell.collection.dequeue();
     }
 
     Optional<T> tryDequeue() const {
@@ -251,6 +295,20 @@ public:
         auto& cell = checkedCell();
         std::lock_guard lock(cell.mutex);
         cell.collection.push(std::move(value));
+    }
+
+    template<class Project>
+    void tryPopProjected(Project project) const {
+        auto& cell = checkedCell();
+        std::lock_guard lock(cell.mutex);
+        if (cell.collection.count() == 0) {
+            project(Optional<T>::None());
+            return;
+        }
+
+        // A bridge can materialize its owned return value before removal.
+        project(Optional<T>::Some(cell.collection.peek()));
+        (void)cell.collection.pop();
     }
 
     Optional<T> tryPop() const {

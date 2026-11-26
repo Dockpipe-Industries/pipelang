@@ -47,6 +47,13 @@ target_link_libraries(header_consumer PRIVATE header_model)
 add_executable(compiled_consumer main.cpp)
 target_link_libraries(compiled_consumer PRIVATE compiled_model)
 
+if(WIN32)
+    # Match the installed SDK consumer profile. CTest runs without toolchain
+    # runtime DLLs on PATH, just like the other Windows SDK fixtures.
+    target_link_options(header_consumer PRIVATE -static)
+    target_link_options(compiled_consumer PRIVATE -static)
+endif()
+
 add_library(native_owner STATIC owner.cpp)
 target_link_libraries(native_owner PRIVATE "$<BUILD_INTERFACE:compiled_model>")
 pipelang_install_model_implementation(compiled_model

@@ -726,7 +726,16 @@ target_compile_options(fixed_arrays PRIVATE -frounding-math)
         "-G", "Ninja", "-DCMAKE_EXE_LINKER_FLAGS=-static",
 #endif
         "-DCMAKE_BUILD_TYPE=Release"});
-    invoke({nativeTool("cmake").string(), "--build", (output / "initial-normal").string(), "--parallel", "1"});
+    // Separate the generated library from the consumers so each build keeps
+    // its own existing deadline while Ninja reuses the completed dependencies.
+    for (const auto* target : {"fixed_compiled_implementation", "fixed_arrays", "fixed_array_headers"}) {
+        try {
+            invoke({nativeTool("cmake").string(), "--build", (output / "initial-normal").string(),
+                "--target", target, "--parallel", "1"});
+        } catch (const std::exception& error) {
+            throw std::runtime_error("fixed array build target " + std::string(target) + ": " + error.what());
+        }
+    }
     invoke({nativeExecutable(output / "initial-normal/fixed_arrays").string()});
     invoke({nativeExecutable(output / "initial-normal/fixed_array_headers").string()});
 #if defined(__SSE2__)

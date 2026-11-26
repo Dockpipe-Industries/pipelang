@@ -37,7 +37,7 @@ if [ "${1:-}" != --inside ]; then
     fi
     : "${PIPELANG_NATIVE_COMPAT_PROOF:?Select a fresh compatibility test proof}"
     mkdir "$PIPELANG_NATIVE_COMPAT_PROOF"
-    exec "$runner" job --output "$PIPELANG_NATIVE_COMPAT_PROOF/job" \
+    run_native_job "$runner" "$PIPELANG_NATIVE_COMPAT_PROOF/job" \
         --estate "$PIPELANG_NATIVE_COMPAT_PROOF" --timeout 7200 -- \
         /usr/bin/env PIPELANG_NATIVE_TOOLCHAIN_PROOF="$PIPELANG_NATIVE_TOOLCHAIN_PROOF" \
         PIPELANG_NATIVE_BUILD_DIRECTORY="$build" PIPELANG_NATIVE_COMPAT_PROOF="$PIPELANG_NATIVE_COMPAT_PROOF" \
@@ -47,6 +47,7 @@ if [ "${1:-}" != --inside ]; then
         PIPELANG_NATIVE_FIXTURE_SELECTION="${PIPELANG_NATIVE_FIXTURE_SELECTION-all}" \
         PIPELANG_CXX_RESOURCE_PROFILE="${PIPELANG_CXX_RESOURCE_PROFILE-system}" \
         PIPELANG_NATIVE_TOOL_PATH="${PIPELANG_NATIVE_TOOL_PATH:-}" sh "$0" --inside
+    exit
 fi
 if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
     : "${PIPELANG_MACOS_COORDINATOR:?Native workflow requires a macOS coordinator}"

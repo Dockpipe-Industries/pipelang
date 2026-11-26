@@ -36,22 +36,14 @@ actual_hash=$(sha256sum "$runner" | cut -d' ' -f1)
 test "$actual_hash" = "$PIPELANG_NATIVE_RUNNER_SHA256"
 if [ "${1:-}" != --inside ]; then
     mkdir "$PIPELANG_NATIVE_TOOLCHAIN_PROOF"
-    if "$runner" job --output "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/job" \
+    run_native_job "$runner" "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/job" \
             --estate "$PIPELANG_NATIVE_TOOLCHAIN_PROOF" --timeout 3600 -- \
             /usr/bin/env PIPELANG_NATIVE_TOOLCHAIN_PROOF="$PIPELANG_NATIVE_TOOLCHAIN_PROOF" \
             PIPELANG_NATIVE_BUILD_DIRECTORY="$build" PIPELANG_NATIVE_RUNNER="$runner" \
             PIPELANG_BUILD_NATIVE_OBJECT_PROOF="$native_objects" \
             PIPELANG_NATIVE_TOOL_PATH="${PIPELANG_NATIVE_TOOL_PATH:-}" PIPELANG_NATIVE_TRACE_EXEC="${PIPELANG_NATIVE_TRACE_EXEC:-0}" \
-            PIPELANG_NATIVE_RUNNER_SHA256="$PIPELANG_NATIVE_RUNNER_SHA256" sh "$0" --inside; then
-        exit 0
-    else
-        result=$?
-        job_output="$PIPELANG_NATIVE_TOOLCHAIN_PROOF/job.output"
-        if [ -f "$job_output" ]; then
-            tail -c 12000 "$job_output" >&2
-        fi
-        exit "$result"
-    fi
+            PIPELANG_NATIVE_RUNNER_SHA256="$PIPELANG_NATIVE_RUNNER_SHA256" sh "$0" --inside
+    exit
 fi
 if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
     : "${PIPELANG_MACOS_COORDINATOR:?Native workflow requires a macOS coordinator}"

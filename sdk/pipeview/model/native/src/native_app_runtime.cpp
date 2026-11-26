@@ -30,6 +30,7 @@
 #include <deque>
 #include <exception>
 #include <optional>
+#include <span>
 #include <variant>
 #include <vector>
 
@@ -2841,9 +2842,10 @@ void eraseResult(const NativeLists& lists, const OwnedShape& shape, const std::u
     } while (!nextIdentity.compare_exchange_weak(identity, identity + 1, std::memory_order_relaxed));
     const ResultInterfaceHeader header{identity, source[0], cost.bytes, cost.elements};
     const auto& error = shape.fields[1];
-    std::memcpy(output, &header, sizeof(header));
-    std::memcpy(static_cast<std::byte*>(output) + sizeof(header), source + error.offsetWords,
-                error.shape->words * sizeof(std::uint64_t));
+    const auto errorBytes = error.shape->words * sizeof(std::uint64_t);
+    const std::span storage(static_cast<std::byte*>(output), sizeof(header) + errorBytes);
+    std::memcpy(storage.data(), &header, sizeof(header));
+    std::memcpy(storage.subspan<sizeof(header)>().data(), source + error.offsetWords, errorBytes);
 }
 
 template<class Operation>

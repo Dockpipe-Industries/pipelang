@@ -29,6 +29,8 @@ if(PIPELANG_TESTING_SANITIZERS)
     target_compile_options(testing_model INTERFACE
         -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(testing_model INTERFACE -fsanitize=address,undefined)
+elseif(WIN32)
+    target_link_options(testing_model INTERFACE -static)
 endif()
 
 add_executable(testing_contracts Main.cpp)

@@ -1,0 +1,15 @@
+<Style name="Theme">
+    <Token name="inset" type="length" value="16px"/>
+    <Token name="ink" type="color" value="#DDEEFFff"/>
+    <Property name="padding" value="inset"/>
+    <Property name="gap" value="8px"/>
+    <Property name="controlHeight" value="42px"/>
+    <Property name="text" value="ink"/>
+    <Property name="focus" value="#AABBCCff"/>
+    <Property name="disabledText" value="#667788ff"/>
+</Style>
+<Style name="Compact" extends="Theme">
+    <Token name="inset" type="length" value="10.5px" override="true"/>
+    <Property name="gap" value="4px" override="true"/>
+    <Property name="background" value="#102030ff"/>
+</Style>

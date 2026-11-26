@@ -1,0 +1,70 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.SynchronousValues;
+
+public Record Request {
+    public List<int> samples;
+    public int divisor;
+}
+
+public Record TestFailure {
+    public string message;
+    public int code;
+}
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var rule = new Rule(2);
+        var gate = SemaphoreSlim.Create(0, 1);
+        var ready = await gate.WaitAsync(45);
+        var samples = List<int>.Empty();
+        samples.Add(80);
+
+        var result = rule.Evaluate(Request(samples, scenario == 2 ? 0 : 2), scenario == 1);
+        if (result.IsFailure) {
+            if (scenario == 1 && result.Error.code == 7)
+                return Result<int,string>.Failure(result.Error.message);
+            if (scenario == 2 && result.Error.code == 8)
+                return Result<int,string>.Failure(result.Error.message);
+            return Result<int,string>.Failure("lost synchronous error");
+        }
+
+        if (scenario == 3) {
+            try {
+                var unexpected = Rule.Divide(80, 0);
+                return Result<int,string>.Success(unexpected);
+            } catch (Error error) {
+                if (error.Message != "integer division by zero")
+                    return Result<int,string>.Failure("wrong synchronous fault");
+            }
+        }
+        var cleaned = await gate.WaitAsync(65);
+        return Result<int,string>.Success(result.Value);
+    }
+}
+
+public Class Rule {
+    private int adjustment;
+
+    public Rule(int adjustment) {
+        this.adjustment = adjustment;
+    }
+
+    public pure Result<int,TestFailure> Evaluate(Request request, bool reject) {
+        if (reject)
+            return Result<int,TestFailure>.Failure(TestFailure("policy rejected", 7));
+
+        int value = 0;
+        try {
+            value = Rule.Divide(request.samples.At(0), request.divisor);
+        } catch (Error error) {
+            return Result<int,TestFailure>.Failure(TestFailure(error.Message, 8));
+        } finally {
+            value = value + adjustment;
+        }
+        return Result<int,TestFailure>.Success(value);
+    }
+
+    public static pure int Divide(int sample, int divisor) {
+        return sample / divisor;
+    }
+}

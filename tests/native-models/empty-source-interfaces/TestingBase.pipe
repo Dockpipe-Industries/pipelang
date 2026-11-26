@@ -1,0 +1,39 @@
+module TestingBase;
+
+public source Interface ITestCase {
+    int Body();
+}
+
+public source Interface IUnused {
+    pure int Read();
+    Task<Result<int,string>> Later();
+}
+
+public source Interface IDeclaredOnly {
+    pure bool IsReady();
+}
+
+public source Interface IReadBase {
+    pure int Read();
+}
+
+public source Interface IEmptyChild : IReadBase {
+}
+
+public Class LiveBase : IReadBase {
+    public pure int Read() => 8;
+}
+
+public Class RequiredHolder {
+    private IUnused required;
+}
+
+public Class TestRunner {
+    public int Run(List<ITestCase> cases) {
+        int total = 0;
+        foreach (ITestCase item in cases) {
+            total = total + item.Body();
+        }
+        return total;
+    }
+}

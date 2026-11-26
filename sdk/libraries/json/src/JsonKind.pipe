@@ -1,0 +1,3 @@
+module PipeLang.Json;
+
+public Enum JsonKind { Null, Boolean, Number, String, Object, Array }

@@ -1,0 +1,8 @@
+name: pipelang-sqlite-build
+description: Qualify the optional maintained SQLite native capability and installed consumer
+docker_preflight: false
+steps:
+  - id: sqlite
+    kind: host
+    cwd: repo
+    cmd: bash workflows/sqlite.build/assets/scripts/run.sh

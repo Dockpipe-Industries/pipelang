@@ -1,0 +1,461 @@
+module PipeLang.IO.Tests;
+import PipeLang.IO;
+import PipeLang.Crypto;
+import PipeLang.Testing;
+
+public Class FileCase : IProbeTestCase {
+    private FileStreams files;
+    private FileStreams peer;
+    private Sha256Streams crypto;
+    private FileInputs inputs;
+    private int scenario;
+    private int snapshotId = 0;
+    private int peerSnapshot = 0;
+    private int hash = 0;
+    private bool pendingRead = false;
+    private List<int> live;
+    private FileUsage initial;
+
+    public FileCase(FileStreams files, FileStreams peer, Sha256Streams crypto, FileInputs inputs, int scenario) {
+        this.files = files;
+        this.peer = peer;
+        this.crypto = crypto;
+        this.inputs = inputs;
+        this.scenario = scenario;
+        live = List<int>.Empty();
+        initial = FileUsage(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+
+    public pure string Id() => "io.file." + string.FromInt(scenario);
+    public pure string Name() => "descriptor capture and digest " + string.FromInt(scenario);
+
+    public Result<void,TestFailure> Setup(CancellationToken token) {
+        Result<void,string> restored = inputs.Restore();
+        try Assert.True(restored.IsSuccess, "previous schedule state restored explicitly");
+        Result<FileUsage,string> usage = inputs.Usage();
+        try Assert.True(usage.IsSuccess, "bounded factual resource observation");
+        initial = usage.Value;
+        try Assert.Equal<int>(0, initial.snapshots, "case starts without retained captures");
+        try Assert.Equal<int>(0, initial.operations, "case starts without pending effects");
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Cleanup() {
+        bool success = true;
+        if (pendingRead) {
+            Result<CapturedFile,IoFailure> completed = inputs.FinishPending();
+            pendingRead = false;
+            if (completed.IsSuccess)
+                peerSnapshot = completed.Value.snapshotId;
+        }
+        if (snapshotId != 0 && !files.CloseSnapshot(snapshotId).IsSuccess)
+            success = false;
+        if (peerSnapshot != 0 && !peer.CloseSnapshot(peerSnapshot).IsSuccess)
+            success = false;
+        if (hash != 0 && !crypto.CloseSha256(hash).IsSuccess)
+            success = false;
+        foreach (int handle in live) {
+            if (!files.CloseSnapshot(handle).IsSuccess)
+                success = false;
+        }
+
+        if (!inputs.Restore().IsSuccess)
+            success = false;
+        Result<FileUsage,string> usage = inputs.Usage();
+        if (!usage.IsSuccess)
+            success = false;
+        else if (usage.Value.snapshots != 0 || usage.Value.reservedBytes != 0 || usage.Value.operations != 0 ||
+                 usage.Value.descriptors != initial.descriptors || usage.Value.owners != initial.owners ||
+                 usage.Value.openDescriptors != initial.openDescriptors)
+            success = false;
+
+        return Assert.True(success, "independent cleanup releases every capture/hash/pending effect and restores names");
+    }
+
+    private Result<void,TestFailure> Create(string path, int count, string pattern) {
+        Result<void,string> created = inputs.Create(path, count, pattern);
+        return Assert.True(created.IsSuccess, "real bounded fixture creation: " + path);
+    }
+
+    private Result<void,TestFailure> Capture(string path, int maximumBytes, CancellationToken token) {
+        Result<CapturedFile,IoFailure> captured = files.CaptureSnapshot(path, maximumBytes, token);
+        try Assert.True(captured.IsSuccess, "complete capture admitted: " + path);
+        snapshotId = captured.Value.snapshotId;
+        try Assert.True(snapshotId > 0, "published opaque positive ID");
+        try Assert.True(captured.Value.file.identity.objectId != "", "actual device/inode observation");
+        try Assert.True(captured.Value.file.identity.revision != "", "actual revision observation");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Close() {
+        try Assert.True(files.CloseSnapshot(snapshotId).IsSuccess, "capture closes explicitly");
+        snapshotId = 0;
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Refusal(string path, int maximumBytes, string expected, CancellationToken token) {
+        Result<CapturedFile,IoFailure> captured = files.CaptureSnapshot(path, maximumBytes, token);
+        if (captured.IsSuccess)
+            snapshotId = captured.Value.snapshotId;
+        try Assert.True(captured.IsFailure, "effect fails without publishing a capture");
+        try Assert.Equal<string>(expected, captured.Error.code, "typed read failure");
+        try Assert.True(captured.Error.effect == OutputEffect.NoDurableOutput, "read never creates named output");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> HashSnapshot(int length, string expected, CancellationToken token) {
+        Result<int,CryptoFailure> begun = crypto.BeginSha256(length);
+        try Assert.True(begun.IsSuccess, "actual maintained hash service admits fragment stream");
+        hash = begun.Value;
+        int offset = 0;
+        // Uneven fragments exercise arbitrary boundaries without per-byte loops.
+        while (offset < length) {
+            int count = 777777;
+            if (count > length - offset)
+                count = length - offset;
+            Result<ByteBuffer,IoFailure> fragment = files.ReadSnapshot(snapshotId, offset, count);
+            try Assert.True(fragment.IsSuccess, "immutable bounded fragment");
+            try Assert.Equal<int>(count, fragment.Value.Length, "exact fragment byte count");
+            try Assert.True(crypto.UpdateSha256(hash, fragment.Value, token).IsSuccess, "hash exactly returned bytes");
+            offset = offset + count;
+        }
+        Result<Sha256Digest,CryptoFailure> digest = crypto.FinishSha256(hash, token);
+        try Assert.True(digest.IsSuccess, "fragment digest seals");
+        try Assert.Equal<int>(length, digest.Value.byteCount, "all captured bytes hashed");
+        try Assert.Equal<string>(expected, digest.Value.lowercaseHex, "Source known-answer digest");
+        try Assert.True(crypto.CloseSha256(hash).IsSuccess, "fragment crypto custody closed");
+        hash = 0;
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Vectors(CancellationToken token) {
+        string expected = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        int length = 0;
+        string pattern = "a";
+        if (scenario == 1) {
+            expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+            length = 3;
+            pattern = "abc";
+        } else if (scenario == 2) {
+            expected = "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880";
+            length = 256;
+            pattern = "binary";
+        } else if (scenario == 3) {
+            expected = "299285fc41a44cdb038b9fdaf494c76ca9d0c866672b2b266c1a0c17dda60a05";
+            length = 4194304;
+        }
+
+        try Create("vector", length, pattern);
+        Result<CapturedFile,IoFailure> captured = files.CaptureSnapshot("vector", length, token);
+        try Assert.True(captured.IsSuccess, "empty/binary/exact4MiB complete copy");
+        snapshotId = captured.Value.snapshotId;
+        try Assert.Equal<int>(length, captured.Value.file.byteCount, "exact capture count");
+        try Assert.Equal<string>(expected, captured.Value.file.sha256, "capture known-answer bytes");
+        try HashSnapshot(length, expected, token);
+        if (length == 4194304) {
+            Result<ByteBuffer,IoFailure> largest = files.ReadSnapshot(snapshotId, 0, 1048576);
+            try Assert.True(largest.IsSuccess && largest.Value.Length == 1048576, "exact1MiB fragment admitted");
+        }
+        Result<FileDigest,IoFailure> digest = files.DigestFile("vector", length, token);
+        try Assert.True(digest.IsSuccess, "stream digest succeeds independently");
+        try Assert.Equal<string>(expected, digest.Value.sha256, "digest agrees with Source oracle");
+        try Assert.Equal<int>(length, digest.Value.byteCount, "digest count");
+        try Assert.Equal<string>(captured.Value.file.identity.objectId, digest.Value.identity.objectId, "same descriptor object");
+        Result<ByteBuffer,IoFailure> empty = files.ReadSnapshot(snapshotId, length, 0);
+        try Assert.True(empty.IsSuccess && empty.Value.Length == 0, "zero length at EOF, including empty allocation");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> MutationIndependence(CancellationToken token) {
+        try Create("immutable", 3, "abc");
+        try Capture("immutable", 3, token);
+        Result<ByteBuffer,IoFailure> first = files.ReadSnapshot(snapshotId, 0, 1);
+        try Assert.True(first.IsSuccess, "prefix fragment");
+        try Assert.Equal<string>("a", first.Value.DecodeUtf8(), "prefix exact");
+        try Create("immutable", 3, "a");
+        Result<ByteBuffer,IoFailure> tail = files.ReadSnapshot(snapshotId, 1, 2);
+        try Assert.True(tail.IsSuccess, "tail survives source mutation");
+        try Assert.Equal<string>("bc", tail.Value.DecodeUtf8(), "immutable original tail");
+        try HashSnapshot(3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", token);
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Ranges(CancellationToken token) {
+        try Create("ranges", 3, "abc");
+        try Capture("ranges", 3, token);
+        try Assert.True(files.ReadSnapshot(snapshotId, -1, 0).IsFailure, "negative offset");
+        try Assert.True(files.ReadSnapshot(snapshotId, 0, -1).IsFailure, "negative count");
+        try Assert.True(files.ReadSnapshot(snapshotId, 4, 0).IsFailure, "past EOF offset");
+        try Assert.True(files.ReadSnapshot(snapshotId, 2, 2).IsFailure, "past EOF count");
+        try Assert.True(files.ReadSnapshot(snapshotId, 9223372036854775807, 1).IsFailure, "offset overflow");
+        try Assert.True(files.ReadSnapshot(snapshotId, 0, 1048577).IsFailure, "fragment capacity");
+        try Assert.True(peer.ReadSnapshot(snapshotId, 0, 0).IsFailure, "cross-owner cannot observe bytes");
+        try Assert.True(peer.CloseSnapshot(snapshotId).IsFailure, "cross-owner cannot retire custody");
+        int stale = snapshotId;
+        try Close();
+        try Assert.True(files.CloseSnapshot(stale).IsSuccess, "bounded recent close tombstone");
+        try Assert.True(files.ReadSnapshot(stale, 0, 0).IsFailure, "closed capture refuses read");
+        try Capture("ranges", 3, token);
+        try Assert.True(snapshotId != stale, "monotonic ID not recycled");
+        try Assert.True(files.ReadSnapshot(stale, 0, 0).IsFailure, "evicted stale ID cannot alias new capture");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Limits(CancellationToken token) {
+        try Create("over", 4194305, "a");
+        try Refusal("over", 4194304, "io.byte_limit", token);
+        try Refusal("over", -1, "io.invalid_limit", token);
+        try Refusal("over", 4194305, "io.invalid_limit", token);
+        Result<FileDigest,IoFailure> negative = files.DigestFile("over", -1, token);
+        try Assert.True(negative.IsFailure && negative.Error.code == "io.invalid_limit", "negative digest cap");
+        Result<FileDigest,IoFailure> excessive = files.DigestFile("over", 536870913, token);
+        try Assert.True(excessive.IsFailure && excessive.Error.code == "io.invalid_limit", "digest512MiB caller contract");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Paths(CancellationToken token) {
+        try Refusal("../outside", 1, "io.invalid_path", token);
+        try Refusal("/outside", 1, "io.invalid_path", token);
+        try Refusal("./vector", 1, "io.invalid_path", token);
+        try Refusal("tree//leaf", 1, "io.invalid_path", token);
+        try Refusal("tree/", 1, "io.invalid_path", token);
+        try Refusal("", 1, "io.invalid_path", token);
+        ByteBuffer nul = ByteBuffer.Empty();
+        nul.Add(0u);
+        try Refusal("a" + nul.DecodeUtf8(), 1, "io.invalid_path", token);
+        string tooDeep = "leaf";
+        for (int component = 0; component < 32; component = component + 1)
+            tooDeep = "a/" + tooDeep;
+        try Refusal(tooDeep, 1, "io.invalid_path", token);
+        try Create("symlink-target", 3, "abc");
+        try Assert.True(inputs.MakeSymlink("link", "symlink-target").IsSuccess, "actual leaf symlink");
+        try Refusal("link", 3, "io.file_type", token);
+        try Assert.True(inputs.MakeFifo("fifo").IsSuccess, "actual FIFO");
+        try Refusal("fifo", 3, "io.file_type", token);
+        try Assert.True(inputs.MakeSymlink("directory-link", "tree").IsSuccess, "actual ancestor symlink");
+        try Refusal("directory-link/leaf", 3, "io.directory_type", token);
+        // Hardlinks and .git are factual filesystem inputs, not native app policy.
+        try Create("hardlink-target", 3, "abc");
+        try Assert.True(inputs.MakeHardlink("hardlink", "hardlink-target").IsSuccess, "actual hardlink");
+        Result<CapturedFile,IoFailure> linked = files.CaptureSnapshot("hardlink", 4194304, token);
+        try Assert.True(linked.IsSuccess, "hardlink permitted for Source admission");
+        snapshotId = linked.Value.snapshotId;
+        try Assert.True(linked.Value.file.identity.linkCount >= 2, "actual link count exposed");
+        try Close();
+        try Assert.True(inputs.MakeDirectory(".git").IsSuccess, "ordinary dot directory");
+        try Create(".git/plain", 3, "abc");
+        try Capture(".git/plain", 3, token);
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Capacity(CancellationToken token) {
+        try Create("race", 4194304, "a");
+        try Assert.True(inputs.Arm("after_read", "pause", "race", 0).IsSuccess, "pending capture barrier armed");
+        try Assert.True(inputs.StartPending("race", 4194304).IsSuccess, "real peer capture starts");
+        pendingRead = true;
+        try Assert.True(inputs.AwaitPendingRead().IsSuccess, "real descriptor read reached barrier");
+        Result<FileUsage,string> pendingUsage = inputs.Usage();
+        try Assert.True(pendingUsage.IsSuccess, "observe pending reservation");
+        try Assert.Equal<int>(1, pendingUsage.Value.snapshots, "pending slot counts before publication");
+        try Assert.Equal<int>(4194304, pendingUsage.Value.reservedBytes, "pending bytes reserved before allocation/read");
+        for (int index = 0; index < 7; index = index + 1) {
+            Result<CapturedFile,IoFailure> captured = files.CaptureSnapshot("race", 4194304, token);
+            try Assert.True(captured.IsSuccess, "seven additional global captures");
+            live.Add(captured.Value.snapshotId);
+        }
+        try Refusal("race", 4194304, "io.snapshot_limit", token);
+        Result<FileUsage,string> full = inputs.Usage();
+        try Assert.True(full.IsSuccess, "observe global retained+pending ledger");
+        try Assert.Equal<int>(8, full.Value.snapshots, "global eight slots include pending peer");
+        try Assert.Equal<int>(33554432, full.Value.reservedBytes, "global32MiB includes pending peer");
+        Result<CapturedFile,IoFailure> completed = inputs.FinishPending();
+        pendingRead = false;
+        try Assert.True(completed.IsSuccess, "pending capture returns actual receipt");
+        peerSnapshot = completed.Value.snapshotId;
+        try Assert.True(peer.CloseSnapshot(peerSnapshot).IsSuccess, "release pending result reservation");
+        peerSnapshot = 0;
+        try Capture("race", 4194304, token);
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Destructor(CancellationToken token) {
+        try Create("destructor", 3, "abc");
+        Result<CapturedFile,IoFailure> captured = peer.CaptureSnapshot("destructor", 3, token);
+        try Assert.True(captured.IsSuccess, "peer retains real capture before destruction");
+        int stale = captured.Value.snapshotId;
+        try Assert.True(inputs.RecreatePeer().IsSuccess, "explicit Source-requested actual owner destruction");
+        try Assert.True(peer.ReadSnapshot(stale, 0, 0).IsFailure, "destroyed owner's handle cannot alias successor");
+        Result<FileUsage,string> usage = inputs.Usage();
+        try Assert.True(usage.IsSuccess && usage.Value.snapshots == 0 && usage.Value.reservedBytes == 0,
+                        "destructor reclaims reservation");
+        try Capture("destructor", 3, token);
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> LargeDigest(CancellationToken token) {
+        try Create("large", 536870912, "a");
+        Result<FileDigest,IoFailure> digest = files.DigestFile("large", 536870912, token);
+        try Assert.True(digest.IsSuccess, "actual512MiB streamed without capture allocation");
+        try Assert.Equal<int>(536870912, digest.Value.byteCount, "exact512MiB accepted count");
+        try Assert.Equal<string>("b9045a713caed5dff3d3b783e98d1ce5778d8bc331ee4119d707072312af06a7",
+                                 digest.Value.sha256, "independent512MiB-a known answer");
+        Result<FileUsage,string> usage = inputs.Usage();
+        try Assert.True(usage.IsSuccess && usage.Value.snapshots == 0 && usage.Value.reservedBytes == 0,
+                        "stream digest retains no captured payload");
+        try Assert.True(inputs.Arm("before_probe", "append", "large", 0).IsSuccess, "actual growth before EOF probe");
+        Result<FileDigest,IoFailure> grown = files.DigestFile("large", 536870912, token);
+        try Assert.True(grown.IsFailure, "running cap refuses growth at exact512MiB");
+        try Assert.Equal<string>("io.byte_limit", grown.Error.code, "extra probe byte rejected before hashing");
+        try Create("sparse-over", 536870913, "sparse");
+        Result<FileDigest,IoFailure> initialOver = files.DigestFile("sparse-over", 536870912, token);
+        try Assert.True(initialOver.IsFailure && initialOver.Error.code == "io.byte_limit", "initial512MiB+1 sparse extent refused");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Scheduled(CancellationToken token) {
+        try Create("race", 131072, "a");
+        string boundary = "after_read";
+        string action = "mutate";
+        string path = "race";
+        string expected = "io.file_changed";
+        if (scenario == 12) {
+            action = "truncate";
+        } else if (scenario == 13) {
+            action = "replace";
+        } else if (scenario == 14) {
+            boundary = "after_eof";
+            action = "replace";
+        } else if (scenario == 15) {
+            boundary = "before_open";
+            action = "symlink";
+            expected = "io.open_failed";
+        } else if (scenario == 16) {
+            boundary = "before_open";
+            action = "fifo";
+        } else if (scenario == 17) {
+            try Assert.True(inputs.MakeDirectory("tree").IsSuccess, "real ancestor directory");
+            try Create("tree/race", 131072, "a");
+            path = "tree/race";
+            action = "ancestor";
+            expected = "io.directory_changed";
+        } else if (scenario == 18) {
+            action = "root";
+            expected = "io.directory_changed";
+        } else if (scenario == 19) {
+            boundary = "before_read";
+            action = "read_error";
+            expected = "io.read_failed";
+        } else if (scenario == 20) {
+            boundary = "before_probe";
+            action = "append";
+            expected = "io.byte_limit";
+        } else if (scenario == 21) {
+            boundary = "after_close";
+            action = "close_error";
+            expected = "io.close_failed";
+        }
+        try Assert.True(inputs.Arm(boundary, action, path, 0).IsSuccess, "Source selects real syscall boundary/action");
+        try Refusal(path, 131072, expected, token);
+        Result<FileUsage,string> usage = inputs.Usage();
+        try Assert.True(usage.IsSuccess && usage.Value.schedules == initial.schedules + 1,
+                        "scheduled actual effect ran exactly once; pre-effect failure cannot pass");
+        if (action == "replace" || action == "root" || action == "ancestor") {
+            string replacement = "race";
+            if (action == "ancestor")
+                replacement = "tree/race";
+            Result<ByteBuffer,string> retained = inputs.ReadFixture(replacement, 3);
+            try Assert.True(retained.IsSuccess, "replacement still present after read refusal");
+            try Assert.Equal<string>("new", retained.Value.DecodeUtf8(), "replacement unchanged; no deletion effect");
+        }
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Cancellation(CancellationToken token, CancellationToken probeToken) {
+        try Create("race", 131072, "a");
+        Result<FileUsage,string> before = inputs.Usage();
+        try Assert.True(before.IsSuccess, "observe before real cancellation");
+        bool digestOnly = scenario >= 26;
+        int stage = scenario - 22;
+        if (digestOnly)
+            stage = scenario - 26;
+        int scope = stage;
+        if (digestOnly)
+            scope = scope + 4;
+        if (stage == 0) {
+            try Assert.True(inputs.CancelProbe(scope).IsSuccess, "genuine pre-cancelled method-scoped token");
+        } else if (stage == 1) {
+            try Assert.True(inputs.Arm("after_read", "cancel", "race", scope).IsSuccess, "cancel after actual descriptor read");
+        } else if (stage == 2) {
+            try Assert.True(inputs.Arm("after_hash", "cancel", "race", scope).IsSuccess, "cancel after maintained provider consumes bytes");
+        } else {
+            try Assert.True(inputs.Arm("after_finish", "cancel", "race", scope).IsSuccess, "cancel after actual provider finish");
+        }
+        if (digestOnly) {
+            Result<FileDigest,IoFailure> cancelled = files.DigestFile("race", 131072, probeToken);
+            try Assert.True(cancelled.IsCancelled, "real cancelled digest cannot return admitted digest");
+            try Assert.True(cancelled.Error.effect == OutputEffect.NoDurableOutput, "cancelled digest has no named output");
+        } else {
+            Result<CapturedFile,IoFailure> cancelled = files.CaptureSnapshot("race", 131072, probeToken);
+            if (cancelled.IsSuccess)
+                snapshotId = cancelled.Value.snapshotId;
+            try Assert.True(cancelled.IsCancelled, "real cancellation never publishes a partial capture");
+            try Assert.True(cancelled.Error.effect == OutputEffect.NoDurableOutput, "cancelled read has no named output");
+        }
+        Result<FileUsage,string> after = inputs.Usage();
+        try Assert.True(after.IsSuccess, "observe after cancellation");
+        if (stage == 0) {
+            try Assert.Equal<int>(before.Value.reads, after.Value.reads, "pre-cancel performs no descriptor read");
+            try Assert.Equal<int>(before.Value.opens, after.Value.opens, "pre-cancel performs no descriptor acquisition");
+        } else if (stage == 1)
+            try Assert.True(after.Value.reads > before.Value.reads, "actual read preceded cancellation");
+        else if (stage == 2)
+            try Assert.True(after.Value.hashes > before.Value.hashes, "actual hash update preceded cancellation");
+        else
+            try Assert.True(after.Value.finishes > before.Value.finishes, "actual finish preceded cancellation");
+
+        try Assert.Equal<int>(0, after.Value.snapshots, "cancel releases pending capture reservation");
+        try Capture("race", 131072, token);
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> WorkLimit(CancellationToken token) {
+        try Create("race", 3, "abc");
+        try Assert.True(inputs.Arm("before_read", "interrupts", "race", 512).IsSuccess, "finite real-boundary EINTR schedule");
+        Result<FileDigest,IoFailure> limited = inputs.DigestWithWorkLimit("race", 3, 256, token);
+        try Assert.True(limited.IsFailure && limited.Error.code == "io.work_limit", "explicit native syscall budget stops nonprogress");
+        Result<FileUsage,string> usage = inputs.Usage();
+        try Assert.True(usage.IsSuccess && usage.Value.schedules == initial.schedules + 1 && usage.Value.reads > initial.reads,
+                        "read retry boundary actually reached; constructor failure cannot pass");
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        return Assert.True(false, "file contracts require genuine method-scoped probe dispatch");
+    }
+
+    public Result<void,TestFailure> BodyWithProbe(CancellationToken token, CancellationToken probeToken) {
+        if (scenario <= 3)
+            return Vectors(token);
+        if (scenario == 4)
+            return MutationIndependence(token);
+        if (scenario == 5)
+            return Ranges(token);
+        if (scenario == 6)
+            return Limits(token);
+        if (scenario == 7)
+            return Paths(token);
+        if (scenario == 8)
+            return Capacity(token);
+        if (scenario == 9)
+            return Destructor(token);
+        if (scenario == 10)
+            return LargeDigest(token);
+        if (scenario <= 21)
+            return Scheduled(token);
+        if (scenario <= 29)
+            return Cancellation(token, probeToken);
+        if (scenario == 30)
+            return WorkLimit(token);
+        return Assert.True(false, "unknown Source file contract");
+    }
+}

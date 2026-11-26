@@ -1,0 +1,88 @@
+module PipeLang.Testing.AsyncSelfTests;
+import PipeLang.Testing;
+import PipeLang.Testing.Async;
+
+public Class AsyncScenarioCase : IAsyncTestCase {
+    private AsyncScenario scenario;
+    private TestClock clock;
+    private AsyncFixture fixture;
+
+    public AsyncScenarioCase(AsyncScenario scenario, TestClock clock, AsyncFixture fixture) {
+        this.scenario = scenario;
+        this.clock = clock;
+        this.fixture = fixture;
+    }
+
+    public pure string Id() => "async.scenario." + scenario.id;
+    public pure string Name() => "Async lifecycle contract " + scenario.id;
+
+    public async Task<Result<TestStepResult,string>> Setup(TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.Passed());
+    }
+
+    public async Task<Result<TestStepResult,string>> Cleanup(TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.Passed());
+    }
+
+    private Result<void,TestFailure> Verify(AsyncTestResult actual, ScriptedAsyncCase leaf) {
+        TestResult test = actual.test;
+        TestOutcome expected = scenario.primaryOutcome;
+        if (scenario.cleanupOutcome != TestOutcome.Passed || scenario.cleanupClockFailed)
+            expected = TestOutcome.Failed;
+        try Assert.Equal<TestOutcome>(expected, test.outcome, "final outcome");
+        try Assert.Equal<string>(scenario.id, test.id, "nested case identity");
+        try Assert.Equal<TestOutcome>(scenario.primaryOutcome, test.primaryOutcome, "primary outcome retained");
+        try Assert.Equal<TestPhase>(scenario.primaryPhase, test.primaryPhase, "primary phase retained");
+        try Assert.Equal<bool>(scenario.bodyRan, test.bodyRan, "body admission");
+        try Assert.True(test.cleanupRan, "every attempted setup owns cleanup");
+        try Assert.Equal<TestOutcome>(scenario.cleanupOutcome, test.cleanupOutcome, "cleanup outcome retained");
+        try Assert.Equal<bool>(scenario.cleanupClockFailed, actual.cleanupClockFailure.HasValue,
+                                   "clock failure is independent of cleanup failure");
+        if (scenario.primaryCode != "") {
+            try Assert.True(test.primaryFailure.HasValue, "primary failure exists");
+            try Assert.Equal<string>(scenario.primaryCode, test.primaryFailure.Value.code, "primary failure code");
+        } else {
+            try Assert.False(test.primaryFailure.HasValue, "successful primary has no failure");
+        }
+        if (scenario.cleanupCode != "") {
+            try Assert.True(test.cleanupFailure.HasValue, "cleanup failure exists");
+            try Assert.Equal<string>(scenario.cleanupCode, test.cleanupFailure.Value.code, "cleanup failure code");
+        } else {
+            try Assert.False(test.cleanupFailure.HasValue, "successful cleanup has no hook failure");
+        }
+        if (scenario.cleanupClockFailed)
+            try Assert.Equal<string>("test.clock_error", actual.cleanupClockFailure.Value.code,
+                                          "cleanup clock failure remains typed");
+        string expectedTrace = "setupcleanup";
+        if (scenario.bodyRan)
+            expectedTrace = "setupbodycleanup";
+        try Assert.Equal<string>(expectedTrace, leaf.trace, "hook order and exactly one cleanup attempt");
+        try Assert.False(leaf.cleanupCancelled, "mandatory cleanup has an independent token");
+        if (scenario.bodyRan)
+            try Assert.Equal<int>(leaf.setupDeadline, leaf.bodyDeadline, "setup and body share one deadline");
+        if (scenario.cleanupClockFailed && scenario.body == AsyncBehavior.FailCleanupClock) {
+            try Assert.Equal<int>(0, leaf.cleanupDeadline, "failed cleanup clock gives an expired deadline");
+            try Assert.Equal<string>("cleanup", test.cleanupFailure.Value.message,
+                                          "clock failure does not erase cleanup assertion message");
+        }
+        if (scenario.body == AsyncBehavior.AssertionFailure)
+            try Assert.Equal<string>("body", test.primaryFailure.Value.message,
+                                          "assertion message is not a transport string");
+        if (scenario.body == AsyncBehavior.Expire || scenario.setup == AsyncBehavior.Expire)
+            try Assert.True(leaf.cleanupDeadline > leaf.setupDeadline, "cleanup starts a fresh budget after body expiry");
+        return Result<void,TestFailure>.Success();
+    }
+
+    public async Task<Result<TestStepResult,string>> Body(TestDeadline deadline, CancellationToken token) {
+        ScriptedAsyncCase leaf = new ScriptedAsyncCase(scenario.id, scenario.setup,
+            scenario.body, scenario.cleanup, clock, fixture);
+        AsyncTestRunner runner = new AsyncTestRunner(clock);
+        Result<AsyncTestResult,string> actual = await runner.Run(leaf, 10, 4, token, CancellationToken.None);
+        if (!actual.IsSuccess)
+            return Result<TestStepResult,string>.Failure(actual.Error);
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.From(Verify(actual.Value, leaf)));
+    }
+}

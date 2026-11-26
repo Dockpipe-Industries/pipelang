@@ -1,0 +1,37 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+public model Class SelfTests {
+    public List<TestResult> Run(CancellationToken token) {
+        List<ITestCase> cases = List<ITestCase>.Empty();
+        cases.Add(new AssertionContractCase());
+        cases.Add(new LifecycleContractCase());
+        List<NumberCaseData> parameters = List<NumberCaseData>.Empty();
+        parameters.Add(NumberCaseData("numbers.negative", -2, 4));
+        parameters.Add(NumberCaseData("numbers.zero", 0, 0));
+        parameters.Add(NumberCaseData("numbers.positive", 3, 9));
+        foreach (NumberCaseData item in parameters)
+            cases.Add(new ParameterizedNumberCase(item));
+        TestRunner runner = new TestRunner();
+        return runner.RunAll(cases, token);
+    }
+
+    public TestResult DeliberateFailure(CancellationToken token) {
+        TestRunner runner = new TestRunner();
+        return runner.Run(new ScriptedCase("deliberate-failure", TestBehavior.Success,
+                                           TestBehavior.Failure, TestBehavior.Failure), token);
+    }
+
+    public bool DuplicateRegistrationRefused(CancellationToken token) {
+        List<ITestCase> cases = List<ITestCase>.Empty();
+        cases.Add(new ScriptedCase("duplicate", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success));
+        cases.Add(new ScriptedCase("duplicate", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success));
+        TestRunner runner = new TestRunner();
+        try {
+            List<TestResult> unexpectedResults = runner.RunAll(cases, token);
+        } catch (Error error) {
+            return true;
+        }
+        return false;
+    }
+}

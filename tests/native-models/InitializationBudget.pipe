@@ -1,0 +1,23 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class InitializationBudget {
+    private int initial = Work(5000);
+    public int value = 0;
+
+    public InitializationBudget(int iterations) {
+        value = initial + Work(iterations);
+    }
+
+    private pure int Work(int iterations) {
+        int index = 0;
+        while (index < iterations)
+            index = index + 1;
+        return index;
+    }
+
+    public pure int QueryWork(int iterations) => Work(iterations);
+
+    public void Consume(int iterations) {
+        value = 99;
+        value = Work(iterations);
+    }
+}

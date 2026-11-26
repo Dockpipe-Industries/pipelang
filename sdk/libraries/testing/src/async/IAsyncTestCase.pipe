@@ -1,0 +1,10 @@
+module PipeLang.Testing.Async;
+import PipeLang.Testing;
+
+public source Interface IAsyncTestCase {
+    pure string Id();
+    pure string Name();
+    Task<Result<TestStepResult,string>> Setup(TestDeadline deadline, CancellationToken token);
+    Task<Result<TestStepResult,string>> Body(TestDeadline deadline, CancellationToken token);
+    Task<Result<TestStepResult,string>> Cleanup(TestDeadline deadline, CancellationToken token);
+}

@@ -1,0 +1,20 @@
+module App;
+import Contracts;
+import Counters;
+
+// Two small exported roots exercise independent ownership of ordinary objects.
+public Class App {
+    private ICounter counter = new Counter(4);
+
+    public pure int Read() => counter.Read();
+
+    public void Increment() {
+        counter.Increment();
+    }
+}
+
+public Class Monitor {
+    private ICounter counter = new Counter(10);
+
+    public pure int Read() => counter.Read();
+}

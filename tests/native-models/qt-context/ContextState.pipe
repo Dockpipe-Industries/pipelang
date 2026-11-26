@@ -1,0 +1,62 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class ContextState {
+    private ContextOwner lifetime;
+    private bool projectionFailure = false;
+    public string Text;
+    public List<string> Rows;
+
+    public ContextState() {
+        lifetime = ContextOwner.Create();
+        Rows = List<string>.Empty();
+    }
+
+    public pure ContextOwner Lifetime() => lifetime;
+
+    public pure string Projected() {
+        if (projectionFailure)
+            return string.Utf8Slice("value", 7, 1);
+        return "available";
+    }
+
+    public bool FailProjection() {
+        projectionFailure = true;
+        return true;
+    }
+
+    public bool RecoverProjection() {
+        projectionFailure = false;
+        return true;
+    }
+    public pure bool Confirm(string value) => Text == value;
+
+    public bool Set(string value) {
+        Text = value;
+        return true;
+    }
+
+    public Result<void,string> Begin() {
+        Rows = List<string>.Empty();
+        return Result<void,string>.Success();
+    }
+
+    public Result<void,string> Append(string value) {
+        Rows.Add(value);
+        return Result<void,string>.Success();
+    }
+
+    public Result<void,string> Commit(string value) {
+        Text = value;
+        return Result<void,string>.Success();
+    }
+
+    public bool ReplaceAndSetLifetime(string value) {
+        Text = value;
+        lifetime.Replace();
+        return true;
+    }
+
+    public bool ReplaceLifetime() {
+        lifetime.Replace();
+        return true;
+    }
+}

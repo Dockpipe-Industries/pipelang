@@ -1,0 +1,10 @@
+module PipeLang.Json;
+
+// Optional capability sharing the JsonReader document owner. Exact decoded UTF8
+// equality only; source owns selection, traversal and application interpretation.
+public Interface JsonStringIndexer {
+    Result<JsonStringIndex,string> BeginStringIndex(int document, JsonStringIndexLimits limits);
+    Result<bool,string> AddString(JsonStringIndex index, JsonNode node, CancellationToken token);
+    Result<bool,string> ContainsString(JsonStringIndex index, JsonNode candidate, CancellationToken token);
+    Result<void,string> CloseStringIndex(JsonStringIndex index);
+}

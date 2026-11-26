@@ -1,0 +1,134 @@
+module PipeLang.Testing;
+
+public Class TestRunner {
+    private Result<void,TestFailure> Setup(ITestCase test, CancellationToken token) {
+        try {
+            return test.Setup(token);
+        } catch (Error error) {
+            return Result<void,TestFailure>.Failure(TestFailure("test.unexpected_error", error.Message));
+        }
+    }
+
+    private Result<void,TestFailure> Body(ITestCase test, IProbeTestCase? probe,
+                                           CancellationToken token, CancellationToken probeToken) {
+        try {
+            if (probe.HasValue)
+                return probe.Value.BodyWithProbe(token, probeToken);
+
+            return test.Body(token);
+        } catch (Error error) {
+            return Result<void,TestFailure>.Failure(TestFailure("test.unexpected_error", error.Message));
+        }
+    }
+
+    private Result<void,TestFailure> Cleanup(ITestCase test) {
+        try {
+            return test.Cleanup();
+        } catch (Error error) {
+            return Result<void,TestFailure>.Failure(TestFailure("test.unexpected_error", error.Message));
+        }
+    }
+
+    private pure TestOutcome Outcome(Result<void,TestFailure> result) {
+        if (result.IsFailure)
+            return TestOutcome.Failed;
+        if (result.IsCancelled)
+            return TestOutcome.Cancelled;
+        return TestOutcome.Passed;
+    }
+
+    private pure TestResult CancelledBeforeSetup(string id, string name) {
+        return TestResult(id, name, TestOutcome.Cancelled, TestOutcome.Cancelled, TestPhase.NotRun,
+                          TestFailure("test.cancelled", "Cancelled before setup"),
+                          TestOutcome.Passed, null, false, false);
+    }
+
+    private TestResult RunCore(ITestCase test, IProbeTestCase? probe,
+                               CancellationToken token, CancellationToken probeToken) {
+        string id = test.Id();
+        string name = test.Name();
+        if (id == "" || name == "")
+            throw Error("Tests require an explicit nonempty stable id and name");
+        if (token.IsCancellationRequested)
+            return CancelledBeforeSetup(id, name);
+
+        Result<void,TestFailure> primary = Result<void,TestFailure>.Success();
+        Result<void,TestFailure> cleanup = Result<void,TestFailure>.Success();
+        TestPhase phase = TestPhase.Setup;
+        bool bodyRan = false;
+        try {
+            primary = Setup(test, token);
+            if (primary.IsSuccess) {
+                if (token.IsCancellationRequested) {
+                    primary = Result<void,TestFailure>.Cancelled(
+                        TestFailure("test.cancelled", "Cancelled after setup"));
+                } else {
+                    phase = TestPhase.Body;
+                    bodyRan = true;
+                    primary = Body(test, probe, token, probeToken);
+                    if (primary.IsSuccess && token.IsCancellationRequested)
+                        primary = Result<void,TestFailure>.Cancelled(
+                            TestFailure("test.cancelled", "Cancelled during body"));
+                }
+            }
+        } finally {
+            // Every setup attempt owns exactly one cleanup attempt, including
+            // terminal execution faults that cannot become a TestResult.
+            cleanup = Cleanup(test);
+        }
+        TestOutcome outcome = Outcome(primary);
+        TestFailure? failure = null;
+        TestFailure? cleanupFailure = null;
+        if (!primary.IsSuccess)
+            failure = primary.Error;
+        if (!cleanup.IsSuccess) {
+            cleanupFailure = cleanup.Error;
+            outcome = TestOutcome.Failed;
+        }
+        return TestResult(id, name, outcome, Outcome(primary), phase, failure,
+                          Outcome(cleanup), cleanupFailure, bodyRan, true);
+    }
+
+    public TestResult Run(ITestCase test, CancellationToken token) {
+        return RunCore(test, null, token, token);
+    }
+
+    // probeToken is a scoped body input, never the runner's cancellation token.
+    // It may already be cancelled without suppressing setup, body or cleanup.
+    public TestResult RunProbe(IProbeTestCase test, CancellationToken token,
+                               CancellationToken probeToken) {
+        return RunCore(test, test, token, probeToken);
+    }
+
+    public List<TestResult> RunAll(List<ITestCase> tests, CancellationToken token) {
+        if (tests.Count > 128)
+            throw Error("A test suite supports at most 128 explicitly registered cases");
+        HashSet<string> ids = HashSet<string>.Empty();
+        foreach (ITestCase test in tests) {
+            if (test.Id() == "" || test.Name() == "" || !ids.Add(test.Id()))
+                throw Error("Test registration requires nonempty unique stable ids and names");
+        }
+
+        List<TestResult> results = List<TestResult>.Empty();
+        foreach (ITestCase test in tests)
+            results.Add(Run(test, token));
+        return results;
+    }
+
+    public List<TestResult> RunAllProbes(List<IProbeTestCase> tests, CancellationToken token,
+                                        CancellationToken probeToken) {
+        if (tests.Count > 128)
+            throw Error("A test suite supports at most 128 explicitly registered cases");
+        HashSet<string> ids = HashSet<string>.Empty();
+        foreach (IProbeTestCase test in tests) {
+            if (test.Id() == "" || test.Name() == "" || !ids.Add(test.Id()))
+                throw Error("Test registration requires nonempty unique stable ids and names");
+        }
+
+        List<TestResult> results = List<TestResult>.Empty();
+        foreach (IProbeTestCase test in tests)
+            results.Add(RunProbe(test, token, probeToken));
+        return results;
+    }
+
+}

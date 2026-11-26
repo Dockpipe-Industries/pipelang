@@ -1,0 +1,15 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.TextFold;
+
+public model Class Session {
+    public Session() {}
+
+    public int Run(int count) {
+        int total = 0;
+        for (int index = 0; index < count; index = index + 1) {
+            string marker = "source report prefix " + "constant non-ASCII suffix é";
+            total = total + string.Utf8Length(marker);
+        }
+        return total;
+    }
+}

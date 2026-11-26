@@ -1,0 +1,10 @@
+name: pipelang-context-qt-check
+description: Verify captured context receivers through actual generated Qt metadata and QML ownership.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: qt
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/context.check/assets/scripts/qt.sh

@@ -1,0 +1,268 @@
+module PipeLang.Crypto.Tests;
+import PipeLang.Crypto;
+import PipeLang.Testing;
+
+public Class CryptoCase : IProbeTestCase {
+    private Sha256Streams streams;
+    private Sha256Streams peer;
+    private CryptoInputs inputs;
+    private int scenario;
+    private int hash = 0;
+    private int peerHash = 0;
+    private List<int> live;
+    private List<int> peerLive;
+
+    public CryptoCase(Sha256Streams streams, Sha256Streams peer, CryptoInputs inputs, int scenario) {
+        this.streams = streams;
+        this.peer = peer;
+        this.inputs = inputs;
+        this.scenario = scenario;
+        live = List<int>.Empty();
+        peerLive = List<int>.Empty();
+    }
+
+    public pure string Id() => "crypto.contract." + string.FromInt(scenario);
+    public pure string Name() => "SHA256 custody and bounds " + string.FromInt(scenario);
+    public Result<void,TestFailure> Setup(CancellationToken token) => Result<void,TestFailure>.Success();
+
+    public Result<void,TestFailure> Cleanup() {
+        bool success = true;
+        if (hash != 0 && !streams.CloseSha256(hash).IsSuccess)
+            success = false;
+        if (peerHash != 0 && !peer.CloseSha256(peerHash).IsSuccess)
+            success = false;
+
+        foreach (int handle in live) {
+            if (!streams.CloseSha256(handle).IsSuccess)
+                success = false;
+        }
+        foreach (int handle in peerLive) {
+            if (!peer.CloseSha256(handle).IsSuccess)
+                success = false;
+        }
+
+        return Assert.True(success, "every admitted stream releases even after a failed assertion");
+    }
+
+    private Result<void,TestFailure> Open(int maximumBytes) {
+        Result<int,CryptoFailure> begun = streams.BeginSha256(maximumBytes);
+        try Assert.True(begun.IsSuccess, "stream admission succeeds");
+        hash = begun.Value;
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Close() {
+        try Assert.True(streams.CloseSha256(hash).IsSuccess, "explicit close succeeds");
+        hash = 0;
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Limits(CancellationToken token) {
+        Result<int,CryptoFailure> negative = streams.BeginSha256(-1);
+        try Assert.True(negative.IsFailure, "negative maximum refused");
+        try Assert.Equal<string>("crypto.invalid_limit", negative.Error.code, "typed negative limit");
+        Result<int,CryptoFailure> excessive = streams.BeginSha256(9223372036854775807);
+        try Assert.True(excessive.IsFailure, "SHA256 bit-count ceiling enforced before unsigned conversion");
+        try Assert.Equal<string>("crypto.invalid_limit", excessive.Error.code, "typed count ceiling");
+
+        try Open(2305843009213693951);
+        try Assert.True(streams.FinishSha256(hash, token).IsSuccess, "maximum admitted limit does not allocate the message");
+        try Close();
+        try Assert.True(streams.BeginSha256(2305843009213693952).IsFailure, "one over SHA256 bit-count ceiling refused");
+
+        try Open(0);
+        Result<void,CryptoFailure> zeroOver = streams.UpdateSha256(hash, ByteBuffer.FromUtf8("x"), token);
+        try Assert.True(zeroOver.IsFailure, "empty-only maximum rejects the first byte");
+        try Assert.Equal<string>("crypto.message_limit", zeroOver.Error.code, "typed running maximum");
+        try Assert.True(streams.FinishSha256(hash, token).IsFailure, "limit failure cannot publish an empty prefix digest");
+        try Close();
+
+        try Open(3);
+        try Assert.True(streams.UpdateSha256(hash, ByteBuffer.FromUtf8("abc"), token).IsSuccess, "exact running limit accepted");
+        try Assert.True(streams.UpdateSha256(hash, ByteBuffer.Empty(), token).IsSuccess, "empty update at exact maximum accepted");
+        Result<Sha256Digest,CryptoFailure> exact = streams.FinishSha256(hash, token);
+        try Assert.True(exact.IsSuccess, "exact count finishes");
+        try Assert.Equal<int>(3, exact.Value.byteCount, "exact count is retained");
+        try Assert.Equal<string>("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", exact.Value.lowercaseHex, "exact bytes hashed");
+        try Assert.True(streams.FinishSha256(hash, token).IsFailure, "finish seals exactly once");
+        try Assert.True(streams.UpdateSha256(hash, ByteBuffer.Empty(), token).IsFailure, "sealed stream refuses updates");
+        try Close();
+
+        try Open(3);
+        try Assert.True(streams.UpdateSha256(hash, ByteBuffer.FromUtf8("ab"), token).IsSuccess, "prefix accepted");
+        Result<void,CryptoFailure> over = streams.UpdateSha256(hash, ByteBuffer.FromUtf8("cd"), token);
+        try Assert.True(over.IsFailure, "partition crossing caller maximum rejected");
+        try Assert.Equal<string>("crypto.message_limit", over.Error.code, "exact overflow outcome");
+        try Assert.True(streams.UpdateSha256(hash, ByteBuffer.FromUtf8("c"), token).IsFailure, "failure releases consumed prefix, retry refused");
+        try Assert.True(streams.FinishSha256(hash, token).IsFailure, "failed update never yields partial success");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Custody(CancellationToken token) {
+        try Assert.True(streams.CloseSha256(0).IsFailure, "zero is not a handle");
+        try Assert.True(streams.UpdateSha256(-1, ByteBuffer.Empty(), token).IsFailure, "negative handle refused before unsigned conversion");
+        try Open(3);
+        int old = hash;
+        try Assert.True(peer.UpdateSha256(hash, ByteBuffer.FromUtf8("abc"), token).IsFailure, "cross-adapter update refused");
+        try Assert.True(peer.FinishSha256(hash, token).IsFailure, "cross-adapter finish refused");
+        try Assert.True(peer.CloseSha256(hash).IsFailure, "cross-adapter close cannot free foreign state");
+        try Assert.True(streams.UpdateSha256(hash, ByteBuffer.FromUtf8("abc"), token).IsSuccess, "foreign attempts leave owner's bytes unchanged");
+        try Assert.True(streams.CloseSha256(hash).IsSuccess, "owner closes consumed context");
+
+        Result<int,CryptoFailure> peerBegun = peer.BeginSha256(0);
+        try Assert.True(peerBegun.IsSuccess, "peer reuses provider tombstone");
+        peerHash = peerBegun.Value;
+        try Assert.True(streams.CloseSha256(old).IsSuccess, "local close remains idempotent after backend tombstone reuse");
+        try Assert.True(streams.FinishSha256(old, token).IsFailure, "closed handle never revives");
+        hash = 0;
+        try Open(0);
+        try Assert.NotEqual<int>(old, hash, "new admission uses a new generation");
+        try Assert.True(streams.CloseSha256(old).IsFailure, "replaced local tombstone refuses stale close");
+        try Assert.True(streams.FinishSha256(old, token).IsFailure, "reused local slot rejects stale generation");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Capacity(CancellationToken token) {
+        for (int index = 0; index < 64; index = index + 1) {
+            Result<int,CryptoFailure> begun = streams.BeginSha256(0);
+            try Assert.True(begun.IsSuccess, "exact 64 contexts admitted");
+            live.Add(begun.Value);
+        }
+
+        Result<int,CryptoFailure> over = peer.BeginSha256(0);
+        try Assert.True(over.IsFailure, "provider capacity shared across adapters");
+        try Assert.Equal<string>("crypto.context_limit", over.Error.code, "typed provider-wide context limit");
+        try Assert.True(streams.FinishSha256(live.At(0), token).IsSuccess, "full registry permits finish");
+        try Assert.True(peer.BeginSha256(0).IsFailure, "sealed stream retains its slot until close");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> DestructorReclaim(CancellationToken token) {
+        for (int index = 0; index < 64; index = index + 1) {
+            Result<int,CryptoFailure> begun = peer.BeginSha256(0);
+            try Assert.True(begun.IsSuccess, "peer fills provider before destruction");
+            peerLive.Add(begun.Value);
+        }
+
+        int old = peerLive.At(0);
+        try Assert.True(streams.BeginSha256(0).IsFailure, "live peer contexts occupy all provider slots");
+        try Assert.True(inputs.RecreatePeer().IsSuccess, "fixture destroys actual adapter then creates a fresh provider");
+        peerLive = List<int>.Empty();
+        try Assert.True(peer.CloseSha256(old).IsFailure, "fresh provider rejects destroyed adapter's handle");
+        return Capacity(token);
+    }
+
+    private Result<void,TestFailure> PartitionAndLarge(CancellationToken token, bool large) {
+        int length = 1048576;
+        int fixture = 7;
+        if (large) {
+            length = 536870912;
+            fixture = 6;
+        }
+
+        try Open(length);
+        Result<int,CryptoFailure> peerBegun = peer.BeginSha256(length);
+        try Assert.True(peerBegun.IsSuccess, "second partition stream begins");
+        peerHash = peerBegun.Value;
+        int offset = 0;
+        while (offset < length) {
+            Result<ByteBuffer,string> whole = inputs.Slice(fixture, offset, 1048576);
+            Result<ByteBuffer,string> first = inputs.Slice(fixture, offset, 524288);
+            Result<ByteBuffer,string> second = inputs.Slice(fixture, offset + 524288, 524288);
+            try Assert.True(whole.IsSuccess && first.IsSuccess && second.IsSuccess, "constant-memory bounded fixture chunks");
+            try Assert.Equal<int>(1048576, whole.Value.Length, "exact ByteBuffer transport ceiling");
+            try Assert.True(streams.UpdateSha256(hash, whole.Value, token).IsSuccess, "one-mebibyte partition succeeds");
+            try Assert.True(peer.UpdateSha256(peerHash, first.Value, token).IsSuccess, "first half partition succeeds");
+            try Assert.True(peer.UpdateSha256(peerHash, second.Value, token).IsSuccess, "second half partition succeeds");
+            offset = offset + 1048576;
+        }
+
+        Result<Sha256Digest,CryptoFailure> firstDigest = streams.FinishSha256(hash, token);
+        Result<Sha256Digest,CryptoFailure> secondDigest = peer.FinishSha256(peerHash, token);
+        try Assert.True(firstDigest.IsSuccess && secondDigest.IsSuccess, "both streamed partitions finish");
+        try Assert.Equal<int>(length, firstDigest.Value.byteCount, "exact long-stream count");
+        try Assert.Equal<int>(length, secondDigest.Value.byteCount, "partitioned long-stream count");
+        try Assert.Equal<string>(firstDigest.Value.lowercaseHex, secondDigest.Value.lowercaseHex, "partition agreement without retaining the full message");
+        if (large) {
+            // Independent maintained OpenSSL oracle for exactly 512 MiB of ASCII a.
+            string expected = "b9045a713caed5dff3d3b783e98d1ce5778d8bc331ee4119d707072312af06a7";
+            try Assert.Equal<string>(expected, firstDigest.Value.lowercaseHex, "512 MiB digest matches independent OpenSSL answer");
+            try Assert.Equal<string>(expected, secondDigest.Value.lowercaseHex, "partitioned 512 MiB digest matches independent answer");
+        }
+
+        try Assert.Equal<int>(64, string.Utf8Length(firstDigest.Value.lowercaseHex), "digest is lowercase hex of exactly 32 bytes");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Cancellation(CancellationToken token, CancellationToken probeToken) {
+        try Open(3);
+        int beforeUpdates = inputs.UpdateCalls().Value;
+        int beforeFinishes = inputs.FinishCalls().Value;
+        try Assert.False(probeToken.IsCancellationRequested, "real probe token begins live");
+        if (scenario == 5 || scenario == 7) {
+            try Assert.True(inputs.CancelProbe(scenario - 5).IsSuccess, "source requests genuine pre-call cancellation");
+        } else {
+            try Assert.True(inputs.CancelAfterProviderCall(scenario - 5, scenario == 8).IsSuccess,
+                "source schedules actual cancellation after the selected maintained provider call");
+        }
+
+        if (scenario <= 6) {
+            Result<void,CryptoFailure> stopped = streams.UpdateSha256(hash, ByteBuffer.FromUtf8("abc"), probeToken);
+            try Assert.True(stopped.IsCancelled, "update preserves real cancellation outcome");
+            try Assert.Equal<string>("crypto.cancelled", stopped.Error.code, "typed update cancellation");
+            int expectedCalls = 0;
+            if (scenario == 6)
+                expectedCalls = 1;
+
+            try Assert.Equal<int>(expectedCalls, inputs.UpdateCalls().Value - beforeUpdates, "pre-cancel consumes nothing; post-cancel delegates exactly once");
+        } else {
+            if (scenario == 8)
+                try Assert.True(streams.UpdateSha256(hash, ByteBuffer.FromUtf8("abc"), token).IsSuccess, "finish probe has already consumed real bytes");
+
+            Result<Sha256Digest,CryptoFailure> stopped = streams.FinishSha256(hash, probeToken);
+            try Assert.True(stopped.IsCancelled, "finish never publishes a digest after cancellation");
+            try Assert.Equal<string>("crypto.cancelled", stopped.Error.code, "typed finish cancellation");
+            int expectedCalls = 0;
+            if (scenario == 8)
+                expectedCalls = 1;
+
+            try Assert.Equal<int>(expectedCalls, inputs.FinishCalls().Value - beforeFinishes, "finish cancellation is checked before and after provider work");
+        }
+
+        try Assert.True(probeToken.IsCancellationRequested, "actual probe cancellation occurred");
+        try Assert.False(token.IsCancellationRequested, "runner normal token remains independent");
+        int consumedCalls = inputs.UpdateCalls().Value;
+        try Assert.True(streams.UpdateSha256(hash, ByteBuffer.FromUtf8("abc"), token).IsFailure, "cancelled consumed bytes cannot be retried");
+        try Assert.Equal<int>(consumedCalls, inputs.UpdateCalls().Value, "retry refusal happens before maintained provider invocation");
+        try Assert.True(streams.FinishSha256(hash, token).IsFailure, "cancelled prefix cannot be finalized");
+        try Assert.True(streams.CloseSha256(hash).IsSuccess, "cancelled context cleanup is idempotent");
+        hash = 0;
+
+        // Full readmission proves the cancelled provider context was released,
+        // independently of the adapter's local closed-handle refusal.
+        return Capacity(token);
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        return Assert.True(false, "Crypto custody cases require the explicit scoped probe runner");
+    }
+
+    public Result<void,TestFailure> BodyWithProbe(CancellationToken token, CancellationToken probeToken) {
+        if (scenario == 0)
+            return Limits(token);
+        if (scenario == 1)
+            return Custody(token);
+        if (scenario == 2)
+            return Capacity(token);
+        if (scenario == 3)
+            return DestructorReclaim(token);
+        if (scenario == 4)
+            return PartitionAndLarge(token, false);
+        if (scenario >= 5 && scenario <= 8)
+            return Cancellation(token, probeToken);
+        if (scenario == 9)
+            return PartitionAndLarge(token, true);
+
+        return Assert.True(false, "unknown Source crypto case");
+    }
+}

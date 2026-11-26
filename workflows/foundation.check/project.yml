@@ -1,0 +1,10 @@
+name: pipelang-foundation-project-check
+description: Verify byte iteration through installed SDK project/composition generation on native and WASM targets.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: project
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/foundation.check/assets/scripts/project.sh

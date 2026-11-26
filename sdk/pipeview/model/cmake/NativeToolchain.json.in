@@ -1,0 +1,11 @@
+{
+  "protocol": "pipelang.native-toolchain.v1",
+  "profile": "@PIPELANG_NATIVE_COMPILER_PROFILE@",
+  "compiler": {
+    "id": "@CMAKE_CXX_COMPILER_ID@",
+    "version": "@CMAKE_CXX_COMPILER_VERSION@"
+  },
+  "system": "@CMAKE_SYSTEM_NAME@",
+  "architecture": "@CMAKE_SYSTEM_PROCESSOR@",
+  "cxx_standard": 20
+}

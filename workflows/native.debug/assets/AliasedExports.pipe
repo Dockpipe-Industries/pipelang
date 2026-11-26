@@ -1,0 +1,72 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.AliasedExports;
+
+public source Interface IValue {
+    pure int Read();
+    Task<Result<int,string>> AfterWait(int offset);
+}
+
+public Class BaseValue {
+    public BaseValue() {}
+
+    public virtual pure int Read() => 30;
+}
+
+public Class DerivedValue : BaseValue, IValue {
+    public DerivedValue() : base() {}
+
+    public override pure int Read() => 42;
+
+    public async Task<Result<int,string>> AfterWait(int offset) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(20);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected permit");
+        return Result<int,string>.Success(this.Read() + offset);
+    }
+}
+
+public Class OtherValue : IValue {
+    public OtherValue() {}
+
+    public pure int Read() => 99;
+
+    public async Task<Result<int,string>> AfterWait(int offset) {
+        return Result<int,string>.Success(offset + 99);
+    }
+}
+
+public Class Collector {
+    private BaseValue baseValue;
+    private IValue interfaceValue;
+
+    public Collector(BaseValue baseValue, IValue interfaceValue) {
+        this.baseValue = baseValue;
+        this.interfaceValue = interfaceValue;
+    }
+
+    public pure int ReadBoth() => baseValue.Read() + interfaceValue.Read();
+
+    public Result<int,string> ReadStatus(bool refuse) {
+        if (refuse)
+            return Result<int,string>.Failure("authored refusal");
+        return Result<int,string>.Success(this.ReadBoth());
+    }
+
+    public Result<int,string> ReadFault() {
+        throw Error("invocation fault");
+    }
+}
+
+public model Class Root {
+    public pure int Run() => 42;
+}
+
+public composition Startup {
+    scoped BaseValue = DerivedValue;
+    scoped IValue = DerivedValue;
+    scoped Collector = Collector;
+    export Collector;
+    export BaseValue;
+    export IValue;
+}

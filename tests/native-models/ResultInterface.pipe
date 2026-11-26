@@ -1,0 +1,66 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Enum ReadCode { Missing, Conflict }
+public Record ReadError {
+    public ReadCode code = ReadCode.Missing;
+    public string message = "";
+    public string origin = "";
+    public int request = 0;
+}
+
+public Class ResultInterfaceModel {
+    private pure string Message(IResult<ReadError> outcome) {
+        if (outcome.IsSuccess)
+            return "";
+        return outcome.Error.message;
+    }
+
+    public pure IResult<ReadError> Number(Result<int,ReadError> outcome) => outcome;
+    public pure IResult<ReadError> Text(Result<string,ReadError> outcome) => outcome;
+    public pure IResult<ReadError> Nothing(Result<void,ReadError> outcome) => outcome;
+    public pure string NumberMessage(Result<int,ReadError> outcome) => Message(outcome);
+    public pure string TextMessage(Result<string,ReadError> outcome) => Message(outcome);
+    public pure int Retain(Result<int,ReadError> outcome) {
+        IResult<ReadError> common = outcome;
+        return outcome.Value;
+    }
+
+    public pure IResult<ReadError> Temporary() {
+        return Result<int,ReadError>.Failure(ReadError(ReadCode.Conflict, "version conflict", "reader", 41));
+    }
+
+    public pure bool Snapshot() {
+        Result<int,ReadError> typed = Result<int,ReadError>.Success(7);
+        IResult<ReadError> common = typed;
+        typed = Result<int,ReadError>.Failure(ReadError(ReadCode.Missing, "changed", "reader", 99));
+        return common.IsSuccess && typed.IsFailure;
+    }
+
+    public pure bool Identity() {
+        Result<int,ReadError> typed = Result<int,ReadError>.Success(7);
+        IResult<ReadError> common = typed;
+        IResult<ReadError> copy = common;
+        IResult<ReadError> another = typed;
+        return common == copy && common != another;
+    }
+
+    public pure List<IResult<ReadError>> Outcomes() {
+        List<IResult<ReadError>> results = List<IResult<ReadError>>.Empty();
+        results.Add(Result<int,ReadError>.Success(7));
+        results.Add(Result<string,ReadError>.Failure(ReadError(ReadCode.Conflict, "version conflict", "reader", 42)));
+        results.Add(Result<void,ReadError>.Cancelled(ReadError(ReadCode.Missing, "read cancelled", "reader", 43)));
+        return results;
+    }
+
+    public pure int CountFailures(List<IResult<ReadError>> outcomes) {
+        int failures = 0;
+        foreach (IResult<ReadError> outcome in outcomes) {
+            if (outcome.IsFailure)
+                failures = failures + 1;
+        }
+        return failures;
+    }
+
+    public string Describe(IResult<ReadError> outcome) => Message(outcome);
+    public IResult<ReadError> Owned(Result<int,ReadError> outcome) => outcome;
+    public pure IResult<string> String(Result<int,string> outcome) => outcome;
+}

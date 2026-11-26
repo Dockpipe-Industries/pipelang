@@ -1,0 +1,8 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Contracts;
+
+public source Interface IFaultyService {
+    pure int Identity();
+    pure int RootIdentity();
+    pure int AttemptDependencyIdentity();
+}

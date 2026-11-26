@@ -1,0 +1,44 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.JsonWireBytes;
+import PipeLang.Json;
+
+public Class Session {
+    private JsonReader reader;
+
+    public Session(JsonReader reader) {
+        this.reader = reader;
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        var wire = ByteBuffer.Empty();
+        wire.Add(255u);
+        wire.Add(254u);
+        if (scenario != 1)
+            wire.Add(52u);
+        else
+            wire.Add(123u);
+        wire.Add(0u);
+        if (scenario != 1) {
+            wire.Add(50u);
+            wire.Add(0u);
+        }
+
+        JsonReadLimits limits = new JsonReadLimits { retainedBytes = 65536, inputBytes = 4096 };
+        limits.detectUnicodeEncoding = true;
+        int document = try reader.BeginDocument(limits);
+        try {
+            try reader.AppendDocument(document, wire.Slice(0, 1));
+            try reader.AppendDocument(document, wire.Slice(1, wire.Length - 1));
+            JsonNode root = try reader.CompleteDocument(document, token);
+            ByteBuffer captured = try reader.InputSlice(document, 0, wire.Length);
+            if (captured != wire)
+                return Result<int,string>.Failure("encoded JSON capture changed");
+            int number = try reader.Int64Value(root);
+            return Result<int,string>.Success(number);
+        } finally {
+            var closed = reader.CloseDocument(document);
+            if (!closed.IsSuccess)
+                throw Error(closed.Error);
+        }
+    }
+}

@@ -1,0 +1,138 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedGraphSynchronization;
+
+public Class Member {
+    private Atomic<int> counter;
+    private Lock gate;
+    private SemaphoreSlim semaphore;
+    private ConcurrentQueue<int> queue;
+    private ConcurrentStack<int> stack;
+    private ConcurrentDictionary<int,int> dictionary;
+    private Atomic<int> localDefault;
+
+    public Member(Atomic<int> sourceCounter, Lock sourceGate, SemaphoreSlim sourceSemaphore,
+                  ConcurrentQueue<int> sourceQueue, ConcurrentStack<int> sourceStack,
+                  ConcurrentDictionary<int,int> sourceDictionary, bool fail) {
+        counter = sourceCounter;
+        gate = sourceGate;
+        semaphore = sourceSemaphore;
+        queue = sourceQueue;
+        stack = sourceStack;
+        dictionary = sourceDictionary;
+        if (fail)
+            throw Error("synchronized constructor failed");
+    }
+
+    public void Add() {
+        lock (gate) {
+            counter.Add(2);
+            semaphore.Release();
+            queue.Enqueue(5);
+            stack.Push(7);
+            dictionary.Set(1, 11);
+            localDefault.Add(10);
+        }
+    }
+
+    public int Observe(Member peer, int initial) {
+        lock (gate) {
+            if (counter.Load() != initial || peer.ReadCounter() != initial || localDefault.Load() != 0)
+                return -1;
+        }
+        return peer.Take() + 18;
+    }
+
+    public int Take() {
+        if (!semaphore.Wait(0))
+            return -1;
+        int value = queue.TryDequeue().Value + stack.TryPop().Value + dictionary.At(1);
+        dictionary.Clear();
+        return value + 1;
+    }
+
+    public int ReadCounter() {
+        lock (gate) {
+            return counter.Load();
+        }
+    }
+
+    public int ReadDefault() {
+        return localDefault.Load();
+    }
+}
+
+public Class BrokenCell {
+    private Atomic<int> first = Atomic<int>.Create(0);
+    private Atomic<int> second = Atomic<int>.Create(0);
+    private Atomic<int> third = Atomic<int>.Create(0);
+    private Atomic<int> fourth = Atomic<int>.Create(0);
+    private Atomic<int> fifth = Atomic<int>.Create(0);
+    private Atomic<int> sixth = Atomic<int>.Create(0);
+
+    public BrokenCell() {
+        throw Error("transient shared cell");
+    }
+
+    public virtual int Read() {
+        return first.Load();
+    }
+}
+
+public model Class Session {
+    private Member? first;
+    private Member? second;
+
+    public Session() {}
+
+    private void Install(bool fail) {
+        Atomic<int> counter = Atomic<int>.Create(40);
+        Lock gate = Lock.Create();
+        SemaphoreSlim semaphore = SemaphoreSlim.Create(0, 1);
+        ConcurrentQueue<int> queue = ConcurrentQueue<int>.Empty();
+        ConcurrentStack<int> stack = ConcurrentStack<int>.Empty();
+        ConcurrentDictionary<int,int> dictionary = ConcurrentDictionary<int,int>.Empty();
+        Member left = new Member(counter, gate, semaphore, queue, stack, dictionary, false);
+        Member right = new Member(counter, gate, semaphore, queue, stack, dictionary, fail);
+        first = left;
+        second = right;
+    }
+
+    public int Run(int scenario) {
+        if (scenario == 0) {
+            Install(false);
+            first.Value.Add();
+        } else if (scenario == 1) {
+            if (first.Value.ReadDefault() != 10)
+                return -1;
+            return second.Value.Observe(first.Value, 42);
+        } else if (scenario == 2) {
+            first = null;
+            second.Value.Add();
+            if (second.Value.ReadDefault() != 10)
+                return -1;
+            return second.Value.Take() + 18;
+        } else if (scenario == 3) {
+            first = null;
+            second = null;
+        } else if (scenario == 5) {
+            for (int iteration = 0; iteration < 800; iteration = iteration + 1) {
+                try {
+                    BrokenCell temporary = new BrokenCell();
+                    return -1;
+                } catch (Error error) {
+                    if (error.Message != "transient shared cell")
+                        throw error;
+                }
+            }
+        } else {
+            try {
+                Install(true);
+                return -1;
+            } catch (Error error) {
+                if (error.Message != "synchronized constructor failed")
+                    throw error;
+            }
+        }
+        return 42;
+    }
+}

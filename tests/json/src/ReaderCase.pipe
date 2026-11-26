@@ -1,0 +1,129 @@
+module PipeLang.Json.Tests;
+import PipeLang.Json;
+import PipeLang.Testing;
+
+public Class ReaderCase : ITestCase {
+    private JsonReader reader;
+    private FixtureBytes bytes;
+    private JsonScenario scenario;
+    private int document = 0;
+
+    public ReaderCase(JsonReader service, FixtureBytes inputs, JsonScenario data) {
+        reader = service;
+        bytes = inputs;
+        scenario = data;
+    }
+
+    public pure string Id() => "json.reader." + string.FromInt(scenario.id);
+    public pure string Name() => "Strict JSON scenario " + string.FromInt(scenario.id);
+    public Result<void,TestFailure> Setup(CancellationToken token) => Result<void,TestFailure>.Success();
+
+    public Result<void,TestFailure> Cleanup() {
+        if (document != 0)
+            return Assert.True(reader.CloseDocument(document).IsSuccess, "document cleanup succeeds");
+
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        JsonReadLimits limits = new JsonReadLimits {};
+        if (scenario.id == 19)
+            limits.inputBytes = 3;
+        if (scenario.id == 20)
+            limits.nodes = 3;
+        if (scenario.id == 21)
+            limits.nodes = 2;
+        if (scenario.id == 22 || scenario.id == 23)
+            limits.depth = 2;
+        if (scenario.id == 24 || scenario.id == 25)
+            limits.nameBytes = 3;
+        if (scenario.id == 26 || scenario.id == 27)
+            limits.decodedBytes = 3;
+        if (scenario.id == 32)
+            limits.retainedBytes = 4096;
+
+        Result<int,string> begun = reader.BeginDocument(limits);
+        try Assert.True(begun.IsSuccess, "valid limits admit a document");
+        document = begun.Value;
+
+        Result<int,string> length = bytes.Length(scenario.id);
+        try Assert.True(length.IsSuccess, "fixture length is available");
+        int offset = 0;
+        while (offset < length.Value) {
+            int count = 1;
+            if (length.Value > 100)
+                count = 65536;
+            if (length.Value - offset < count)
+                count = length.Value - offset;
+
+            Result<ByteBuffer,string> chunk = bytes.Slice(scenario.id, offset, count);
+            try Assert.True(chunk.IsSuccess, "fixture chunk stays bounded");
+            Result<void,string> appended = reader.AppendDocument(document, chunk.Value);
+            if (appended.IsFailure) {
+                try Assert.Equal<string>(scenario.error, appended.Error, "exact append refusal");
+                try Assert.True(reader.CompleteDocument(document, token).IsFailure, "append failure poisons document");
+                return Result<void,TestFailure>.Success();
+            }
+            offset = offset + count;
+        }
+
+        Result<JsonNode,string> completed = reader.CompleteDocument(document, token);
+        if (scenario.error != "") {
+            try Assert.True(completed.IsFailure, "invalid complete input is refused before queries");
+            try Assert.Equal<string>(scenario.error, completed.Error, "exact parser or resource refusal");
+            return Result<void,TestFailure>.Success();
+        }
+
+        try Assert.True(completed.IsSuccess, "valid complete input parses");
+        JsonNode root = completed.Value;
+        try Assert.Equal<int>(length.Value, reader.InputLength(document).Value, "capture retains exact input length");
+        Result<ByteBuffer,string> first = reader.InputSlice(document, 0, 1);
+        try Assert.True(first.IsSuccess, "captured bytes are queryable independently");
+        try Assert.Equal<uint32>(bytes.Slice(scenario.id, 0, 1).Value.At(0), first.Value.At(0), "capture preserves input bytes");
+        try Assert.True(reader.AppendDocument(document, ByteBuffer.Empty()).IsFailure, "completed documents are immutable");
+
+        if (scenario.id == 0) {
+            try Assert.Equal<JsonKind>(JsonKind.Object, reader.Kind(root).Value, "object kind");
+            try Assert.Equal<int>(4, reader.Count(root).Value, "enumeration includes unknown members");
+            JsonNode? missing = reader.FindMember(root, "absent").Value;
+            try Assert.False(missing.HasValue, "missing is distinct from null");
+            JsonNode present = reader.FindMember(root, "nil").Value.Value;
+            try Assert.Equal<JsonKind>(JsonKind.Null, reader.Kind(present).Value, "explicit null remains present");
+            try Assert.True(reader.BoolValue(present).IsFailure, "wrong-kind is recoverable");
+            JsonNode flag = reader.FindMember(root, "flag").Value.Value;
+            try Assert.True(reader.BoolValue(flag).Value, "bool scalar");
+            JsonNode member = reader.At(root, 0).Value;
+            try Assert.Equal<int>(3, reader.NameLength(member).Value, "member name byte length");
+            try Assert.Equal<string>("nil", reader.NameSlice(member, 0, 3).Value.DecodeUtf8(), "member names retain authored order");
+        }
+        if (scenario.id == 11)
+            try Assert.Equal<int>(9223372036854775807, reader.Int64Value(root).Value, "signed maximum exact");
+        if (scenario.id == 12)
+            try Assert.Equal<int>(-9223372036854775808, reader.Int64Value(root).Value, "signed minimum exact");
+        if (scenario.id == 13 || scenario.id == 39)
+            try Assert.True(reader.Int64Value(root).IsFailure, "integer overflow never rounds through float");
+        if (scenario.id == 14) {
+            try Assert.True(reader.Int64Value(root).IsFailure, "fraction is not an integer");
+            try Assert.Equal<float>(1.25, reader.FiniteFloatValue(root).Value, "finite float conversion");
+        }
+        if (scenario.id == 16) {
+            try Assert.Equal<int>(8193, reader.Count(root).Value, "arrays exceed source List bounds by indexed query");
+            JsonNode last = reader.At(root, 8192).Value;
+            try Assert.Equal<int>(7, reader.Int64Value(last).Value, "last large-array element is reachable");
+            try Assert.True(reader.At(root, 8193).IsFailure, "out-of-range index is recoverable");
+        }
+        if (scenario.id == 17) {
+            try Assert.Equal<int>(1048577, reader.ScalarLength(root).Value, "scalar exceeds one source value");
+            try Assert.Equal<string>("x", reader.ScalarSlice(root, 1048576, 1).Value.DecodeUtf8(), "bounded scalar fragments");
+            try Assert.True(reader.ScalarSlice(root, 0, 1048577).IsFailure, "fragment cap is exact");
+        }
+        if (scenario.id == 29)
+            try Assert.Equal<uint32>(0u, reader.ScalarSlice(root, 0, 1).Value.At(0), "escaped NUL is binary-safe");
+        if (scenario.id == 37) {
+            try Assert.Equal<int>(4, reader.ScalarLength(root).Value, "surrogate pair decodes to UTF8");
+            try Assert.Equal<uint32>(240u, reader.ScalarSlice(root, 0, 1).Value.At(0), "slices may split UTF8 at byte boundaries");
+        }
+
+        return Result<void,TestFailure>.Success();
+    }
+}

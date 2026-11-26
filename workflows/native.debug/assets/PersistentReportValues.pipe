@@ -1,0 +1,77 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.PersistentReportValues;
+
+public Record Report {
+    public string label;
+    public Dictionary<string,int> counts;
+}
+
+public Record ReportIndex {
+    public string label;
+    public List<Report> reports;
+    public HashSet<string> keys;
+}
+
+public model Class Session {
+    private List<int> initial;
+    private List<string> messages;
+    private List<Report> reports = List<Report>.Empty();
+    private ReportIndex index;
+
+    public Session(List<int> values, List<string> texts) {
+        initial = values;
+        messages = texts;
+        index = ReportIndex("initial", List<Report>.Empty(), HashSet<string>.Empty());
+    }
+
+    private Report Make(string label, int passed) {
+        Dictionary<string,int> counts = Dictionary<string,int>.Empty();
+        counts.Add("passed", passed);
+        return Report(label, counts);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(2);
+        if (opened)
+            return Result<int,string>.Failure("unexpected report gate");
+
+        if (scenario == 0) {
+            reports.Add(Make("committed", initial.At(0)));
+            index.reports.Add(Make("indexed", 7));
+            index.keys.Add("retained");
+            ReportIndex savedIndex = index;
+            index = ReportIndex("committed", reports, index.keys);
+            index.reports.Add(Make("child", 3));
+            if (savedIndex.reports.Count != 1 || savedIndex.reports.At(0).label != "indexed")
+                return Result<int,string>.Failure("an earlier record value changed");
+            return Result<int,string>.Success(reports.Count);
+        }
+        if (scenario == 1) {
+            reports.Add(Make("discarded", 99));
+            initial.Add(999);
+            index.reports.Add(Make("discarded", 100));
+            index.keys.Clear();
+            index = ReportIndex("discarded", reports, index.keys);
+            throw Error("rollback persistent reports");
+        }
+        if (scenario == 2) {
+            Report saved = reports.At(0);
+            ReportIndex savedIndex = index;
+            if (reports.Count != 1 || saved.label != "committed" || initial.Count != 1 ||
+                savedIndex.label != "committed" || savedIndex.reports.Count != 2 ||
+                savedIndex.reports.At(1).counts.At("passed") != 3 || !savedIndex.keys.Contains("retained"))
+                return Result<int,string>.Failure("persistent reports changed across invocations");
+            return Result<int,string>.Success(saved.counts.At("passed"));
+        }
+        if (scenario == 4) {
+            int total = 0;
+            for (int position = 0; position < 80; position = position + 1)
+                total = total + string.Utf8Length(messages.At(position));
+            return Result<int,string>.Success(total);
+        }
+        if (reports.Count != 0 || index.reports.Count != 0 || index.keys.Count != 0 || initial.Count != 1)
+            return Result<int,string>.Failure("persistent state leaked into another receiver");
+        return Result<int,string>.Success(initial.At(0));
+    }
+}

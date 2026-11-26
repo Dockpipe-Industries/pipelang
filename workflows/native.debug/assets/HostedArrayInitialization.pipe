@@ -1,0 +1,65 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module InitialArray;
+
+public Record Cell {
+    public int number;
+    public string text;
+    public ByteBuffer payload;
+}
+
+public model Class Model {
+    public Array<Cell> cells;
+    public int total;
+    public ByteBuffer bytes;
+    public Cell saved;
+
+    public Model(int count, string text) {
+        if (text == "grow") {
+            int index = 0;
+            while (index < count) {
+                bytes.Add(255u);
+                index = index + 1;
+            }
+        } else {
+            string label = "é中" + text + string.FromInt(count);
+            if (text == "split")
+                label = string.Utf8Slice(label, 0, 1);
+            ByteBuffer packet = ByteBuffer.FromUtf8("é");
+            packet.Add(0u);
+            bytes = packet;
+            packet.Append(ByteBuffer.FromUtf8("a"));
+            packet.Add(255u);
+            if (text == "invalid-bytes")
+                label = packet.DecodeUtf8();
+            bytes.Add(33u);
+            int byteSum = 0;
+            foreach (uint32 item in packet)
+                byteSum = byteSum + int.FromUInt32(item);
+            ByteBuffer payload = packet.Slice(2, 3);
+            int suffix = string.Utf8IndexOf(label, text, 5);
+            Cell fill = count == 0 ? Cell(0, "empty", ByteBuffer.Empty()) :
+                Cell(41 + count / count, string.Utf8Slice(label, suffix, string.Utf8Length(label) - suffix), payload);
+            saved = fill;
+            saved.payload.Add(1u);
+            cells = Array<Cell>.Create(count, fill);
+            if (cells.Count != 0) {
+                Cell first = cells.At(0);
+                foreach (Cell item in cells) {
+                    total = total + item.number;
+                    if (total == first.number && first == fill && string.StartsWith(label, "é中") &&
+                        string.ByteLengthIs(label, string.Utf8Length(label)) && string.ByteAtOr(label, 1, -1) == 169 &&
+                        byteSum == 716 && payload.At(2) == 255u && packet.IndexOf(payload, 0) == 2)
+                        cells.Set(0, Cell(43, "constructed", item.payload));
+                }
+            }
+        }
+    }
+
+    public pure Cell Read() => cells.At(0);
+    public pure ByteBuffer ReadBytes() => bytes;
+    public pure Cell ReadSaved() => saved;
+
+    public void Edit(int value) {
+        cells.Set(0, Cell(value, "edited", ByteBuffer.Empty()));
+    }
+}

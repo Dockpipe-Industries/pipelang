@@ -1,0 +1,50 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.AsyncRecursion;
+
+public model Class Session {
+    public Session() {}
+
+    private async Task<Result<int,string>> Bottom() {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(4);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected recursive permit");
+        return Result<int,string>.Success(10);
+    }
+
+    private async Task<Result<int,string>> Count(int remaining) {
+        if (remaining == 0) {
+            var bottom = await Bottom();
+            return bottom;
+        }
+        int child = try await Count(remaining - 1);
+        return Result<int,string>.Success(child + 1);
+    }
+
+    private async Task<Result<int,string>> Even(int remaining) {
+        if (remaining == 0) {
+            var bottom = await Bottom();
+            return bottom;
+        }
+        int child = try await Odd(remaining - 1);
+        return Result<int,string>.Success(child + 2);
+    }
+
+    private async Task<Result<int,string>> Odd(int remaining) {
+        if (remaining == 0) {
+            var bottom = await Bottom();
+            return bottom;
+        }
+        int child = try await Even(remaining - 1);
+        return Result<int,string>.Success(child + 3);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        if (scenario < 0) {
+            var even = await Even(0 - scenario);
+            return even;
+        }
+        var counted = await Count(scenario);
+        return counted;
+    }
+}

@@ -1,0 +1,83 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.PersistentSets;
+
+public Record IndexState {
+    public string label;
+    public HashSet<string> keys;
+}
+
+public Class Cache {
+    private HashSet<string> keys = HashSet<string>.Empty();
+
+    public void Add(string key) {
+        keys.Add(key);
+    }
+
+    public void Clear() {
+        keys.Clear();
+    }
+
+    public pure bool Contains(string key) {
+        return keys.Contains(key);
+    }
+}
+
+public model Class Session {
+    private HashSet<string> keys;
+    private IndexState index;
+    private Cache cache;
+
+    public Session(HashSet<string> initial) {
+        keys = initial;
+        index = IndexState("initial", initial);
+        cache = new Cache();
+    }
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        if (scenario == 0) {
+            var saved = keys;
+            IndexState original = index;
+            keys.Add("root");
+            index.keys.Add("record");
+            cache.Add("child");
+            var gate = SemaphoreSlim.Create(0, 1);
+            bool opened = await gate.WaitAsync(15);
+            if (opened || saved.Count != 1 || !saved.Contains("seed") ||
+                original.keys.Contains("record") || original.label != "initial")
+                return Result<int,string>.Failure("receiver mutation changed an earlier set view");
+            return Result<int,string>.Success(42);
+        }
+        if (scenario == 1) {
+            if (keys.Count != 2 || !keys.Contains("root") || !index.keys.Contains("record") ||
+                index.label != "initial" || !cache.Contains("child"))
+                return Result<int,string>.Failure("persistent set state changed");
+            return Result<int,string>.Success(42);
+        }
+        if (scenario == 2) {
+            keys.Clear();
+            index = IndexState("discard", keys);
+            cache.Clear();
+            throw Error("rollback persistent sets");
+        }
+        if (scenario == 3) {
+            index = IndexState("committed", keys);
+            keys.Remove("seed");
+            return Result<int,string>.Success(42);
+        }
+        if (scenario == 4) {
+            if (index.label != "committed" || index.keys.Count != 2 || !index.keys.Contains("seed") ||
+                !index.keys.Contains("root") || keys.Contains("seed") || keys.Count != 1 ||
+                !cache.Contains("child"))
+                return Result<int,string>.Failure("whole record replacement changed a shared set");
+            return Result<int,string>.Success(42);
+        }
+        if (scenario == 6) {
+            if (keys.Count != 1101 || !keys.Contains("bulk-1099") || index.keys != keys)
+                return Result<int,string>.Failure("bulk constructor set changed during import");
+            return Result<int,string>.Success(42);
+        }
+        if (keys.Count != 1 || !keys.Contains("seed") || index.keys != keys || cache.Contains("child"))
+            return Result<int,string>.Failure("persistent sets leaked into another receiver");
+        return Result<int,string>.Success(42);
+    }
+}

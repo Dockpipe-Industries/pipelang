@@ -1,0 +1,67 @@
+module GenericMemberApp;
+import GenericMemberLibrary;
+
+public Class App {
+    private Assertions assertions;
+    private DerivedAssertions inherited;
+    private Holder holder;
+    public int acquisitions = 0;
+
+    public App() {
+        assertions = new Assertions();
+        inherited = new DerivedAssertions();
+        holder = new Holder(assertions);
+    }
+
+    private pure bool Parameter(Assertions candidate) {
+        return candidate.Equal<int>(7, 7, "parameter");
+    }
+
+    private Assertions Next() {
+        acquisitions = acquisitions + 1;
+        return assertions;
+    }
+
+    public pure bool Primitive() {
+        return Parameter(assertions) &&
+            assertions.Equal<string>("same", "same", "string") &&
+            assertions.Equal<bool>(true, true, "bool") &&
+            !assertions.Equal<int>(1, 2, "different");
+    }
+
+    public pure bool Records() {
+        Point first = new Point { x = 3, y = 4 };
+        Point same = new Point { x = 3, y = 4 };
+        Point different = new Point { x = 3, y = 5 };
+        return assertions.Equal<Point>(first, same, "record") &&
+            !assertions.Equal<Point>(first, different, "different record");
+    }
+
+    public bool Local() {
+        Assertions local = new Assertions();
+        return local.Equal<int>(5, 5, "local");
+    }
+
+    public pure bool NestedField() {
+        return holder.value.Equal<int>(9, 9, "field");
+    }
+
+    public bool Constructed() {
+        return new Assertions().Equal<int>(8, 8, "constructed");
+    }
+
+    public int CallReceiver() {
+        int value = Next().Remember<int>(42);
+        if (value != 42)
+            return -1;
+        return acquisitions * 100 + assertions.Count();
+    }
+
+    public pure bool Inherited() {
+        return inherited.Equal<int>(6, 6, "inherited");
+    }
+
+    public pure int Overloads() {
+        return assertions.Identity<int>(3) + assertions.Identity<int>(4, 0);
+    }
+}

@@ -1,0 +1,7 @@
+module PipeLang.IO;
+
+public Record FileDigest {
+    public int byteCount = 0;
+    public string sha256 = "";
+    public FileIdentity identity;
+}

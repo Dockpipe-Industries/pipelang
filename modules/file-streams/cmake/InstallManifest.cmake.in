@@ -1,0 +1,23 @@
+set(file_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+file(SHA256 "${file_prefix}/@package_share@/library/library.json" installed_library_sha256)
+if(NOT installed_library_sha256 STREQUAL "@file_library_sha256@")
+    message(FATAL_ERROR "Installed FileStreams descriptor differs from the selected source")
+endif()
+
+execute_process(COMMAND "@PipeLangModel_GENERATOR@" verify
+    --prefix "@PipeLangModel_SDK_PREFIX@" --manifest "@PipeLangModel_MANIFEST@"
+    --sha256 "@PIPELANG_CORE_MANIFEST_SHA256@" RESULT_VARIABLE core_status)
+execute_process(COMMAND "@PipeLangModel_GENERATOR@" verify
+    --prefix "@crypto_prefix@" --manifest "@PipeLangCryptoStream_MANIFEST@"
+    --sha256 "@PIPELANG_CRYPTO_STREAM_MANIFEST_SHA256@" RESULT_VARIABLE crypto_status)
+if(NOT core_status EQUAL 0 OR NOT crypto_status EQUAL 0)
+    message(FATAL_ERROR "Selected installed dependency drifted before FileStreams inventory")
+endif()
+
+execute_process(COMMAND "@PipeLangModel_GENERATOR@" manifest
+    --prefix "${file_prefix}" --manifest "${file_prefix}/@package_share@/sdk-manifest.json"
+    --roots "@CMAKE_INSTALL_INCLUDEDIR@" "@CMAKE_INSTALL_LIBDIR@" "@package_share@"
+    RESULT_VARIABLE manifest_status)
+if(NOT manifest_status EQUAL 0)
+    message(FATAL_ERROR "Failed to inventory independent optional FileStreams package")
+endif()

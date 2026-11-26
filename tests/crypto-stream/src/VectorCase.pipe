@@ -1,0 +1,74 @@
+module PipeLang.Crypto.Tests;
+import PipeLang.Crypto;
+import PipeLang.Testing;
+
+public Class VectorCase : ITestCase {
+    private Sha256Streams streams;
+    private CryptoInputs inputs;
+    private VectorData vector;
+    private int hash = 0;
+
+    public VectorCase(Sha256Streams streams, CryptoInputs inputs, VectorData vector) {
+        this.streams = streams;
+        this.inputs = inputs;
+        this.vector = vector;
+    }
+
+    public pure string Id() => "crypto.vector." + string.FromInt(vector.fixture);
+    public pure string Name() => "SHA256 known answer " + string.FromInt(vector.fixture);
+    public Result<void,TestFailure> Setup(CancellationToken token) => Result<void,TestFailure>.Success();
+
+    public Result<void,TestFailure> Cleanup() {
+        if (hash != 0)
+            return Assert.True(streams.CloseSha256(hash).IsSuccess, "vector stream cleanup");
+
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Append(int offset, int count, CancellationToken token) {
+        Result<ByteBuffer,string> bytes = inputs.Slice(vector.fixture, offset, count);
+        try Assert.True(bytes.IsSuccess, "bounded vector bytes available");
+        try Assert.Equal<int>(count, bytes.Value.Length, "fixture supplies exact requested bytes");
+        return Assert.True(streams.UpdateSha256(hash, bytes.Value, token).IsSuccess, "vector update succeeds");
+    }
+
+    private Result<void,TestFailure> Verify(int split, CancellationToken token) {
+        Result<int,CryptoFailure> begun = streams.BeginSha256(vector.length);
+        try Assert.True(begun.IsSuccess, "known-vector stream begins");
+        hash = begun.Value;
+
+        if (split >= 0) {
+            try Append(0, split, token);
+            try Append(split, vector.length - split, token);
+        } else {
+            int offset = 0;
+            while (offset < vector.length) {
+                int count = 65536;
+                if (vector.length - offset < count)
+                    count = vector.length - offset;
+
+                try Append(offset, count, token);
+                offset = offset + count;
+            }
+        }
+
+        Result<Sha256Digest,CryptoFailure> finished = streams.FinishSha256(hash, token);
+        try Assert.True(finished.IsSuccess, "known vector finishes");
+        try Assert.Equal<int>(vector.length, finished.Value.byteCount, "exact known-vector byte count");
+        try Assert.Equal<string>(vector.hex, finished.Value.lowercaseHex, "independent known SHA256 answer");
+        try Assert.True(streams.CloseSha256(hash).IsSuccess, "known vector closes");
+        hash = 0;
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        if (vector.length <= 112) {
+            for (int split = 0; split <= vector.length; split = split + 1)
+                try Verify(split, token);
+        } else {
+            try Verify(-1, token);
+        }
+
+        return Result<void,TestFailure>.Success();
+    }
+}

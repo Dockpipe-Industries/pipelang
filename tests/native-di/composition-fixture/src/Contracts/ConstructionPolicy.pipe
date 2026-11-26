@@ -1,0 +1,7 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Contracts;
+
+// A trusted read-only fixture decision; it never allocates IDs or acquires resources.
+public Interface ConstructionPolicy {
+    pure Result<int,string> Read(string kind, int context);
+}

@@ -1,0 +1,134 @@
+public Record SettingsValues {
+    public string playerName = "Rider";
+    public bool vsync = true;
+    public int volume = 100;
+}
+
+public Record SettingsSnapshot {
+    public SettingsValues draft;
+    public SettingsValues saved;
+    public bool saving;
+    public bool dirty;
+    public bool valid;
+    public bool canSave;
+    public string status;
+    public string error;
+}
+
+public Enum SaveStatus { Saved, Unsaved, Invalid, Saving, Failed, Cancelled }
+
+public Interface SettingsStorage {
+    Task<Result<void, string>> Save(SettingsValues value, CancellationToken cancellation);
+}
+
+public Class SettingsModel {
+    private SettingsStorage Store;
+    public SettingsValues draft;
+    public SettingsValues saved;
+    public SaveStatus status = SaveStatus.Saved;
+    public string error = "";
+
+    public SettingsModel(SettingsStorage store, SettingsValues initial) {
+        Store = store;
+        draft = initial;
+        saved = initial;
+        Edited();
+    }
+
+    public pure bool IsValid(SettingsValues value)
+        => value.playerName != "" && value.volume >= 0 && value.volume <= 100;
+
+    public pure bool IsDirty() => draft != saved;
+    public pure bool CanEdit() => status != SaveStatus.Saving;
+    public pure bool CanSave() => CanEdit() && IsDirty() && IsValid(draft);
+
+    public pure string StatusText() {
+        if (status == SaveStatus.Saving)
+            return "Saving";
+        if (status == SaveStatus.Failed)
+            return "Save failed";
+        if (status == SaveStatus.Cancelled)
+            return "Save cancelled";
+        if (status == SaveStatus.Invalid)
+            return "Invalid settings";
+        if (status == SaveStatus.Unsaved)
+            return "Unsaved changes";
+        return "Saved";
+    }
+
+    public pure SettingsSnapshot Inspect() => new SettingsSnapshot {
+        draft = draft,
+        saved = saved,
+        saving = status == SaveStatus.Saving,
+        dirty = IsDirty(),
+        valid = IsValid(draft),
+        canSave = CanSave(),
+        status = StatusText(),
+        error = error
+    };
+
+    private void Edited() {
+        error = "";
+        if (!IsValid(draft))
+            status = SaveStatus.Invalid;
+        else if (IsDirty())
+            status = SaveStatus.Unsaved;
+        else
+            status = SaveStatus.Saved;
+    }
+
+    public Result<void, string> Rename(string value) {
+        if (status == SaveStatus.Saving)
+            return Result<void, string>.Cancelled("A save is pending");
+        draft.playerName = value;
+        Edited();
+        return Result<void, string>.Success();
+    }
+
+    public Result<void, string> ChangeVSync(bool value) {
+        if (status == SaveStatus.Saving)
+            return Result<void, string>.Cancelled("A save is pending");
+        draft.vsync = value;
+        Edited();
+        return Result<void, string>.Success();
+    }
+
+    public Result<void, string> ChangeVolume(int value) {
+        if (status == SaveStatus.Saving)
+            return Result<void, string>.Cancelled("A save is pending");
+        draft.volume = value;
+        Edited();
+        return Result<void, string>.Success();
+    }
+
+    public Result<void, string> Revert() {
+        if (status == SaveStatus.Saving)
+            return Result<void, string>.Cancelled("A save is pending");
+        draft = saved;
+        status = SaveStatus.Saved;
+        error = "";
+        return Result<void, string>.Success();
+    }
+
+    public async Task<Result<void, string>> Save(CancellationToken cancellation) {
+        if (status == SaveStatus.Saving)
+            return Result<void, string>.Cancelled("A save is pending");
+        if (!CanSave())
+            return Result<void, string>.Failure("Save requires valid unsaved changes");
+        SettingsValues captured = draft;
+        status = SaveStatus.Saving;
+        error = "";
+        Result<void, string> outcome = await Store.Save(captured, cancellation);
+        if (outcome.IsSuccess) {
+            saved = captured;
+            status = SaveStatus.Saved;
+        } else if (outcome.IsCancelled) {
+            status = SaveStatus.Cancelled;
+            error = outcome.Error;
+        } else {
+            status = SaveStatus.Failed;
+            error = outcome.Error;
+        }
+        return outcome;
+    }
+}

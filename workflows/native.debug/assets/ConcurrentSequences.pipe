@@ -1,0 +1,79 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ConcurrentSequences;
+
+public Record Packet {
+    public string name;
+    public int bytes;
+}
+
+public Class Buffers {
+    private ConcurrentQueue<Packet> queue;
+    private ConcurrentStack<int> stack;
+
+    public Buffers() {}
+
+    public bool Check() {
+        Packet point = new Packet {name = "ready", bytes = 8};
+        queue.Enqueue(point);
+        stack.Push(9);
+        return queue.Count == 1 && queue.TryPeek().Value.bytes == 8 &&
+            stack.TryPop().Value == 9 && !stack.TryPeek().HasValue;
+    }
+}
+
+public model Class Session {
+    public Session() {}
+
+    private async Task<Result<int,string>> Finish(ConcurrentQueue<Packet> queue, int total, CancellationToken token) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(4, token);
+        if (acquired || queue.Count != 1 || queue.TryDequeue().Value.name != "last")
+            return Result<int,string>.Failure("the forwarded queue lost its state");
+        return Result<int,string>.Success(total);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        Buffers buffers = new Buffers();
+        if (!buffers.Check())
+            return Result<int,string>.Failure("default receiver fields did not retain separate collections");
+
+        ConcurrentQueue<Packet> queue = ConcurrentQueue<Packet>.Empty();
+        ConcurrentQueue<Packet> alias = queue;
+        if (queue.TryDequeue().HasValue)
+            return Result<int,string>.Failure("an empty queue had a value");
+
+        List<int> work = List<int>.Empty();
+        for (int number = 1; number < 4; number = number + 1) {
+            work.Add(number);
+        }
+        parallel foreach (int item in work) {
+            Packet packet = new Packet {name = "item", bytes = item};
+            alias.Enqueue(packet);
+        }
+        List<Packet> retained = alias.ToList();
+        int total = 0;
+        foreach (Packet packet in queue) {
+            total = total + packet.bytes;
+            alias.TryDequeue();
+        }
+        if (queue.Count != 0 || retained.Count != 3 || total != 6)
+            return Result<int,string>.Failure("the queue did not keep its ordered snapshot");
+
+        ConcurrentStack<int> stack = ConcurrentStack<int>.Empty();
+        ConcurrentStack<int> copy = stack;
+        stack.Push(36);
+        copy.Push(2);
+        if (stack.TryPeek().Value != 2 || copy.TryPop().Value != 2 || stack.TryPop().Value != 36 ||
+            copy.TryPop().HasValue)
+            return Result<int,string>.Failure("the stack did not share LIFO state");
+        stack.Push(99);
+        copy.Clear();
+        if (stack.Count != 0)
+            return Result<int,string>.Failure("stack clear lost its shared identity");
+
+        Packet last = new Packet {name = "last", bytes = 12};
+        alias.Enqueue(last);
+        Result<int,string> result = await Finish(queue, total + 36, token);
+        return result;
+    }
+}

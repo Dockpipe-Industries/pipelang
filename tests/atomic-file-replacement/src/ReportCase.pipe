@@ -1,0 +1,159 @@
+module PipeLang.IO.ReportTests;
+import PipeLang.IO;
+import PipeLang.Testing;
+
+public Class ReportCase : IProbeTestCase {
+    private ExclusiveFileOutput writer;
+    private AtomicFileReplacement replace;
+    private FileStreams reader;
+    private ReportFixture fixture;
+    private int scenario;
+    private string target;
+    private string staged;
+    private int handle = 0;
+    private int renames = 0;
+
+    public ReportCase(ExclusiveFileOutput writer, AtomicFileReplacement replace,
+                      FileStreams reader, ReportFixture fixture, int scenario) {
+        this.writer = writer;
+        this.replace = replace;
+        this.reader = reader;
+        this.fixture = fixture;
+        this.scenario = scenario;
+        target = "report-" + string.FromInt(scenario);
+        staged = "stage-" + string.FromInt(scenario);
+    }
+
+    public pure string Id() => "io.report_replace." + string.FromInt(scenario);
+    public pure string Name() => "atomic report replacement " + string.FromInt(scenario);
+
+    public Result<void,TestFailure> Setup(CancellationToken token) {
+        string fault = "";
+        if (scenario == 4) {
+            fault = "cancel_after_rename";
+        } else if (scenario == 6) {
+            fault = "sync_after_rename";
+        }
+
+        try Assert.True(fixture.Prepare(target, staged, scenario != 0, fault).IsSuccess,
+                        "controlled staging and actual previous report");
+        Result<int,string> count = fixture.Renames();
+        try Assert.True(count.IsSuccess, "read real rename witness");
+        renames = count.Value;
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Cleanup() {
+        bool outputClosed = true;
+        if (handle != 0)
+            outputClosed = writer.CloseOutput(handle).IsSuccess;
+
+        bool fixtureClosed = fixture.Close().IsSuccess;
+        return Assert.True(outputClosed && fixtureClosed, "independent output and fixture cleanup");
+    }
+
+    private Result<FileDigest,TestFailure> Stage(int bytes, CancellationToken token) {
+        Result<int,IoFailure> started = writer.BeginExclusiveOutput(staged, bytes, token);
+        try Assert.True(started.IsSuccess, "exclusive stage admitted");
+        handle = started.Value;
+        if (bytes == 33554432) {
+            Result<ByteBuffer,string> block = fixture.Block(1048576);
+            try Assert.True(block.IsSuccess && block.Value.Length == 1048576, "real bounded block");
+            for (int index = 0; index < 32; index = index + 1)
+                try Assert.True(writer.AppendOutput(handle, block.Value, token).IsSuccess,
+                                "write exact 32 MiB report at its admitted profile");
+        } else {
+            try Assert.True(writer.AppendOutput(handle, ByteBuffer.FromUtf8("abc"), token).IsSuccess,
+                            "write actual report data");
+        }
+
+        Result<FileDigest,IoFailure> saved = writer.CommitOutput(handle, token);
+        try Assert.True(saved.IsSuccess, "staged file and directory synced");
+        try Assert.True(writer.CloseOutput(handle).Value == OutputEffect.Committed, "stage settled");
+        handle = 0;
+        return Result<FileDigest,TestFailure>.Success(saved.Value);
+    }
+
+    private Result<void,TestFailure> Digest(string path, int bytes, string expected, CancellationToken token) {
+        Result<FileDigest,IoFailure> digest = reader.DigestFile(path, bytes, token);
+        try Assert.True(digest.IsSuccess, "actual report bytes admitted independently");
+        try Assert.Equal<int>(bytes, digest.Value.byteCount, "exact report bytes");
+        return Assert.Equal<string>(expected, digest.Value.sha256, "exact report digest");
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        return Assert.True(false, "report contracts require scoped probes");
+    }
+
+    public Result<void,TestFailure> BodyWithProbe(CancellationToken token, CancellationToken probeToken) {
+        if (scenario == 7) {
+            Result<int,IoFailure> oversize = writer.BeginExclusiveOutput(staged, 33554433, token);
+            try Assert.True(oversize.IsFailure && oversize.Error.code == "io.invalid_limit" &&
+                           oversize.Error.effect == OutputEffect.NoDurableOutput, "32 MiB report cap");
+            return Assert.True(reader.DigestFile("staged/" + staged, 3, token).IsFailure,
+                               "cap refusal has no output");
+        }
+
+        int bytes = 3;
+        string expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        if (scenario == 1) {
+            bytes = 33554432;
+            expected = "facb58ac139bf9fc0e1f8b1f147003236b1b69e84f3a4c94166fa66f18f89932";
+        }
+
+        FileDigest written = try Stage(bytes, token);
+        try Assert.Equal<string>(expected, written.sha256, "actual stage known answer");
+        if (scenario == 3)
+            try Assert.True(fixture.ChangeStage().IsSuccess, "change staged content and revision");
+
+        string destination = target;
+        if (scenario == 5)
+            destination = "../" + target;
+
+        Result<OutputEffect,IoFailure> result = Result<OutputEffect,IoFailure>.Failure(new IoFailure {});
+        if (scenario == 2 || scenario == 4)
+            result = replace.ReplaceFile(staged, destination, written.identity, written.byteCount, probeToken);
+        else
+            result = replace.ReplaceFile(staged, destination, written.identity, written.byteCount, token);
+
+        if (scenario == 0 || scenario == 1) {
+            try Assert.True(result.IsSuccess && result.Value == OutputEffect.Committed, "committed atomic report");
+        } else if (scenario == 2) {
+            try Assert.True(result.IsCancelled && result.Error.effect == OutputEffect.NoDurableOutput,
+                            "cancelled before rename leaves original report");
+        } else if (scenario == 4) {
+            try Assert.True(result.IsCancelled && result.Error.effect == OutputEffect.Unknown,
+                            "cancel after actual rename remains uncertain");
+        } else if (scenario == 6) {
+            try Assert.True(result.IsFailure && result.Error.effect == OutputEffect.Unknown &&
+                           result.Error.code == "io.replacement_directory_sync",
+                           "failure after rename preserves the observed effect");
+        } else {
+            string expectedFailure = "io.replacement_source_changed";
+            if (scenario == 5)
+                expectedFailure = "io.invalid_path";
+            try Assert.True(result.IsFailure && result.Error.effect == OutputEffect.NoDurableOutput &&
+                           result.Error.code == expectedFailure, "pre-rename refusal preserves old report");
+        }
+
+        bool renamed = scenario == 0 || scenario == 1 || scenario == 4 || scenario == 6;
+        int renameCount = renames;
+        if (renamed)
+            renameCount = renameCount + 1;
+        try Assert.Equal<int>(renameCount, fixture.Renames().Value, "one actual rename at most");
+
+        if (scenario != 0) {
+            Result<ByteBuffer,string> old = fixture.OldHandleBytes();
+            try Assert.True(old.IsSuccess && old.Value.DecodeUtf8() == "old",
+                           "previous open reader still sees its original version");
+        }
+
+        if (renamed) {
+            try Assert.True(reader.DigestFile("staged/" + staged, bytes, token).IsFailure,
+                            "successful rename removes the staged name");
+            return Digest(target, bytes, expected, token);
+        }
+
+        return Digest(target, 3, "cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4", token);
+    }
+}

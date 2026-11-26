@@ -1,0 +1,18 @@
+module PipeLang.Json;
+
+// One composed sink owns one document. If any call fails, abandon that
+// staging sink. Finish terminates the complete document with a newline.
+public Interface JsonDocumentOutput {
+    Result<void,string> BeginObject();
+    Result<void,string> BeginArray();
+    Result<void,string> Name(string key);
+    Result<void,string> EndObject();
+    Result<void,string> EndArray();
+    Result<void,string> WriteText(string value);
+    Result<void,string> WriteInteger(int value);
+    Result<void,string> WriteFinite(float value);
+    Result<void,string> WriteBoolean(bool value);
+    Result<void,string> WriteNull();
+    Result<void,string> WriteValue(JsonNode value, CancellationToken token);
+    Result<int,string> Finish();
+}

@@ -1,0 +1,279 @@
+public Record Label {
+    public string text = "initial";
+}
+
+public Record Envelope {
+    public Result<Label,string>? payload;
+}
+
+public Class Fundamentals {
+
+    public float stored = 0.0;
+    public int count = 0;
+    public Label? label;
+    public Envelope envelope;
+
+    public pure int Remainder(int left, int right) => left % right;
+    public pure int MinimumRemainder() => -9223372036854775808 % -1;
+    public pure int RemainderPrecedence() => 29 - 20 % 6 * 2;
+    public pure int RemainderLeftAssociative() => 20 % 6 / 2;
+    public pure int RemainderAfterDivision() => 20 / 3 % 4;
+    public pure int ConstantRemainderFailure() => 7 % 0;
+    public int RemainderRollback(int divisor) {
+        count = 99;
+        return count % divisor;
+    }
+
+    public pure float Decimal() => 0.1;
+
+    public pure float Scientific() => 1.25e+3;
+    public pure float Smallest() => 4.9406564584124654e-324;
+    public pure float Largest() => 1.7976931348623157e308;
+    public pure float Absolute(float value) => float.Abs(value);
+    public pure float Root(float value) => float.Sqrt(value);
+    public pure float Logarithm(float value) => float.Log(value);
+    public pure float NegativeZero() => -0.0;
+    public pure float Add(float left, float right) => left + right;
+    public pure float Subtract(float left, float right) => left - right;
+    public pure float Multiply(float left, float right) => left * right;
+    public pure float Divide(float left, float right) => left / right;
+    public pure bool Less(float left, float right) => left < right;
+    public pure bool LessEqual(float left, float right) => left <= right;
+    public pure bool Greater(float left, float right) => left > right;
+    public pure bool GreaterEqual(float left, float right) => left >= right;
+    public pure bool Equal(float left, float right) => left == right;
+    public pure bool Different(float left, float right) => left != right;
+    public pure bool Finite(float value) => float.IsFinite(value);
+    public pure float FirstMinimum(float first, float second) => second < first ? second : first;
+    public pure float Composed(float value) => Add(Multiply(value, 2.0), 0.5);
+    public pure float SafeArm(bool safe) => safe ? 1.25 : Absent().Value;
+    public pure bool SafeAnd() => false && Absent().Value > 0.0;
+    public pure bool SafeOr() => true || Absent().Value > 0.0;
+    public pure bool DefaultNone() => !label.HasValue && !envelope.payload.HasValue;
+    public pure float? Present(float value) => value;
+    public pure float? Absent() => null;
+    public pure Label ReadLabel() => label.Value;
+
+    public void SetLabel(Label value) {
+        label = value;
+    }
+
+    public void SetEnvelope(Envelope value) {
+        envelope = value;
+    }
+
+    public float Store(float value) {
+        stored = value;
+        return stored;
+    }
+
+    public float MissingRollsBack() {
+        count = 99;
+        label = Label("changed");
+        return Absent().Value;
+    }
+
+    public int Scoped(bool early) {
+        int result = 3;
+        {
+            int local = 7;
+            result = result + local;
+            {
+                int nested = 11;
+                if (early)
+                    return result + nested;
+                result = result + 1;
+            }
+        }
+        {
+            int local = 2;
+            result = result + local;
+        }
+        return result;
+    }
+
+    public int ReturnFromBlock() {
+        {
+            return 41;
+        }
+    }
+    public pure Result<float32?,string> NullableSample(int mode) {
+        if (mode == 0)
+            return Result<float32?,string>.Success(3.5f);
+        if (mode == 1)
+            return Result<float32?,string>.Success(null);
+        if (mode == 2)
+            return Result<float32?,string>.Failure("domain failure");
+        return Result<float32?,string>.Cancelled("cancelled exactly");
+    }
+
+    public pure int? NullableChoice(bool present) => present ? 7 : null;
+    public pure int? NullableReverseChoice(bool present) => present ? null : 9;
+    public pure int? NullableBothAbsent(bool choose) => choose ? null : null;
+    private bool NullableCountedCondition(bool choose) {
+        count = count + 1;
+        return choose;
+    }
+    public int? NullableCountedAbsent(bool choose) => NullableCountedCondition(choose) ? null : null;
+    public pure int?? NullableOuterAbsent() => null;
+    public pure int?? NullableInnerAbsent() {
+        int? inner = null;
+        return inner;
+    }
+    public pure int?? NullableNestedValue() => 11;
+    public pure int NullableCheckedRead(int? value) => value.Value;
+    public pure int? NullableIdentity(int? value) => value;
+    private pure T NullableIdentityValue<T>(T value) => value;
+    public pure int? NullableGeneric() => NullableIdentityValue<int?>(17);
+    public pure bool NullableStorage() {
+        List<int?> values = List<int?>.Empty();
+        values.Add(null);
+        values.Add(5);
+        Array<int?> array = Array<int?>.Create(2, null);
+        array.Set(1, 6);
+        Dictionary<string,int?> mapping = Dictionary<string,int?>.Empty();
+        mapping.Add("missing", null);
+        mapping.Add("present", 8);
+        Label? local = Label("owned");
+        local = null;
+        return values.At(0) == null && null == values.At(0)
+            && values.At(1).Value == 5 && array.At(0) == null
+            && array.At(1).Value == 6 && !local.HasValue
+            && mapping.TryGet("missing").HasValue
+            && !mapping.TryGet("missing").Value.HasValue
+            && mapping.TryGet("present").Value.Value == 8;
+    }
+}
+
+public Record Numeric32Box<T> { public T Value; }
+public Class Binary32 {
+    private pure float32? AbsentFloat32() => null;
+
+    private Atomic<float32> cell = Atomic<float32>.Create(0f);
+    public pure T Identity<T>(T value) => value;
+    public pure float32 Generic() {
+        Numeric32Box<float32> box = new Numeric32Box<float32> { Value = 0.1f };
+        return Identity<float32>(box.Value);
+    }
+    public float32 Exchange(float32 value) => cell.Exchange(value);
+    public float32 CompareExchange(float32 value, float32 comparand) => cell.CompareExchange(value, comparand);
+    public float32 stored = 0f;
+    public List<float32> values = List<float32>.Empty();
+    public pure float32 Decimal() => 0.1f;
+    public pure float32 Tie() => 1.000000059604644775390625f;
+    public pure float32 Smallest() => 1.401298464324817e-45f;
+    public pure float32 Largest() => 3.4028234663852886e38f;
+    public pure float32 NegativeZero() => -0f;
+    public pure float32 Add(float32 first, float32 second) => first + second;
+    public pure float32 Subtract(float32 first, float32 second) => first - second;
+    public pure float32 Multiply(float32 first, float32 second) => first * second;
+    public pure float32 Divide(float32 first, float32 second) => first / second;
+    public pure float32 Negative(float32 value) => -value;
+    public pure float32 MultiplyAdd(float32 first, float32 second, float32 third) => first * second + third;
+    public pure float32 FirstMinimum(float32 first, float32 second) => second < first ? second : first;
+    public pure bool LessEqual(float32 first, float32 second) => first <= second;
+    public pure bool Greater(float32 first, float32 second) => first > second;
+    public pure bool GreaterEqual(float32 first, float32 second) => first >= second;
+    public pure bool Less(float32 first, float32 second) => first < second;
+    public pure bool Equal(float32 first, float32 second) => first == second;
+    public pure bool Different(float32 first, float32 second) => first != second;
+    public pure bool Finite(float32 value) => float32.IsFinite(value);
+    public pure float32 Absolute(float32 value) => float32.Abs(value);
+    public pure float32 Root(float32 value) => float32.Sqrt(value);
+    public pure float32 Logarithm(float32 value) => float32.Log(value);
+    public pure float32 Contact(float32 friction, float32 impulse, float32 speed) {
+        float32 scale = friction * impulse / speed;
+        return scale < 1f ? scale : 1f;
+    }
+    public float32 Store(float32 value) {
+        stored = value;
+        values.Add(value);
+        return stored;
+    }
+    public float32 Rollback() {
+        stored = 7f;
+        values.Add(8f);
+        return AbsentFloat32().Value;
+    }
+}
+
+public Class Math64 {
+    public int count = 0;
+    public pure float Sin(float value) => float.Sin(value);
+    public pure float Cos(float value) => float.Cos(value);
+    public pure float Tan(float value) => float.Tan(value);
+    public pure float Asin(float value) => float.Asin(value);
+    public pure float Acos(float value) => float.Acos(value);
+    public pure float Atan(float value) => float.Atan(value);
+    public pure float Exp(float value) => float.Exp(value);
+    public pure float Expm1(float value) => float.Expm1(value);
+    public pure float Cbrt(float value) => float.Cbrt(value);
+    public pure float Tanh(float value) => float.Tanh(value);
+    public pure float Floor(float value) => float.Floor(value);
+    public pure float Ceiling(float value) => float.Ceiling(value);
+    public pure float Atan2(float left, float right) => float.Atan2(left, right);
+    public pure float Pow(float left, float right) => float.Pow(left, right);
+    public pure float Hypot(float left, float right) => float.Hypot(left, right);
+    public pure float Hypot3(float first, float second, float third) => float.Hypot(first, second, third);
+    public pure float Fmod(float left, float right) => float.Fmod(left, right);
+    public pure float Remainder(float left, float right) => float.Remainder(left, right);
+    public pure float CopySign(float left, float right) => float.CopySign(left, right);
+    public pure float FromInt(int value) => float.FromInt(value);
+    public pure int ToInt(float value) => int.FromFloat(value);
+    public pure float Widen(float32 value) => float.FromFloat32(value);
+    public int ConvertRollback(float value) {
+        count = 99;
+        return int.FromFloat(value);
+    }
+    public float PreserveDomain(float value) {
+        count = 7;
+        return float.Asin(value);
+    }
+}
+
+public Class Math32 {
+    public int count = 0;
+    public pure float32 Sin(float32 value) => float32.Sin(value);
+    public pure float32 Cos(float32 value) => float32.Cos(value);
+    public pure float32 Tan(float32 value) => float32.Tan(value);
+    public pure float32 Asin(float32 value) => float32.Asin(value);
+    public pure float32 Acos(float32 value) => float32.Acos(value);
+    public pure float32 Atan(float32 value) => float32.Atan(value);
+    public pure float32 Exp(float32 value) => float32.Exp(value);
+    public pure float32 Expm1(float32 value) => float32.Expm1(value);
+    public pure float32 Cbrt(float32 value) => float32.Cbrt(value);
+    public pure float32 Tanh(float32 value) => float32.Tanh(value);
+    public pure float32 Floor(float32 value) => float32.Floor(value);
+    public pure float32 Ceiling(float32 value) => float32.Ceiling(value);
+    public pure float32 Atan2(float32 left, float32 right) => float32.Atan2(left, right);
+    public pure float32 Pow(float32 left, float32 right) => float32.Pow(left, right);
+    public pure float32 Hypot(float32 left, float32 right) => float32.Hypot(left, right);
+    public pure float32 Hypot3(float32 first, float32 second, float32 third) => float32.Hypot(first, second, third);
+    public pure float32 Fmod(float32 left, float32 right) => float32.Fmod(left, right);
+    public pure float32 Remainder(float32 left, float32 right) => float32.Remainder(left, right);
+    public pure float32 CopySign(float32 left, float32 right) => float32.CopySign(left, right);
+    public pure float32 FromInt(int value) => float32.FromInt(value);
+    public pure int ToInt(float32 value) => int.FromFloat32(value);
+    public pure float32 Narrow(float value) => float32.FromFloat(value);
+    public int ConvertRollback(float32 value) {
+        count = 99;
+        return int.FromFloat32(value);
+    }
+    public float32 PreserveDomain(float32 value) {
+        count = 7;
+        return float32.Asin(value);
+    }
+
+}
+
+public Interface NullableSampler {
+    Result<float32?,string> Sample();
+}
+
+public Class NullableCallbacks {
+    private NullableSampler sampler;
+    public NullableCallbacks(NullableSampler service) {
+        sampler = service;
+    }
+    public Result<float32?,string> Echo() => sampler.Sample();
+}

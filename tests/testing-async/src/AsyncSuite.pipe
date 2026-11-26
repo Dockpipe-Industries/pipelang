@@ -1,0 +1,99 @@
+module PipeLang.Testing.AsyncSelfTests;
+import PipeLang.Testing;
+import PipeLang.Testing.Async;
+
+public model Class AsyncSuite {
+    private TestClock clock;
+    private AsyncFixture fixture;
+
+    public AsyncSuite(TestClock clock, AsyncFixture fixture) {
+        this.clock = clock;
+        this.fixture = fixture;
+    }
+
+    private pure AsyncTestResult UnitResult(string id, string name, TestStepResult step) {
+        TestResult test = TestResult(id, name, step.outcome, step.outcome, TestPhase.Body,
+            step.failure, TestOutcome.Passed, null, true, false);
+        return AsyncTestResult(test, null);
+    }
+
+    private Result<void,TestFailure> VerifyEnvelope(List<AsyncTestResult> results) {
+        try Assert.Equal<int>(23, results.Count, "explicit async unit and table registration count");
+        try Assert.Equal<string>("async.step-values", results.At(0).test.id, "first declaration retained");
+        try Assert.Equal<string>("async.numbers.negative", results.At(1).test.id, "typed table declaration order");
+        foreach (AsyncTestResult result in results)
+            try Assert.Equal<TestOutcome>(TestOutcome.Passed, result.test.outcome,
+                                               "source async unit case " + result.test.id);
+        return Result<void,TestFailure>.Success();
+    }
+
+    public async Task<Result<List<AsyncTestResult>,string>> Run(
+        CancellationToken activeToken, CancellationToken cancelledToken) {
+        List<IAsyncTestCase> cases = List<IAsyncTestCase>.Empty();
+        cases.Add(new AsyncStepContractCase());
+        List<AsyncNumberData> parameters = List<AsyncNumberData>.Empty();
+        parameters.Add(AsyncNumberData("async.numbers.negative", -2, 4));
+        parameters.Add(AsyncNumberData("async.numbers.zero", 0, 0));
+        parameters.Add(AsyncNumberData("async.numbers.positive", 3, 9));
+        foreach (AsyncNumberData parameter in parameters)
+            cases.Add(new AsyncNumberCase(parameter));
+
+        List<AsyncScenario> scenarios = List<AsyncScenario>.Empty();
+        scenarios.Add(AsyncScenario("success", AsyncBehavior.Success, AsyncBehavior.Success, AsyncBehavior.Success,
+            TestOutcome.Passed, TestPhase.Body, "", TestOutcome.Passed, "", false, true));
+        scenarios.Add(AsyncScenario("setup.assertion", AsyncBehavior.AssertionFailure, AsyncBehavior.Success, AsyncBehavior.Success,
+            TestOutcome.Failed, TestPhase.Setup, "assert.true", TestOutcome.Passed, "", false, false));
+        scenarios.Add(AsyncScenario("setup.error", AsyncBehavior.Throw, AsyncBehavior.Success, AsyncBehavior.Success,
+            TestOutcome.Failed, TestPhase.Setup, "test.unexpected_error", TestOutcome.Passed, "", false, false));
+        scenarios.Add(AsyncScenario("setup.cancelled", AsyncBehavior.Cancelled, AsyncBehavior.Success, AsyncBehavior.Success,
+            TestOutcome.Cancelled, TestPhase.Setup, "fixture.cancelled", TestOutcome.Passed, "", false, false));
+        scenarios.Add(AsyncScenario("body.assertion", AsyncBehavior.Success, AsyncBehavior.AssertionFailure, AsyncBehavior.Success,
+            TestOutcome.Failed, TestPhase.Body, "assert.true", TestOutcome.Passed, "", false, true));
+        scenarios.Add(AsyncScenario("body.transport-failure", AsyncBehavior.Success, AsyncBehavior.TransportFailure, AsyncBehavior.Success,
+            TestOutcome.Failed, TestPhase.Body, "test.unexpected_error", TestOutcome.Passed, "", false, true));
+        scenarios.Add(AsyncScenario("body.transport-cancelled", AsyncBehavior.Success, AsyncBehavior.TransportCancelled, AsyncBehavior.Success,
+            TestOutcome.Cancelled, TestPhase.Body, "test.cancelled", TestOutcome.Passed, "", false, true));
+        scenarios.Add(AsyncScenario("body.error", AsyncBehavior.Success, AsyncBehavior.Throw, AsyncBehavior.Success,
+            TestOutcome.Failed, TestPhase.Body, "test.unexpected_error", TestOutcome.Passed, "", false, true));
+        scenarios.Add(AsyncScenario("body.cancelled", AsyncBehavior.Success, AsyncBehavior.Cancelled, AsyncBehavior.Success,
+            TestOutcome.Cancelled, TestPhase.Body, "fixture.cancelled", TestOutcome.Passed, "", false, true));
+        scenarios.Add(AsyncScenario("setup.deadline", AsyncBehavior.Expire, AsyncBehavior.Success, AsyncBehavior.Success,
+            TestOutcome.Failed, TestPhase.Setup, "test.deadline_exceeded", TestOutcome.Passed, "", false, false));
+        scenarios.Add(AsyncScenario("body.deadline", AsyncBehavior.Success, AsyncBehavior.Expire, AsyncBehavior.Success,
+            TestOutcome.Failed, TestPhase.Body, "test.deadline_exceeded", TestOutcome.Passed, "", false, true));
+        scenarios.Add(AsyncScenario("cleanup.assertion", AsyncBehavior.Success, AsyncBehavior.Success, AsyncBehavior.AssertionFailure,
+            TestOutcome.Passed, TestPhase.Body, "", TestOutcome.Failed, "assert.true", false, true));
+        scenarios.Add(AsyncScenario("cleanup.error", AsyncBehavior.Success, AsyncBehavior.Success, AsyncBehavior.Throw,
+            TestOutcome.Passed, TestPhase.Body, "", TestOutcome.Failed, "test.unexpected_error", false, true));
+        scenarios.Add(AsyncScenario("cleanup.cancelled", AsyncBehavior.Success, AsyncBehavior.Success, AsyncBehavior.Cancelled,
+            TestOutcome.Passed, TestPhase.Body, "", TestOutcome.Cancelled, "fixture.cancelled", false, true));
+        scenarios.Add(AsyncScenario("cleanup.deadline", AsyncBehavior.Success, AsyncBehavior.Success, AsyncBehavior.Expire,
+            TestOutcome.Passed, TestPhase.Body, "", TestOutcome.Failed, "test.deadline_exceeded", false, true));
+        scenarios.Add(AsyncScenario("dual.assertion", AsyncBehavior.Success, AsyncBehavior.AssertionFailure, AsyncBehavior.AssertionFailure,
+            TestOutcome.Failed, TestPhase.Body, "assert.true", TestOutcome.Failed, "assert.true", false, true));
+        scenarios.Add(AsyncScenario("body.clock", AsyncBehavior.Success, AsyncBehavior.FailPhaseClock, AsyncBehavior.Success,
+            TestOutcome.Failed, TestPhase.Body, "test.clock_error", TestOutcome.Passed, "", false, true));
+        scenarios.Add(AsyncScenario("cleanup.clock-before", AsyncBehavior.Success, AsyncBehavior.FailCleanupClock, AsyncBehavior.AssertionFailure,
+            TestOutcome.Passed, TestPhase.Body, "", TestOutcome.Failed, "assert.true", true, true));
+        scenarios.Add(AsyncScenario("cleanup.clock-after", AsyncBehavior.Success, AsyncBehavior.Success, AsyncBehavior.FailPhaseClock,
+            TestOutcome.Passed, TestPhase.Body, "", TestOutcome.Passed, "", true, true));
+        foreach (AsyncScenario scenario in scenarios)
+            cases.Add(new AsyncScenarioCase(scenario, clock, fixture));
+
+        AsyncTestRunner runner = new AsyncTestRunner(clock);
+        Result<List<AsyncTestResult>,string> suite = await runner.RunAll(cases, 1000000, 1000,
+            CancellationToken.None, CancellationToken.None);
+        if (!suite.IsSuccess)
+            return suite;
+        List<AsyncTestResult> results = suite.Value;
+        TestSteps steps = new TestSteps();
+        results.Add(UnitResult("async.envelope", "Source suite registration and results",
+            steps.From(VerifyEnvelope(results))));
+        AsyncRegistrationChecks registration = new AsyncRegistrationChecks(clock, fixture);
+        Result<TestStepResult,string> checkedRegistration = await registration.Run(activeToken, cancelledToken);
+        if (!checkedRegistration.IsSuccess)
+            return Result<List<AsyncTestResult>,string>.Failure(checkedRegistration.Error);
+        results.Add(UnitResult("async.registration", "Source registration and independent tokens", checkedRegistration.Value));
+        return Result<List<AsyncTestResult>,string>.Success(results);
+    }
+}

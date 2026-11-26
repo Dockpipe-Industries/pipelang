@@ -1,0 +1,13 @@
+view FixtureView(model: FixtureModel) {
+    Column(id: "root") {
+        Row(id: "editors") {
+            TextField(id: "name", value: bind model.Draft.Name, sensitive: true, changed: model.SetName);
+            Toggle(id: "toggle", label: "Enabled", value: bind model.Draft.Enabled, changed: model.SetEnabled);
+            PercentStepper(id: "volume", label: "Volume", value: bind model.Draft.Volume, changed: model.SetVolume);
+        }
+        Button(id: "save", label: "Save", enabled: bind model.CanSave(), clicked: model.Save);
+        Button(id: "fail", label: "Fail", clicked: model.Fail);
+        Button(id: "cancel", label: "Cancel", clicked: model.Cancel);
+        Label(id: "error", value: bind model.Error);
+    }
+}

@@ -1,0 +1,285 @@
+public source Interface ICase {
+    int Body();
+}
+
+public Class Runner {
+    public int Run(ICase item) => item.Body();
+}
+
+public Class LeafCase : ICase {
+    public int Body() => 7;
+}
+
+public Class NestedCase : ICase {
+    public int Body() {
+        Runner nested = new Runner();
+        LeafCase leaf = new LeafCase();
+        return nested.Run(leaf);
+    }
+}
+
+public source Interface INode {
+    int Accept(Visitor visitor);
+}
+
+public Class Leaf : INode {
+    private int value;
+    public Leaf(int value) {
+        this.value = value;
+    }
+    public int Accept(Visitor visitor) => value;
+}
+
+public Class Branch : INode {
+    private INode left;
+    private INode right;
+    public Branch(INode left, INode right) {
+        this.left = left;
+        this.right = right;
+    }
+    public int Accept(Visitor visitor) => visitor.Visit(left) + visitor.Visit(right);
+}
+
+public Class Visitor {
+    public int Visit(INode node) => node.Accept(this);
+}
+
+public Class Calls {
+    public pure int Direct(int remaining) {
+        if (remaining == 0)
+            return 1;
+        return Direct(remaining - 1);
+    }
+    public pure int Mutual(int remaining) {
+        if (remaining == 0)
+            return 1;
+        return Other(remaining - 1);
+    }
+    private pure int Other(int remaining) => Mutual(remaining);
+    public pure T Generic<T>(T value, int remaining) {
+        if (remaining == 0)
+            return value;
+        return Generic<T>(value, remaining - 1);
+    }
+    public pure int Branching(int remaining) {
+        if (remaining == 0)
+            return 1;
+        return Branching(remaining - 1) + Branching(remaining - 1);
+    }
+    private void CleanupHelper(Atomic<int> cleaned) {
+        cleaned.Increment();
+    }
+    public void CleanupDepth(int remaining, Atomic<int> cleaned, bool helper) {
+        try {
+            CleanupDepth(remaining + 1, cleaned, helper);
+        } finally {
+            cleaned.Increment();
+            if (helper)
+                CleanupHelper(cleaned);
+        }
+    }
+    public void CleanupWork(Atomic<int> cleaned) {
+        try {
+            throw Error("primary fault");
+        } finally {
+            cleaned.Increment();
+            while (true) {
+                cleaned.Increment();
+            }
+        }
+    }
+    private pure int Worker(int remaining) {
+        if (remaining == 0)
+            return 1;
+        return Worker(remaining - 1);
+    }
+    public int Parallel(List<int> depths) {
+        Atomic<int> total = Atomic<int>.Create(0);
+        parallel foreach (int depth in depths) {
+            total.Add(Worker(depth));
+        }
+        return total.Load();
+    }
+}
+
+public Class VirtualBase {
+    public virtual pure int Walk(int remaining) {
+        if (remaining == 0)
+            return 1;
+        return Walk(remaining - 1);
+    }
+}
+
+public Class VirtualChild : VirtualBase {
+    public override pure int Walk(int remaining) {
+        if (remaining == 0)
+            return 2;
+        return base.Walk(remaining - 1);
+    }
+}
+
+public Class Constructed {
+    public Constructed(int remaining, Atomic<int> entered) {
+        entered.Increment();
+        if (remaining > 0) {
+            Constructed child = new Constructed(remaining - 1, entered);
+        }
+    }
+}
+
+public Interface StepHost {
+    Task<Result<int,string>> Step(CancellationToken token);
+    Result<int,string> Reenter();
+}
+
+public source Interface IAsyncCalls {
+    Task<Result<int,string>> Recur(int remaining, bool suspend, CancellationToken token);
+}
+
+public Class AsyncCalls : IAsyncCalls {
+    private StepHost host;
+    public AsyncCalls(StepHost host) {
+        this.host = host;
+    }
+    public virtual async Task<Result<int,string>> Recur(int remaining, bool suspend, CancellationToken token) {
+        if (suspend) {
+            Result<int,string> step = await host.Step(token);
+            if (!step.IsSuccess)
+                return step;
+        }
+        if (remaining == 0)
+            return Result<int,string>.Success(3);
+        try {
+            Result<int,string> child = await Recur(remaining - 1, suspend, token);
+            if (child.IsFailure)
+                return Result<int,string>.Success(999);
+            return child;
+        } catch (Error error) {
+            return Result<int,string>.Success(998);
+        }
+    }
+    public async Task<Result<int,string>> Work() {
+        int count = 0;
+        while (count < 4000) {
+            count = count + 1;
+        }
+        return Result<int,string>.Success(count);
+    }
+}
+
+public Class DerivedAsyncCalls : AsyncCalls {
+    public DerivedAsyncCalls(StepHost host) : base(host) {
+    }
+    public override async Task<Result<int,string>> Recur(int remaining, bool suspend, CancellationToken token) {
+        Result<int,string> result = await base.Recur(remaining, suspend, token);
+        return result;
+    }
+}
+
+public Class App {
+    private Calls calls = new Calls();
+    private VirtualBase virtualCalls = new VirtualChild();
+    private Atomic<int> cleaned = Atomic<int>.Create(0);
+    private Atomic<int> constructed = Atomic<int>.Create(0);
+    private StepHost host;
+    private IAsyncCalls asyncCalls;
+    private AsyncCalls virtualAsync;
+    public int marker = 0;
+
+    public App(StepHost host) {
+        this.host = host;
+        asyncCalls = new AsyncCalls(host);
+        virtualAsync = new DerivedAsyncCalls(host);
+    }
+    public int NestedRunner() {
+        Runner runner = new Runner();
+        NestedCase nested = new NestedCase();
+        return runner.Run(nested);
+    }
+    public int Visit() {
+        Leaf first = new Leaf(11);
+        Leaf second = new Leaf(19);
+        Branch branch = new Branch(first, second);
+        Visitor visitor = new Visitor();
+        return visitor.Visit(branch);
+    }
+    public int Direct(int depth) {
+        marker = marker + 1;
+        return calls.Direct(depth);
+    }
+    public int Mutual(int depth) => calls.Mutual(depth);
+    public int Generic(int depth) => calls.Generic<int>(17, depth);
+    public int Virtual(int depth) => virtualCalls.Walk(depth);
+    public int Siblings(int depth) => calls.Direct(depth) + calls.Direct(depth);
+    private pure int PureHelper(int depth) {
+        if (depth == 0)
+            return 1;
+        return PureHelper(depth - 1);
+    }
+    public pure int Pure(int depth) => PureHelper(depth);
+    public int Work() => calls.Branching(20);
+    public void CleanupDepth(bool helper) {
+        cleaned.Store(0);
+        calls.CleanupDepth(0, cleaned, helper);
+    }
+    public void CleanupWork() {
+        cleaned.Store(0);
+        calls.CleanupWork(cleaned);
+    }
+    public int Cleaned() => cleaned.Load();
+    public void Construct(int depth) {
+        constructed.Store(0);
+        Constructed child = new Constructed(depth, constructed);
+    }
+    public int ConstructedCount() => constructed.Load();
+    private pure int Worker(int depth) {
+        if (depth == 0)
+            return 1;
+        return Worker(depth - 1);
+    }
+    public int ParallelRoot(List<int> depths) {
+        Atomic<int> total = Atomic<int>.Create(0);
+        parallel foreach (int depth in depths) {
+            total.Add(Worker(depth));
+        }
+        return total.Load();
+    }
+    public int ParallelObject(List<int> depths) => calls.Parallel(depths);
+    public Result<int,string> HostReentry() => host.Reenter();
+    private async Task<Result<int,string>> Local(int depth, bool suspend, CancellationToken token) {
+        if (suspend) {
+            Result<int,string> step = await host.Step(token);
+            if (!step.IsSuccess)
+                return step;
+        }
+        if (depth == 0)
+            return Result<int,string>.Success(5);
+        Result<int,string> child = await Local(depth - 1, suspend, token);
+        if (child.IsFailure)
+            return Result<int,string>.Success(997);
+        return child;
+    }
+    public async Task<Result<int,string>> LocalAsync(int depth, bool suspend, CancellationToken token) {
+        Result<int,string> result = await Local(depth, suspend, token);
+        return result;
+    }
+    public async Task<Result<int,string>> ObjectAsync(int depth, bool suspend, CancellationToken token) {
+        Result<int,string> result = await asyncCalls.Recur(depth, suspend, token);
+        return result;
+    }
+    public async Task<Result<int,string>> AsyncSiblings(int depth, CancellationToken token) {
+        Result<int,string> first = await asyncCalls.Recur(depth, true, token);
+        Result<int,string> second = await asyncCalls.Recur(depth, true, token);
+        return Result<int,string>.Success(first.Value + second.Value);
+    }
+    public async Task<Result<int,string>> VirtualAsync(int depth, CancellationToken token) {
+        Result<int,string> result = await virtualAsync.Recur(depth, true, token);
+        return result;
+    }
+    public async Task<Result<int,string>> AsyncWork() {
+        Result<int,string> first = await virtualAsync.Work();
+        Result<int,string> second = await virtualAsync.Work();
+        Result<int,string> third = await virtualAsync.Work();
+        return Result<int,string>.Success(first.Value + second.Value + third.Value);
+    }
+}

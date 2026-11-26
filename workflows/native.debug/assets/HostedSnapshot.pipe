@@ -1,0 +1,35 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedSnapshot;
+
+public Record Report {
+    public string label;
+    public List<int> values;
+    public HashSet<string> keys;
+}
+
+public model Class Session {
+    private ContextOwner lifetime;
+    private int secret = 99;
+    public int count = 0;
+    public string phase = "initial";
+    public Report report;
+
+    public Session() {
+        lifetime = ContextOwner.Create();
+        report = Report("initial", List<int>.Empty(), HashSet<string>.Empty());
+    }
+
+    public pure ContextOwner Lifetime() => lifetime;
+
+    public int Run(int scenario) {
+        count = 42;
+        phase = "published";
+        report.label = "changed";
+        report.values.Add(42);
+        report.keys.Add("new");
+        lifetime.Invalidate();
+        if (scenario < 0)
+            throw Error("rollback snapshot");
+        return count;
+    }
+}

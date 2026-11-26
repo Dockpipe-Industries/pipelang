@@ -1,0 +1,60 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HashSets;
+
+public Enum Status { Open, Closed }
+
+public Class App {
+    private static async Task<Result<int,string>> CheckSnapshot(HashSet<string> saved) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(15);
+        var ordered = saved.ToList();
+        if (acquired || ordered.Count != 2 || ordered.At(0) != "étape" || ordered.At(1) != "other")
+            return Result<int,string>.Failure("set snapshot changed");
+        return Result<int,string>.Success(saved.Count);
+    }
+
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var keys = HashSet<string>.Empty();
+        if (!keys.Add("étape") || keys.Add("étape") || !keys.Add("other"))
+            return Result<int,string>.Failure("set add did not detect duplicates");
+        var saved = keys;
+        var before = keys.ToList();
+        if (!keys.Remove("étape") || keys.Remove("étape") || keys.Contains("étape") || !saved.Contains("étape"))
+            return Result<int,string>.Failure("set removal changed an alias");
+        keys.Add("étape");
+        if (keys != saved || before.At(0) != "étape")
+            return Result<int,string>.Failure("set equality depended on insertion order");
+
+        var index = 0;
+        foreach (string key in keys) {
+            if ((index == 0 && key != "other") || (index == 1 && key != "étape"))
+                return Result<int,string>.Failure("set enumeration changed order");
+            keys.Clear();
+            index = index + 1;
+        }
+        if (index != 2 || keys.Count != 0 || saved.Count != 2)
+            return Result<int,string>.Failure("set enumeration did not retain its snapshot");
+
+        var flags = HashSet<bool>.Empty();
+        var numbers = HashSet<int>.Empty();
+        var statuses = HashSet<Status>.Empty();
+        if (!flags.Add(false) || !flags.Contains(false) || flags.Contains(true) ||
+            !numbers.Add(-42) || !numbers.Contains(-42) ||
+            !statuses.Add(Status.Closed) || !statuses.Contains(Status.Closed) || statuses.Contains(Status.Open))
+            return Result<int,string>.Failure("set key representation changed");
+
+        int count = try await App.CheckSnapshot(saved);
+        if (scenario < 0)
+            return Result<int,string>.Failure("registration refused");
+        return Result<int,string>.Success(count + index + flags.Count + numbers.Count + statuses.Count);
+    }
+}
+
+public model Class ReferenceApp {
+    public ReferenceApp() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        var result = await App.Run(scenario);
+        return result;
+    }
+}

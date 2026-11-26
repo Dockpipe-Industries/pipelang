@@ -1,0 +1,10 @@
+name: pipelang-native-debug
+description: Verify direct PipeLang machine code, linked executables, and source debugging.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+  - id: verify
+    kind: host
+    cwd: repo
+    cmd: /bin/bash workflows/native.debug/assets/scripts/run.sh

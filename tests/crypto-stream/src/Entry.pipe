@@ -1,0 +1,4 @@
+module CryptoEntry;
+import PipeLang.Crypto;
+import PipeLang.Testing;
+import PipeLang.Crypto.Tests;

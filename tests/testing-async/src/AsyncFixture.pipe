@@ -1,0 +1,8 @@
+module PipeLang.Testing.AsyncSelfTests;
+
+public Interface AsyncFixture {
+    Result<void,string> AdvanceMilliseconds(int milliseconds);
+    Result<void,string> FailClockAfter(int successfulReads);
+    Result<void,string> RequestBodyCancellation();
+    Task<Result<bool,string>> Observe(string phase, int remainingMilliseconds, CancellationToken token);
+}

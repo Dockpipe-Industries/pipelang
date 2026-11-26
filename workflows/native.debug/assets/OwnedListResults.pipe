@@ -1,0 +1,92 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.OwnedListResults;
+
+public Record CaseRow {
+    public int id;
+    public bool passed;
+    public string name;
+}
+
+public Record CaseReport {
+    public List<CaseRow> items;
+    public List<CaseRow> original;
+    public List<CaseRow> alternate;
+    public List<List<int>> history;
+}
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var collected = await Collector.Collect(scenario);
+        if (collected.IsCancelled)
+            return Result<int,string>.Cancelled(collected.Error);
+        if (collected.IsFailure)
+            return Result<int,string>.Failure(collected.Error);
+
+        var report = collected.Value;
+        var owned = report.items;
+        owned.Add(CaseRow(55, true, "caller-only"));
+        var completed = await Collector.Confirm();
+        if (!completed.IsSuccess || owned.Count != 4 || report.items.Count != 3 ||
+            report.original.Count != 1 || report.alternate.Count != 2 || report.history.At(0).At(0) != 12) {
+            return Result<int,string>.Failure("list ownership changed across a call or append");
+        }
+        if (scenario == 2)
+            return Result<int,string>.Success(report.original.At(1).id);
+        if (scenario == 4)
+            return Result<int,string>.Failure(report.original.At(0).name);
+
+        var first = report.items.At(0);
+        var second = report.items.At(1);
+        var alternate = report.alternate.At(1);
+        if (!first.passed || second.passed || alternate.id != 31 || report.items.At(2).id != 7) {
+            return Result<int,string>.Failure("list fork or snapshot changed its elements");
+        }
+        return Result<int,string>.Success(first.id + second.id + report.items.At(2).id);
+    }
+}
+
+public Class Collector {
+    public static async Task<Result<CaseReport,string>> Collect(int scenario) {
+        var rows = List<CaseRow>.Empty();
+        rows.Add(CaseRow(12, true, "épreuve d’origine"));
+        var original = rows;
+        rows.Add(CaseRow(23, false, "second"));
+        var alternate = original;
+        alternate.Add(CaseRow(31, true, "alternate"));
+
+        var history = List<List<int>>.Empty();
+        var sequence = List<int>.Empty();
+        sequence.Add(12);
+        history.Add(sequence);
+        sequence.Add(99);
+
+        var gate = SemaphoreSlim.Create(0, 1);
+        try {
+            var first = await gate.WaitAsync(45);
+            if (scenario == 5) {
+                var dense = List<int>.Empty();
+                for (int index = 0; index < 2300; index = index + 1) {
+                    dense.Add(index);
+                }
+                var groups = List<List<int>>.Empty();
+                groups.Add(dense);
+                groups.Add(dense);
+            }
+            var count = 0;
+            foreach (var row in rows) {
+                count = count + 1;
+                if (row.id == 12)
+                    rows.Add(CaseRow(7, true, "appended during iteration"));
+            }
+            if (count != 2 || history.At(0).Count != 1)
+                return Result<CaseReport,string>.Failure("list snapshot did not preserve its prefix");
+            return Result<CaseReport,string>.Success(CaseReport(rows, original, alternate, history));
+        } finally {
+            var second = await gate.WaitAsync(65);
+        }
+    }
+
+    public static async Task<Result<int,string>> Confirm() {
+        return Result<int,string>.Success(0);
+    }
+}

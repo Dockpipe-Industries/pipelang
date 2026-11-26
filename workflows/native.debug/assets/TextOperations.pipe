@@ -1,0 +1,75 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.TextOperations;
+
+public Class App {
+    private static async Task<Result<string,string>> Make(int input) {
+        return Result<string,string>.Success("é" + "中" + string.FromInt(input));
+    }
+
+    public static async Task<Result<int,string>> Run(int input) {
+        string value = try await App.Make(input);
+        if (input < 0) {
+            try {
+                int invalid = string.Utf8IndexOf(value, "中", 1);
+                return Result<int,string>.Success(invalid);
+            } catch (Error failure) {
+                return Result<int,string>.Failure(failure.Message);
+            }
+        }
+        string slice = string.Utf8Slice(value, 2, 3);
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(15);
+        if (acquired || value != "é中1" || slice != "中" || string.Utf8Length(value) != 6 ||
+            !string.ByteLengthIs(value, 6) || string.ByteLengthIs(value, -1) ||
+            string.ByteAtOr(value, 1, -3) != 169 || string.ByteAtOr(value, 6, -3) != -3 ||
+            !string.StartsWith(value, "é中") || string.StartsWith(value, "中") ||
+            string.Utf8IndexOf(value, "中", 2) != 2 || string.Utf8IndexOf(value, "中", 5) != -1 ||
+            string.Utf8IndexOf(value, "", 6) != 6 || string.Utf8Slice(value, 6, 0) != "" ||
+            string.FromInt(-9223372036854775808) != "-9223372036854775808")
+            return Result<int,string>.Failure("text operation changed");
+
+        try {
+            string split = string.Utf8Slice(value, 2, 1);
+            return Result<int,string>.Failure(split);
+        } catch (Error failure) {
+            if (failure.Message != "UTF-8 slice end splits a scalar")
+                return Result<int,string>.Failure(failure.Message);
+        }
+
+        string maximum = "é";
+        for (int exponent = 0; exponent < 19; exponent = exponent + 1)
+            maximum = maximum + maximum;
+        if (!string.ByteLengthIs(maximum, 1048576))
+            return Result<int,string>.Failure("maximum-size string changed");
+        try {
+            string tooLong = maximum + "x";
+            return Result<int,string>.Success(string.Utf8Length(tooLong));
+        } catch (Error failure) {
+            if (failure.Message != "string byte limit exceeded")
+                return Result<int,string>.Failure(failure.Message);
+        }
+        for (int row = 0; row < 8192; row = row + 1) {
+            string digits = string.FromInt(row);
+            string label = "row." + digits;
+            if (!string.StartsWith(label, "row.") || string.Utf8Slice(label, 4, string.Utf8Length(digits)) != digits)
+                return Result<int,string>.Failure("unique rows changed during text retention");
+            if (row % 512 == 511) {
+                bool permit = await gate.WaitAsync(2);
+                if (permit)
+                    return Result<int,string>.Failure("unexpected permit while retaining text");
+            }
+        }
+        if (slice != "中")
+            return Result<int,string>.Failure("earlier text view lost its backing storage");
+        return Result<int,string>.Success(42);
+    }
+}
+
+public model Class ReferenceApp {
+    public ReferenceApp() {}
+
+    public async Task<Result<int,string>> Run(int input) {
+        var result = await App.Run(input);
+        return result;
+    }
+}

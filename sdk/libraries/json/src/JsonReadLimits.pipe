@@ -1,0 +1,11 @@
+module PipeLang.Json;
+
+public Record JsonReadLimits {
+    public int inputBytes = 4194304;
+    public int nodes = 131072;
+    public int depth = 64;
+    public int decodedBytes = 4194304;
+    public int nameBytes = 1048576;
+    public int retainedBytes = 33554432;
+    public bool detectUnicodeEncoding = false;
+}

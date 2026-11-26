@@ -1,0 +1,86 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.OptionalEnumResults;
+
+public Enum Outcome { Passed, Failed, Cancelled }
+
+public Record FailureDetail {
+    public string message;
+    public int code;
+}
+
+public Record TestRow {
+    public Outcome outcome;
+    public FailureDetail? failure;
+}
+
+public Record TestReport {
+    public List<TestRow> rows;
+    public FailureDetail? selected;
+}
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var receipt = await Collector.Collect(scenario);
+        if (receipt.IsCancelled)
+            return Result<int,string>.Cancelled(receipt.Error);
+        if (receipt.IsFailure)
+            return Result<int,string>.Failure(receipt.Error);
+
+        var report = receipt.Value;
+        var first = report.rows.At(0);
+        var second = report.rows.At(1);
+        if (first.outcome != Outcome.Passed || second.outcome != Outcome.Failed ||
+            first.failure != null || second.failure == null || !second.failure.HasValue) {
+            return Result<int,string>.Failure("enum or nullable record did not survive the return");
+        }
+
+        if (scenario == 2)
+            return Result<int,string>.Success(first.failure.Value.code);
+        if (scenario == 4)
+            return Result<int,string>.Failure(second.failure.Value.message);
+
+        TestRow? copy = null;
+        copy = second;
+        if (!copy.HasValue || copy.Value != second ||
+            second.failure != FailureDetail("étape incomplète", 42)) {
+            return Result<int,string>.Failure("nullable or record equality changed the payload");
+        }
+
+        var rebuilt = List<TestRow>.Empty();
+        rebuilt.Add(first);
+        rebuilt.Add(second);
+        if (rebuilt != report.rows || report.selected.HasValue != (scenario == 3)) {
+            return Result<int,string>.Failure("list equality or nullable conditional did not retain the payload");
+        }
+
+        Result<bool,string>? confirmed = await Collector.Confirm();
+        confirmed = await Collector.Confirm();
+        if (!confirmed.HasValue || !confirmed.Value.Value) {
+            return Result<int,string>.Failure("awaited nullable conversion lost the returned value");
+        }
+        if (report.selected != null)
+            return Result<int,string>.Success(report.selected.Value.code);
+        return Result<int,string>.Success(second.failure.Value.code);
+    }
+}
+
+public Class Collector {
+    public static async Task<Result<TestReport,string>> Collect(int scenario) {
+        var failure = FailureDetail("étape incomplète", 42);
+        var rows = List<TestRow>.Empty();
+        rows.Add(TestRow(Outcome.Passed, null));
+        rows.Add(TestRow(Outcome.Failed, failure));
+        var gate = SemaphoreSlim.Create(0, 1);
+        try {
+            var first = await gate.WaitAsync(45);
+            var selected = scenario == 3 ? failure : null;
+            return Result<TestReport,string>.Success(TestReport(rows, selected));
+        } finally {
+            var second = await gate.WaitAsync(65);
+        }
+    }
+
+    public static async Task<Result<bool,string>> Confirm() {
+        return Result<bool,string>.Success(true);
+    }
+}

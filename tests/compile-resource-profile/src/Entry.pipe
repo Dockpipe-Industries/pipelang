@@ -1,0 +1,5 @@
+module ResourcePolicy;
+
+public model Class App {
+    public pure int Read() => 23;
+}

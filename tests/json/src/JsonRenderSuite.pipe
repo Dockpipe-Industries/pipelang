@@ -1,0 +1,46 @@
+module PipeLang.Json.RenderTests;
+import PipeLang.Json;
+
+public model Class JsonRenderSuite {
+    private JsonReader reader;
+    private JsonValueRenderer renderer;
+
+    public JsonRenderSuite(JsonReader reader, JsonValueRenderer renderer) {
+        this.reader = reader;
+        this.renderer = renderer;
+    }
+
+    public Result<void,string> Exercise(CancellationToken token, CancellationToken cancelled) {
+        JsonReadLimits readLimits = new JsonReadLimits {};
+        readLimits.inputBytes = 4096;
+        readLimits.retainedBytes = 65536;
+        int document = try reader.BeginDocument(readLimits);
+        try {
+            try reader.AppendDocument(document, ByteBuffer.FromUtf8("{\"z\":[],\"a\":\"\\u20ac\"}"));
+            JsonNode root = try reader.CompleteDocument(document, token);
+            JsonRenderOptions options = new JsonRenderOptions {};
+            options.maximumBytes = 128;
+            options.ascii = true;
+            options.layout = JsonRenderLayout.Spaced;
+            Result<int,string> stopped = renderer.WriteValue(root, options, cancelled);
+            if (!stopped.IsCancelled)
+                return Result<void,string>.Failure("cancelled Source write did not refuse delivery");
+
+            options.maximumBytes = 1;
+            Result<int,string> bounded = renderer.WriteValue(root, options, token);
+            if (!bounded.IsFailure || bounded.Error != "json.render.byte_limit")
+                return Result<void,string>.Failure("Source rendering exceeded budget");
+
+            options.maximumBytes = 128;
+            int written = try renderer.WriteValue(root, options, token);
+            if (written != 24)
+                return Result<void,string>.Failure("rendered extent differs from the actual document");
+
+            return Result<void,string>.Success();
+        } finally {
+            Result<void,string> closed = reader.CloseDocument(document);
+            if (!closed.IsSuccess)
+                throw Error(closed.Error);
+        }
+    }
+}

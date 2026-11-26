@@ -1,0 +1,28 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+public Class AssertionContractCase : ITestCase {
+    public pure string Id() => "testing.assertions";
+    public pure string Name() => "Typed assertions and useful failure identities";
+    public Result<void,TestFailure> Setup(CancellationToken token) => Result<void,TestFailure>.Success();
+    public Result<void,TestFailure> Cleanup() => Result<void,TestFailure>.Success();
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        try Assert.True(true, "true succeeds");
+        try Assert.False(false, "false succeeds");
+        try Assert.Equal<int>(42, 42, "integer equality");
+        try Assert.Equal<string>("typed", "typed", "string equality");
+        try Assert.Equal<SampleValue>(SampleValue(4, "value"), SampleValue(4, "value"), "record equality");
+        try Assert.NotEqual<int>(1, 2, "integer inequality");
+        try Assert.True(Assert.Equal<int>(1, 2, "different numbers").IsFailure,
+                            "unequal numbers must fail equality");
+        try Assert.True(Assert.Equal<string>("first", "second", "different text").IsFailure,
+                            "unequal strings must fail equality");
+        try Assert.True(Assert.NotEqual<int>(1, 1, "same numbers").IsFailure,
+                            "equal numbers must fail inequality");
+        Result<void,TestFailure> failure = Assert.True(false, "original message");
+        try Assert.Equal<string>("assert.true", failure.Error.code, "failure code is stable");
+        try Assert.Equal<string>("original message", failure.Error.message, "message is retained");
+        return Result<void,TestFailure>.Success();
+    }
+}

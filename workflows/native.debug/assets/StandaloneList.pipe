@@ -1,0 +1,47 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.StandaloneList;
+
+public Record Initial {
+    public int value = 37;
+}
+
+public Class BaseCell {
+    public int seen;
+
+    public BaseCell() {
+        seen = Read();
+    }
+
+    public virtual pure int Read() => -1;
+}
+
+public Class Cell : BaseCell {
+    private Initial field;
+    public int current = 4;
+
+    public Cell() {}
+
+    public override pure int Read() => field.value;
+}
+
+public Class Collection {
+    private List<Cell> cells;
+
+    public Collection() {
+        cells.Add(new Cell());
+    }
+
+    public int Run() {
+        Cell selected = cells.At(0);
+        cells = List<Cell>.Empty();
+        selected.current = selected.current + 1;
+        return selected.seen + selected.current;
+    }
+}
+
+public Class App {
+    public static int Run() {
+        Collection values = new Collection();
+        return values.Run();
+    }
+}

@@ -1,0 +1,110 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.IndependentCancellation;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario, CancellationToken bodyToken,
+                                                      CancellationToken cleanupToken) {
+        if (CancellationToken.None.IsCancellationRequested || bodyToken.IsCancellationRequested ||
+            cleanupToken.IsCancellationRequested) {
+            return Result<int,string>.Failure("a token was cancelled before the test began");
+        }
+        var worker = new Worker();
+        var outcome = await worker.Execute(bodyToken, scenario, cleanupToken);
+        var trace = worker.Read();
+        if (scenario == 1 || scenario == 4) {
+            if (trace != 11 || !bodyToken.IsCancellationRequested || cleanupToken.IsCancellationRequested ||
+                !outcome.IsCancelled) {
+                return Result<int,string>.Failure("body cancellation changed the cleanup token or skipped cleanup");
+            }
+            return outcome;
+        }
+        if (scenario == 2) {
+            if (trace != 22 || bodyToken.IsCancellationRequested || !cleanupToken.IsCancellationRequested ||
+                !outcome.IsSuccess) {
+                return Result<int,string>.Failure("cleanup cancellation changed the body token or missed the wait");
+            }
+            return Result<int,string>.Cancelled("explicit cleanup cancelled");
+        }
+        if (trace != 21 || bodyToken.IsCancellationRequested ||
+            cleanupToken.IsCancellationRequested != (scenario == 3)) {
+            return Result<int,string>.Failure("a cancellation token changed an unrelated wait");
+        }
+        return outcome;
+    }
+}
+
+public Class Worker {
+    private int trace;
+
+    public Worker() {
+        this.trace = 0;
+    }
+
+    public pure int Read() {
+        return this.trace;
+    }
+
+    public async Task<Result<int,string>> Execute(CancellationToken bodyToken, int scenario,
+                                                  CancellationToken cleanupToken) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        try {
+            if (scenario == 4) {
+                await gate.WaitAsync(bodyToken);
+            } else {
+                var body = await gate.WaitAsync(45, bodyToken);
+            }
+        } finally {
+            var bodyCancelled = bodyToken.IsCancellationRequested;
+            if (bodyCancelled) {
+                this.trace = 10;
+            } else {
+                this.trace = 20;
+            }
+            var closed = await Helper.Close(cleanupToken, CancellationToken.None, scenario);
+            if (closed.IsSuccess) {
+                this.trace = this.trace + 1;
+            } else if (closed.IsCancelled) {
+                this.trace = this.trace + 2;
+            }
+            var committed = await Helper.Confirm();
+        }
+        return Result<int,string>.Success(42);
+    }
+}
+
+public Class Helper {
+    public static async Task<Result<int,string>> Close(CancellationToken cleanupToken, CancellationToken unrelated,
+                                                       int scenario) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        if (scenario == 3) {
+            var ignored = await gate.WaitAsync(65, unrelated);
+        } else {
+            var closed = await gate.WaitAsync(65, cleanupToken);
+        }
+        return Result<int,string>.Success(0);
+    }
+
+    public static async Task<Result<int,string>> Confirm() {
+        return Result<int,string>.Success(0);
+    }
+}
+
+public Class SingleToken {
+    public static async Task<Result<int,string>> Run(int input, CancellationToken token) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var waited = await gate.WaitAsync(45, token);
+        return Result<int,string>.Success(input);
+    }
+}
+
+public Class TokenOnly {
+    public static async Task<Result<int,string>> Run(CancellationToken body, CancellationToken cleanup) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        try {
+            var waited = await gate.WaitAsync(35, body);
+        } finally {
+            var closed = await gate.WaitAsync(60, cleanup);
+        }
+        return Result<int,string>.Success(42);
+    }
+}

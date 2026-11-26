@@ -1,0 +1,254 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.EvaluationBudget;
+
+public Record PairOfInt {
+    public int first;
+    public int second;
+}
+
+public source Interface IRead {
+    pure int Read();
+}
+
+public Class Helper : IRead {
+    private int amount;
+    public Helper(int input) { amount = input; }
+    public pure int Read() => amount;
+}
+
+public model Class Session {
+    private int retained = 3;
+    public Session() {}
+
+    private pure int Call(int input) { return input + 1; }
+
+    private async Task<Result<int,string>> ReadChild(SemaphoreSlim gate, int value) {
+        bool acquired = await gate.WaitAsync(10);
+        if (acquired)
+            return Result<int,string>.Success(value + 1);
+        return Result<int,string>.Success(value + 10);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        if (scenario == 0)
+            return Result<int,string>.Success(42);
+        if (scenario == 1) {
+            int accumulated = retained;
+            for (int index = 0; index < 4; index = index + 1) {
+                if (index != 2)
+                    accumulated = Call(accumulated);
+            }
+            return Result<int,string>.Success(accumulated);
+        }
+        if (scenario == 2) {
+            List<int> values = List<int>.Empty();
+            values.Add(1);
+            values.Add(2);
+            values.Add(3);
+            int sum = 0;
+            foreach (int item in values) {
+                sum = sum + item;
+            }
+            return Result<int,string>.Success(sum);
+        }
+        if (scenario == 3) {
+            var record = new PairOfInt { first = 7, second = 9 };
+            record.first = record.second + 3;
+            return Result<int,string>.Success(record.first);
+        }
+        if (scenario == 4) {
+            try {
+                throw Error("expected");
+            } catch (Error failure) {
+                if (failure.Message == "expected")
+                    return Result<int,string>.Success(7);
+                return Result<int,string>.Failure("lost authored failure");
+            } finally {
+                retained = 4;
+            }
+        }
+        if (scenario == 5) {
+            var child = new Helper(5);
+            return Result<int,string>.Success(child.Read());
+        }
+        if (scenario == 7)
+            return Result<int,string>.Success(Call(0));
+        if (scenario == 8)
+            return Result<int,string>.Success(this.Call(0));
+        if (scenario == 9) {
+            int value = 0;
+            value = Call(value);
+            return Result<int,string>.Success(value);
+        }
+        if (scenario == 10) {
+            int value = 0;
+            for (int index = 0; index < 4; index = index + 1) {
+                if (index != 2)
+                    value = value + 1;
+            }
+            return Result<int,string>.Success(value);
+        }
+        if (scenario == 11) {
+            int value = 0;
+            if (scenario == 11)
+                value = value + 1;
+            return Result<int,string>.Success(value);
+        }
+        if (scenario == 6) {
+            SemaphoreSlim gate = SemaphoreSlim.Create(1, 1);
+            await gate.WaitAsync();
+            return Result<int,string>.Success(11);
+        }
+        if (scenario == 12) {
+            SemaphoreSlim ready = SemaphoreSlim.Create(1, 1);
+            var child = await ReadChild(ready, 3);
+            return child;
+        }
+        if (scenario == 13) {
+            SemaphoreSlim delayed = SemaphoreSlim.Create(0, 1);
+            var child = await ReadChild(delayed, 3);
+            return child;
+        }
+        if (scenario == 14) {
+            SemaphoreSlim delayed = SemaphoreSlim.Create(0, 1);
+            int first = try await ReadChild(delayed, 3);
+            int second = try await ReadChild(delayed, 5);
+            return Result<int,string>.Success(first + second);
+        }
+        if (scenario == 15) {
+            SemaphoreSlim delayed = SemaphoreSlim.Create(0, 1);
+            int value = 2;
+            try {
+                value = try await ReadChild(delayed, value);
+            } finally {
+                value = value + 4;
+            }
+            return Result<int,string>.Success(value);
+        }
+        if (scenario == 17) {
+            List<Helper> items = List<Helper>.Empty();
+            items.Add(new Helper(13));
+            items.Add(new Helper(29));
+            int total = 0;
+            foreach (IRead item in items) {
+                items.Add(new Helper(1));
+                total = total + item.Read();
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 18) {
+            Helper alias = new Helper(13);
+            List<IRead> items = List<IRead>.Empty();
+            items.Add(alias);
+            items.Add(new Helper(29));
+            int total = 0;
+            foreach (IRead item in items) {
+                if (item == alias)
+                    continue;
+                total = total + item.Read();
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 19) {
+            ConcurrentStack<int> items = ConcurrentStack<int>.Empty();
+            items.Push(5);
+            items.Push(3);
+            int total = 0;
+            foreach (int item in items) {
+                items.Push(9);
+                total = total * 10 + item;
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 20) {
+            ConcurrentDictionary<int,int> table = ConcurrentDictionary<int,int>.Empty();
+            table.TryAdd(1, 9);
+            table.TryAdd(3, 13);
+            int total = 0;
+            foreach (KeyValuePair<int,int> item in table) {
+                table.TryAdd(7, 90);
+                total = total + item.Key + item.Value;
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 21) {
+            var items = Array<int>.Create(2, 3);
+            int total = 0;
+            foreach (int item in items) {
+                items.Set(1, 9);
+                total = total + item;
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 22) {
+            var items = Queue<int>.Empty();
+            items.Enqueue(2);
+            items.Enqueue(3);
+            int total = 0;
+            foreach (int item in items) {
+                items.Clear();
+                total = total * 10 + item;
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 23) {
+            var items = Stack<int>.Empty();
+            items.Push(2);
+            items.Push(3);
+            int total = 0;
+            foreach (int item in items) {
+                items.Pop();
+                total = total * 10 + item;
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 24) {
+            var items = HashSet<int>.Empty();
+            items.Add(2);
+            items.Add(3);
+            int total = 0;
+            foreach (int item in items) {
+                items.Clear();
+                total = total + item;
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 25) {
+            var table = Dictionary<string,int>.Empty();
+            table.Add("first", 2);
+            table.Add("second", 3);
+            int total = 0;
+            foreach (KeyValuePair<string,int>? item in table) {
+                table.Clear();
+                total = total + item.Value.Value;
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 26) {
+            var bytes = ByteBuffer.FromUtf8("AB");
+            int total = 0;
+            foreach (uint32? item in bytes) {
+                if (item.Value == 65u)
+                    total = total + 1;
+                else if (item.Value == 66u)
+                    total = total + 2;
+            }
+            return Result<int,string>.Success(total);
+        }
+        if (scenario == 27) {
+            var items = ConcurrentQueue<int>.Empty();
+            items.Enqueue(2);
+            items.Enqueue(3);
+            int total = 0;
+            foreach (int item in items) {
+                items.Enqueue(9);
+                total = total * 10 + item;
+            }
+            return Result<int,string>.Success(total);
+        }
+        SemaphoreSlim ready = SemaphoreSlim.Create(1, 1);
+        int result = try await ReadChild(ready, 3);
+        retained = retained + result;
+        return Result<int,string>.Success(retained);
+    }
+}

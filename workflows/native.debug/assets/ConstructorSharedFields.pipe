@@ -1,0 +1,35 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ConstructorSharedFields;
+
+public Class Base {
+    protected Base() {
+        Initialize();
+    }
+
+    public virtual void Initialize() {}
+}
+
+public Class Derived : Base {
+    private Atomic<int> visits;
+    private SemaphoreSlim permits;
+    private ConcurrentQueue<int> values;
+
+    public Derived() : base() {}
+
+    public override void Initialize() {
+        visits.Increment();
+        permits.Release();
+        values.Enqueue(7);
+    }
+
+    public int Measure() {
+        return visits.Load() * 100 + permits.CurrentCount * 10 + values.Count;
+    }
+}
+
+public model Class Session {
+    public int Run() {
+        Derived instance = new Derived();
+        return instance.Measure();
+    }
+}

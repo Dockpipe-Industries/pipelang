@@ -1,0 +1,68 @@
+module PipeLang.Json.Tests;
+import PipeLang.Json;
+import PipeLang.Testing;
+
+public model Class JsonSuite {
+    private JsonReader reader;
+    private JsonReader other;
+    private FixtureBytes bytes;
+
+    public JsonSuite(JsonReader service, JsonReader independent, FixtureBytes inputs) {
+        reader = service;
+        other = independent;
+        bytes = inputs;
+    }
+
+    public List<TestResult> Run(CancellationToken token) {
+        List<ITestCase> cases = List<ITestCase>.Empty();
+        List<JsonScenario> scenarios = List<JsonScenario>.Empty();
+        scenarios.Add(JsonScenario(0, ""));
+        scenarios.Add(JsonScenario(1, "json.duplicate_key"));
+        scenarios.Add(JsonScenario(2, "json.duplicate_key"));
+        scenarios.Add(JsonScenario(3, "json.duplicate_key"));
+        scenarios.Add(JsonScenario(4, ""));
+        scenarios.Add(JsonScenario(5, "json.syntax"));
+        scenarios.Add(JsonScenario(6, "json.syntax"));
+        scenarios.Add(JsonScenario(7, "json.syntax"));
+        scenarios.Add(JsonScenario(8, "json.syntax"));
+        scenarios.Add(JsonScenario(9, "json.syntax"));
+        scenarios.Add(JsonScenario(10, "json.syntax"));
+        scenarios.Add(JsonScenario(11, ""));
+        scenarios.Add(JsonScenario(12, ""));
+        scenarios.Add(JsonScenario(13, ""));
+        scenarios.Add(JsonScenario(14, ""));
+        scenarios.Add(JsonScenario(15, ""));
+        scenarios.Add(JsonScenario(16, ""));
+        scenarios.Add(JsonScenario(17, ""));
+        scenarios.Add(JsonScenario(18, ""));
+        scenarios.Add(JsonScenario(19, "json.input_limit"));
+        scenarios.Add(JsonScenario(20, ""));
+        scenarios.Add(JsonScenario(21, "json.node_limit"));
+        scenarios.Add(JsonScenario(22, ""));
+        scenarios.Add(JsonScenario(23, "json.depth_limit"));
+        scenarios.Add(JsonScenario(24, ""));
+        scenarios.Add(JsonScenario(25, "json.name_limit"));
+        scenarios.Add(JsonScenario(26, ""));
+        scenarios.Add(JsonScenario(27, "json.decoded_limit"));
+        scenarios.Add(JsonScenario(28, "json.encoding"));
+        scenarios.Add(JsonScenario(29, ""));
+        scenarios.Add(JsonScenario(30, "json.syntax"));
+        scenarios.Add(JsonScenario(31, "json.syntax"));
+        scenarios.Add(JsonScenario(32, "json.memory_limit"));
+        scenarios.Add(JsonScenario(33, ""));
+        scenarios.Add(JsonScenario(34, ""));
+        scenarios.Add(JsonScenario(35, ""));
+        scenarios.Add(JsonScenario(36, "json.duplicate_key"));
+        scenarios.Add(JsonScenario(37, ""));
+        scenarios.Add(JsonScenario(38, "json.syntax"));
+        scenarios.Add(JsonScenario(39, ""));
+        scenarios.Add(JsonScenario(40, "json.syntax"));
+
+        foreach (JsonScenario scenario in scenarios)
+            cases.Add(new ReaderCase(reader, bytes, scenario));
+
+        cases.Add(new OwnershipCase(reader, other, bytes));
+        TestRunner runner = new TestRunner();
+        return runner.RunAll(cases, token);
+    }
+}

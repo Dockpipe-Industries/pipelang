@@ -1,0 +1,31 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class ContextOwnerModel {
+    private ContextOwner lifetime;
+    public int changes;
+
+    public ContextOwnerModel() {
+        lifetime = ContextOwner.Create();
+    }
+
+    public pure ContextOwner Lifetime() => lifetime;
+
+    public void Replace() {
+        lifetime.Replace();
+        changes = changes + 1;
+    }
+
+    public void Invalidate() {
+        lifetime.Invalidate();
+        changes = changes + 1;
+    }
+
+    public void Close() {
+        lifetime.Close();
+    }
+
+    public void InvalidateThenFail() {
+        lifetime.Invalidate();
+        changes = changes + 1;
+        throw Error("source failure");
+    }
+}

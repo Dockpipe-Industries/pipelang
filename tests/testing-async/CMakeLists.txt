@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 3.21.1)
+project(PipeLangAsyncTestingContracts LANGUAGES CXX)
+
+find_package(PipeLangModel 0.1.0 EXACT CONFIG REQUIRED)
+set(PIPELANG_TESTING_LIBRARY_ROOT "${PipeLangModel_SOURCE_LIBRARY_DIRECTORY}/testing"
+    CACHE PATH "Immutable installed PipeLang.Testing source library")
+file(REAL_PATH "${PIPELANG_TESTING_LIBRARY_ROOT}" testing_library_root)
+file(SHA256 "${testing_library_root}/library.json" testing_library_sha256)
+string(REPLACE "\\" "\\\\" testing_library_json "${testing_library_root}")
+string(REPLACE "\"" "\\\"" testing_library_json "${testing_library_json}")
+string(REPLACE "\n" "\\n" testing_library_json "${testing_library_json}")
+string(REPLACE "\r" "\\r" testing_library_json "${testing_library_json}")
+string(REPLACE "\t" "\\t" testing_library_json "${testing_library_json}")
+set(testing_references "${CMAKE_CURRENT_BINARY_DIR}/testing-libraries.json")
+file(WRITE "${testing_references}"
+    "{\"protocol\":\"pipelang.source-library-references.v1\",\"libraries\":[{\"root\":\"${testing_library_json}\",\"descriptor\":\"library.json\",\"sha256\":\"${testing_library_sha256}\"}]}\n")
+
+pipelang_add_model(testing_async_model
+    PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+    ENTRY Entry.pipe
+    NAMESPACE pipelang_testing_async
+    SOURCE_LIBRARIES "${testing_references}"
+    COMPILATION COMPILED
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+option(PIPELANG_TESTING_SANITIZERS "Instrument source async tests, implementations and native fixtures" OFF)
+if(PIPELANG_TESTING_SANITIZERS)
+    target_compile_options(testing_async_model INTERFACE
+        -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(testing_async_model INTERFACE -fsanitize=address,undefined)
+endif()
+
+add_executable(testing_async_contracts Main.cpp)
+target_link_libraries(testing_async_contracts PRIVATE testing_async_model)
+target_compile_features(testing_async_contracts PRIVATE cxx_std_20)
+set_target_properties(testing_async_contracts PROPERTIES CXX_EXTENSIONS OFF)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(testing_async_contracts PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+enable_testing()
+add_test(NAME testing_async_contracts COMMAND testing_async_contracts)

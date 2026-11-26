@@ -1,0 +1,84 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedCollectionInputs;
+
+public Record Row {
+    public int id;
+}
+
+public model Class Session {
+    public int Run(ConcurrentQueue<string> queue, ConcurrentStack<Row> stack) {
+        string first = queue.TryDequeue().Value;
+        Row top = stack.TryPop().Value;
+        if (first != "host" || top.id != 5)
+            throw Error("borrowed collection did not retain the original cell");
+        queue.Enqueue("native");
+        stack.Push(new Row { id = 42 });
+        return queue.Count + stack.Count;
+    }
+
+    public int Pop(ConcurrentStack<Row> stack) => stack.TryPop().Value.id;
+
+    public async Task<Result<int,string>> Park(ConcurrentQueue<string> queue, SemaphoreSlim gate, CancellationToken token) {
+        await gate.WaitAsync(token);
+        queue.Enqueue("resumed");
+        return Result<int,string>.Success(queue.Count);
+    }
+
+    public int Workers(ConcurrentQueue<string> queue, ConcurrentStack<Row> stack) {
+        List<int> jobs = List<int>.Empty();
+        jobs.Add(17);
+        jobs.Add(31);
+        parallel foreach (int job in jobs) {
+            queue.Enqueue("worker");
+            stack.Push(new Row { id = job });
+        }
+        return queue.Count + stack.Count;
+    }
+
+    public List<Row> View(ConcurrentStack<Row> stack) => stack.ToList();
+
+    public int Map(ConcurrentDictionary<string,Row> map) {
+        Row initial = map.At("host");
+        Row next = new Row { id = 17 };
+        bool inserted = map.TryAdd("native", next);
+        if (initial.id != 5 || !inserted || map.TryAdd("native", initial))
+            throw Error("borrowed dictionary lost its host entries");
+        if (map.GetOrAdd("host", next).id != 5 || map.TryUpdate("host", next, next) ||
+            !map.TryUpdate("host", next, initial))
+            throw Error("borrowed dictionary did not retain atomic compound operations");
+
+        List<string> keys = map.Keys;
+        List<Row> values = map.Values;
+        List<KeyValuePair<string,Row>> entries = map.Entries;
+        if (keys.Count != 2 || keys.At(0) != "host" || values.At(1).id != 17 ||
+            entries.At(0).Key != "host" || entries.At(0).Value.id != 17)
+            throw Error("borrowed dictionary snapshot changed order or values");
+
+        Row? found = map.TryGet("native");
+        if (!map.ContainsKey("native") || !found.HasValue || found.Value.id != 17 ||
+            map.TryGet("missing").HasValue)
+            throw Error("borrowed dictionary did not preserve expected lookup outcomes");
+        return 42;
+    }
+
+    public int Remove(ConcurrentDictionary<string,Row> map) => map.TryRemove("host").Value.id;
+
+    public int Ensure(ConcurrentDictionary<string,Row> map) {
+        Row staged = new Row { id = 83 };
+        return map.GetOrAdd("staged", staged).id;
+    }
+
+    public int MapWorkers(ConcurrentDictionary<string,Row> map) {
+        List<string> keys = List<string>.Empty();
+        keys.Add("left");
+        keys.Add("right");
+        parallel foreach (string key in keys) {
+            map.Set(key, new Row { id = 9 });
+        }
+        return map.Count;
+    }
+
+    public void Clear(ConcurrentDictionary<string,Row> map) {
+        map.Clear();
+    }
+}

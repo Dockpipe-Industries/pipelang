@@ -1,0 +1,29 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ConstructorParallel;
+
+public model Class Session {
+    private int total;
+
+    public Session(int mode) {
+        List<int> jobs = List<int>.Empty();
+        jobs.Add(6);
+        jobs.Add(9);
+        jobs.Add(27);
+
+        Atomic<int> outcome = Atomic<int>.Create(0);
+        SemaphoreSlim handoff = SemaphoreSlim.Create(0, 1);
+        parallel foreach (int job in jobs) {
+            if (mode == 1 && job == 9)
+                throw Error("constructor worker failed");
+            if (mode == 2 && job == 6 && !handoff.Wait(400))
+                throw Error("constructor worker handoff timed out");
+            if (mode == 2 && job == 9)
+                handoff.Release();
+            outcome.Add(job);
+        }
+
+        total = outcome.Load();
+    }
+
+    public pure int Run() => total;
+}

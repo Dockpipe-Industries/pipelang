@@ -1,0 +1,70 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedClock;
+
+public Record Request {
+    public string path;
+    public int scenario;
+    public List<string> labels;
+}
+
+public Enum ObservationKind { Missing, Found }
+
+public Record Observation {
+    public bool exists;
+    public string content;
+    public List<string> labels;
+    public ObservationKind kind;
+}
+
+public Interface Clock {
+    Result<int,string> NowMilliseconds();
+    Result<string,string> Read(string label, int step, bool enabled);
+    Result<Observation,string> Observe(Request request);
+    Task<Result<Observation,string>> WaitForObservation(Request request, CancellationToken token);
+    Result<void,string> Acknowledge();
+    pure bool IsReady();
+}
+
+public model Class Session {
+    private Clock clock;
+    private int increment;
+
+    public Session(Clock input, int adjustment) {
+        this.clock = input;
+        this.increment = adjustment;
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var ready = await gate.WaitAsync(25);
+        if (!clock.IsReady())
+            return Result<int,string>.Failure("clock unavailable");
+        int tick = try clock.NowMilliseconds();
+        try {
+            string label = try clock.Read("étape", scenario, true);
+            if (label != "retained text")
+                return Result<int,string>.Failure("clock text changed");
+
+            var labels = List<string>.Empty();
+            labels.Add("étape");
+            var observed = try clock.Observe(Request("fixture.pipe", scenario, labels));
+            var later = await gate.WaitAsync(10);
+            if (!observed.exists || observed.content != "owned observation" ||
+                observed.kind != ObservationKind.Found || observed.labels.Count != 1 ||
+                observed.labels.At(0) != "étape")
+                return Result<int,string>.Failure("clock observation changed");
+
+            var awaited = await clock.WaitForObservation(Request("fixture.pipe", scenario, labels), token);
+            var confirmed = try awaited;
+            if (confirmed.content != observed.content || confirmed.labels.At(0) != observed.labels.At(0))
+                return Result<int,string>.Failure("awaited observation changed");
+
+            try clock.Acknowledge();
+            return Result<int,string>.Success(tick + increment);
+        } catch (Error error) {
+            if (scenario == 4 && error.Message == "callback raised")
+                return Result<int,string>.Success(tick + increment);
+            return Result<int,string>.Failure(error.Message);
+        }
+    }
+}

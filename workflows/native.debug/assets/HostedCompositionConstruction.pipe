@@ -1,0 +1,43 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.NativeConstruction;
+import DiFixture.Contracts;
+import DiFixture.Root;
+
+public Class InitialValue {
+    public virtual pure int Read() => 0;
+}
+
+public Class OffsetValue : InitialValue {
+    public override pure int Read() => 40;
+}
+
+public Class OffsetSequence : IIdentitySequence {
+    private int next;
+
+    public OffsetSequence(InitialValue initial) {
+        next = initial.Read();
+    }
+
+    public int Next() {
+        next = next + 1;
+        return next;
+    }
+
+    public pure int Count() => next;
+}
+
+public model Class Witness {
+    private IRootService root;
+
+    public Witness(ConstructionPolicy policy, int scenario) {
+        IIdentitySequence sequence = new IdentitySequence();
+        if (scenario == 1)
+            sequence = new OffsetSequence(new OffsetValue());
+        if (scenario == 2 && policy.Read("invalid-value", 0).Value != 0)
+            throw Error("unexpected successful test input");
+        RootDependency dependency = new RootDependency(policy, sequence);
+        root = new RootService(policy, sequence, dependency);
+    }
+
+    public pure int Run() => root.Identity() * 100 + root.DependencyIdentity();
+}

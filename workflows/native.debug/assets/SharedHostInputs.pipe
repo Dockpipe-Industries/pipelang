@@ -1,0 +1,40 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.SharedHostInputs;
+
+public model Class Session {
+    public async Task<Result<int,string>> Run(SemaphoreSlim permits, CancellationToken cancellation) {
+        await permits.WaitAsync(cancellation);
+        return Result<int,string>.Success(42);
+    }
+
+    public int Signal(SemaphoreSlim permits) => permits.Release();
+
+    public int ReadQueue(ConcurrentQueue<int> values) {
+        List<int> items = values.ToList();
+        int head = values.TryPeek().Value;
+        int removed = values.TryDequeue().Value;
+        values.Clear();
+        return head + removed + items.Count;
+    }
+
+    public int FillQueue(ConcurrentQueue<int> destination, List<int> values) {
+        parallel foreach (int value in values) {
+            destination.Enqueue(value);
+        }
+        return destination.Count;
+    }
+
+    public int UpdateWithLock(Lock gate, Atomic<int> count) {
+        lock (gate) {
+            return count.Add(4);
+        }
+    }
+
+    public bool UpdateAtomics(Atomic<bool> flag, Atomic<float> wide, Atomic<float32> narrow) {
+        bool previous = flag.CompareExchange(true, false);
+        float formerWide = wide.CompareExchange(6.5, -0.0);
+        float32 formerNarrow = narrow.CompareExchange(1.25f, -0.0f);
+        return !previous && formerWide == 0.0 && float.CopySign(1.0, formerWide) == -1.0
+            && float32.ToBits(formerNarrow) == 0x80000000u;
+    }
+}

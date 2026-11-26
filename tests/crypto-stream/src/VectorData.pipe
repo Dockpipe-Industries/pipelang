@@ -1,0 +1,7 @@
+module PipeLang.Crypto.Tests;
+
+public Record VectorData {
+    public int fixture;
+    public int length;
+    public string hex;
+}

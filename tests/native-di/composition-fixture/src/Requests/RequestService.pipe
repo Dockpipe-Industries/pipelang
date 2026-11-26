@@ -1,0 +1,23 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Requests;
+import DiFixture.Contracts;
+
+public Class RequestService : IRequestService {
+    private int identity;
+    private ScopeStamp stamp;
+    private IRootService root;
+
+    public RequestService(ConstructionPolicy policy, IIdentitySequence identities, ScopeStamp context, IRootService rootService) {
+        identity = identities.Next();
+        Result<int,string> admitted = policy.Read("request", context.identity);
+        if (!admitted.IsSuccess)
+            throw Error(admitted.Error);
+        stamp = context;
+        root = rootService;
+    }
+
+    public pure int Identity() => identity;
+    public pure int ScopeIdentity() => stamp.identity;
+    public pure string Tenant() => stamp.tenant;
+    public pure int RootIdentity() => root.Identity();
+}

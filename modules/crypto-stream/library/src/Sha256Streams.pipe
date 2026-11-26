@@ -1,0 +1,10 @@
+module PipeLang.Crypto;
+
+// Each injected provider owns its opaque handles. Cancellation consumes the
+// handle: callers must begin again, never retry bytes on the cancelled stream.
+public Interface Sha256Streams {
+    Result<int,CryptoFailure> BeginSha256(int maximumBytes);
+    Result<void,CryptoFailure> UpdateSha256(int hash, ByteBuffer bytes, CancellationToken token);
+    Result<Sha256Digest,CryptoFailure> FinishSha256(int hash, CancellationToken token);
+    Result<void,CryptoFailure> CloseSha256(int hash);
+}

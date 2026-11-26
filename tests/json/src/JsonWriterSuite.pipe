@@ -1,0 +1,46 @@
+module PipeLang.Json.WriterTests;
+import PipeLang.Json;
+
+public model Class JsonWriterSuite {
+    private JsonReader reader;
+    private JsonDocumentOutput output;
+
+    public JsonWriterSuite(JsonReader reader, JsonDocumentOutput output) {
+        this.reader = reader;
+        this.output = output;
+    }
+
+    public Result<int,string> Write(CancellationToken token) {
+        try Project(token);
+        return output.Finish();
+    }
+
+    public Result<void,string> Project(CancellationToken token) {
+        JsonReadLimits limits = new JsonReadLimits {};
+        limits.inputBytes = 4096;
+        limits.retainedBytes = 65536;
+        int document = try reader.BeginDocument(limits);
+        try {
+            try reader.AppendDocument(document, ByteBuffer.FromUtf8("{\"z\":[null,false],\"a\":\"\\u2028\"}"));
+            JsonNode value = try reader.CompleteDocument(document, token);
+            try output.BeginObject();
+            try output.Name("case");
+            try output.WriteText("demo");
+            try output.Name("count");
+            try output.WriteInteger(8);
+            try output.Name("data");
+            try output.WriteValue(value, token);
+            try output.Name("statuses");
+            try output.BeginArray();
+            try output.WriteBoolean(true);
+            try output.WriteNull();
+            try output.WriteFinite(0.9);
+            try output.EndArray();
+            return output.EndObject();
+        } finally {
+            Result<void,string> closed = reader.CloseDocument(document);
+            if (!closed.IsSuccess)
+                throw Error(closed.Error);
+        }
+    }
+}

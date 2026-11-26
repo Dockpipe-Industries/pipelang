@@ -1,0 +1,46 @@
+module Consumer;
+import AsyncTesting;
+import TestingBase;
+
+public Class AsyncCase : IAsyncTestCase {
+    public async Task<Result<int,string>> Body() {
+        return Result<int,string>.Success(17);
+    }
+}
+
+public Class App {
+    private TestRunner synchronous = new TestRunner();
+    private AsyncTestRunner asynchronous = new AsyncTestRunner();
+    private IAsyncTestCase item = new AsyncCase();
+    public int marker = 0;
+
+    public int EmptySuite() => synchronous.Run(List<ITestCase>.Empty());
+
+    public pure bool EmptyNullable() {
+        IUnused? absent = null;
+        return !absent.HasValue;
+    }
+
+    public pure int InvalidPure(IUnused candidate) => candidate.Read();
+    public pure int InvalidChild(IEmptyChild candidate) => candidate.Read();
+
+    public int InvalidCase(ITestCase candidate) {
+        marker = marker + 1;
+        return candidate.Body();
+    }
+
+    public int Required() {
+        RequiredHolder holder = new RequiredHolder();
+        return 1;
+    }
+
+    public async Task<Result<int,string>> InvalidLater(IUnused candidate) {
+        Result<int,string> result = await candidate.Later();
+        return result;
+    }
+
+    public async Task<Result<int,string>> Run() {
+        Result<int,string> result = await asynchronous.Run(item);
+        return result;
+    }
+}

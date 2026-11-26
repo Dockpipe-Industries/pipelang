@@ -38,3 +38,18 @@ case "$(uname -s)" in
     *) echo 'No qualified native workflow backend for this host' >&2; exit 1 ;;
 esac
 export PIPELANG_NATIVE_PLATFORM
+
+run_native_job() {
+    native_job_runner=$1
+    native_job_prefix=$2
+    shift 2
+    if "$native_job_runner" job --output "$native_job_prefix" "$@"; then
+        return 0
+    else
+        native_job_result=$?
+        if [ -f "$native_job_prefix.output" ]; then
+            tail -c 12000 "$native_job_prefix.output" >&2
+        fi
+        return "$native_job_result"
+    fi
+}

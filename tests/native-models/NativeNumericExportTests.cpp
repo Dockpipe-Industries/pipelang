@@ -27,6 +27,16 @@ void invoke(const std::vector<std::string>& command)
     const auto result = process(command, {}, std::chrono::seconds(90), 4U << 20);
     require(result.exit == 0, "native numeric export consumer failed: " + result.output + result.diagnostic);
 }
+
+void verifyFixture(const fs::path& prefix, const fs::path& output, const char* name,
+                   void (*verify)(const fs::path&, const fs::path&))
+{
+    try {
+        verify(prefix, output / name);
+    } catch (const std::exception& error) {
+        throw std::runtime_error(std::string(name) + ": " + error.what());
+    }
+}
 }
 
 void nativeNumericExportContracts(const std::filesystem::path& prefix,
@@ -197,12 +207,12 @@ public model Class Constructed {
     generateCompiledProjectBindings(prefix, manifest, fileHash(manifest),
         nativeExecutable(prefix / "bin/pipelang-modelc"), output, "src", "Operations.pipe",
         "numeric_compiled_fixture", output / "generated/compiled", compiledInformation.at("plan_sha256").get<std::string>());
-    nativeObservationContracts(prefix, output / "observation");
-    nativeActiveNumericContracts(prefix, output / "active");
-    nativeNumericHeaderContracts(prefix, output / "header-project");
-    nativeStructuredValueContracts(prefix, output / "structured-values");
-    nativeFixedArrayContracts(prefix, output / "fixed-arrays");
-    nativeForLoopContracts(prefix, output / "for-loops");
+    verifyFixture(prefix, output, "observation", nativeObservationContracts);
+    verifyFixture(prefix, output, "active", nativeActiveNumericContracts);
+    verifyFixture(prefix, output, "header-project", nativeNumericHeaderContracts);
+    verifyFixture(prefix, output, "structured-values", nativeStructuredValueContracts);
+    verifyFixture(prefix, output, "fixed-arrays", nativeFixedArrayContracts);
+    verifyFixture(prefix, output, "for-loops", nativeForLoopContracts);
     atomicWrite(output / "main.cpp", R"cpp(#include "Model.hpp"
 #include "compiled/Model.hpp"
 #include "../header-project/default/Model.hpp"
@@ -303,7 +313,7 @@ int main()
     normal.insert(normal.end(), {"-O2", "-ffp-contract=fast", "-o", nativeExecutable(output / "normal").string()});
     invoke(normal);
     invoke({nativeExecutable(output / "normal").string()});
-    verifyNativeNumericArrayOrdinaryFixture(prefix, output / "ordinary-project");
+    verifyFixture(prefix, output, "ordinary-project", verifyNativeNumericArrayOrdinaryFixture);
     atomicWrite(output / "acceptance.json", canonical({{"status", "passed"},
         {"direct_numeric_exports", methods}, {"normal", true}, {"allocation_free_first_call", true},
         {"class_member_collision_overloads", collisionOverloads}, {"header_and_compiled_project_exports", true},

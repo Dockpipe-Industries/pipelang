@@ -7,6 +7,7 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
 using namespace pipelang::models;
@@ -35,19 +36,19 @@ Program checked(const std::string& source) {
     return checked({ModuleSource{"Services", "module Services;\n" + source, "case.pipe"}});
 }
 
-const CompositionGraph& graphNamed(const std::vector<CompositionGraph>& graphs, const std::string& name) {
+const CompositionGraph& graphNamed(const std::vector<CompositionGraph>& graphs, std::string_view name) {
     const auto found = std::find_if(graphs.begin(), graphs.end(), [&](const auto& graph) { return graph.name == name; });
     if (found == graphs.end())
-        throw std::runtime_error("missing graph " + name);
+        throw std::runtime_error("missing graph " + std::string(name));
     return *found;
 }
 
-const CompositionService& serviceNamed(const CompositionGraph& graph, const std::string& name) {
+const CompositionService& serviceNamed(const CompositionGraph& graph, std::string_view name) {
     const auto found = std::find_if(graph.services.begin(), graph.services.end(), [&](const auto& service) {
         return service.service.displayText() == name;
     });
     if (found == graph.services.end())
-        throw std::runtime_error("missing service " + name);
+        throw std::runtime_error("missing service " + std::string(name));
     return *found;
 }
 

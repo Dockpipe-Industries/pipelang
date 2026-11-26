@@ -16,7 +16,8 @@ int main() {
     std::vector<std::uint8_t> allBytes;
     for (unsigned value = 0; value < 256; ++value) {
         allBytes.push_back(static_cast<std::uint8_t>(value));
-        const ByteBuffer single(std::vector<std::uint8_t>{static_cast<std::uint8_t>(value)});
+        auto single = ByteBuffer::Empty();
+        single.add(value);
         assert(model.Sum(single) == static_cast<std::int64_t>(value));
         assert(model.Typed(single) == static_cast<std::int64_t>(value) + 1);
         assert(model.Complement(single) == ~static_cast<std::uint32_t>(value));

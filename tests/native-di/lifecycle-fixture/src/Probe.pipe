@@ -1,0 +1,7 @@
+module DiLifecycle.Bootstrap;
+import DiLifecycle.Contracts;
+import DiLifecycle.Resources;
+import DiLifecycle.Factories;
+
+public model Class LifecycleProbe {
+}

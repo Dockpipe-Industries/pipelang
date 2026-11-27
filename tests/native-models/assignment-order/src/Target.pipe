@@ -1,0 +1,18 @@
+module AssignmentOrder;
+
+public Class Target {
+    private AssignmentPort port;
+    public int value;
+
+    public Target(AssignmentPort input) {
+        port = input;
+        value = 0;
+    }
+
+    public Target Select() {
+        Result<int,string> marked = port.Mark(1);
+        if (!marked.IsSuccess)
+            throw Error(marked.Error);
+        return this;
+    }
+}

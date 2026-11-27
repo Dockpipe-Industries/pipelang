@@ -1,0 +1,95 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.CompositionCleanup;
+
+public source Interface IClose {
+    Result<void,string> Close(CancellationToken cancellation);
+}
+
+public Interface Recorder {
+    pure int Record(int identity);
+    Task<Result<void,string>> Wait(CancellationToken token);
+}
+
+public Record Stamp {
+    public int identity;
+}
+
+public Class Resource : IClose {
+    private Recorder recorder;
+    private Stamp stamp;
+
+    public Resource(Recorder recorder, Stamp stamp) {
+        this.recorder = recorder;
+        this.stamp = stamp;
+    }
+
+    public pure int Read() => stamp.identity;
+
+    public async Task<Result<void,string>> Hold(CancellationToken cancellation) {
+        var outcome = await recorder.Wait(cancellation);
+        return outcome;
+    }
+
+    public Result<void,string> Close(CancellationToken cancellation) {
+        if (cancellation.IsCancellationRequested)
+            return Result<void,string>.Cancelled("unexpected cleanup cancellation");
+        if (recorder.Record(stamp.identity) < 0)
+            return Result<void,string>.Failure("recorder failed");
+        if (stamp.identity == 606) {
+            while (true) {}
+        }
+        if (stamp.identity == 101)
+            return Result<void,string>.Failure("authored cleanup failure");
+        return Result<void,string>.Success();
+    }
+}
+
+public Class RootResource : IClose {
+    private Recorder recorder;
+
+    public RootResource(Recorder recorder) {
+        this.recorder = recorder;
+    }
+
+    public Result<void,string> Close(CancellationToken cancellation) {
+        if (recorder.Record(900) < 0)
+            return Result<void,string>.Failure("recorder failed");
+        return Result<void,string>.Success();
+    }
+}
+
+public Class Failing {
+    public Failing(Resource used, RootResource shared) {
+        throw Error("later constructor failed");
+    }
+}
+
+public Class FailingSlow {
+    public FailingSlow(RootResource shared, Resource used) {
+        throw Error("later constructor failed after a slow resource");
+    }
+}
+
+public Class Stable {
+    public pure int Read() => 42;
+}
+
+public model Class Root {
+    public pure int Run() => 42;
+}
+
+public composition Startup {
+    singleton input Recorder;
+    scoped input Stamp;
+    transient Resource = Resource;
+    singleton RootResource = RootResource;
+    cleanup IClose.Close;
+    scoped Failing = Failing;
+    transient FailingSlow = FailingSlow;
+    export FailingSlow;
+    export Failing;
+    export Resource;
+    singleton Stable = Stable;
+    export Stable;
+    export RootResource;
+}

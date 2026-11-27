@@ -1,0 +1,59 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedTaskRoots;
+
+public Interface Observer {
+    Task<Result<int,string>> Pause(CancellationToken token);
+}
+
+public Class Link {
+    private int value;
+
+    public Link(int initial) {
+        value = initial;
+    }
+
+    public pure int Read() => value;
+}
+
+public model Class Session {
+    private Observer observer;
+    private Link? single;
+    private List<Link> links = List<Link>.Empty();
+    private SemaphoreSlim permits = SemaphoreSlim.Create(0, 1);
+
+    public Session(Observer observer) {
+        this.observer = observer;
+        single = new Link(42);
+    }
+
+    public void Reset() {
+        single = new Link(42);
+        links.Add(new Link(43));
+    }
+
+    public void Drop() {
+        single = null;
+        links = List<Link>.Empty();
+    }
+
+    public async Task<Result<int,string>> Wait(CancellationToken token) {
+        await permits.WaitAsync(token);
+        return Result<int,string>.Success(44);
+    }
+
+    public void Signal() {
+        permits.Release();
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        if (scenario == 0) {
+            Link saved = single.Value;
+            int ready = try await observer.Pause(token);
+            return Result<int,string>.Success(saved.Read() + ready);
+        }
+
+        List<Link> saved = links;
+        int ready = try await observer.Pause(token);
+        return Result<int,string>.Success(saved.At(0).Read() + ready);
+    }
+}

@@ -1,0 +1,12 @@
+module ValueApp;
+import ValueData;
+
+public Class ValueModel {
+    public const int Gates = CourseDimensions.Gates;
+    public const float32 GateSpacing = CourseDimensions.GateSpacing;
+    public pure float32 ReadSpacing() => GateSpacing;
+    public pure int Read() {
+        Balance value = new Balance {};
+        return value.amount;
+    }
+}

@@ -1,0 +1,7 @@
+module PipeLang.Testing.Async;
+import PipeLang.Testing;
+
+public Record TestStepResult {
+    public TestOutcome outcome;
+    public TestFailure? failure;
+}

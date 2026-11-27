@@ -1,0 +1,8 @@
+module PipeLang.IO.AppendTests;
+
+public Interface AppendFixture {
+    Result<void,string> Prepare(string relative, string fault);
+    Result<void,string> ChangeRevision();
+    Result<void,string> Close();
+    Result<int,string> Effects();
+}

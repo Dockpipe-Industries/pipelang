@@ -1,0 +1,245 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+// The contract case itself uses the new scoped API. It keeps effects and
+// fixture configuration as state; both actual tokens remain method parameters.
+public Class ProbeContractCase : IProbeTestCase {
+    private ProbeCancellationControl control;
+    private int scenario;
+    private string caseId;
+
+    public ProbeContractCase(ProbeCancellationControl control, int scenario, string caseId) {
+        this.control = control;
+        this.scenario = scenario;
+        this.caseId = caseId;
+    }
+
+    public pure string Id() => "testing.probe." + caseId;
+    public pure string Name() => "Scoped probe contract " + caseId;
+    public Result<void,TestFailure> Setup(CancellationToken token) => Result<void,TestFailure>.Success();
+    public Result<void,TestFailure> Cleanup() => Result<void,TestFailure>.Success();
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        return Assert.True(false, "Scoped contract requires the explicit probe runner");
+    }
+
+    private ProbeScriptedCase Fixture(string id, TestBehavior setupBehavior,
+                                      TestBehavior bodyBehavior, TestBehavior cleanupBehavior) {
+        return new ProbeScriptedCase(id, setupBehavior, bodyBehavior, cleanupBehavior, control, scenario);
+    }
+
+    private Result<void,TestFailure> ExactlyOnce(ProbeScriptedCase test, bool body) {
+        try Assert.Equal<int>(1, test.setupCalls, "Setup attempted exactly once");
+        try Assert.Equal<int>(1, test.cleanupCalls, "Cleanup attempted exactly once after setup");
+        int expectedBody = 0;
+        if (body)
+            expectedBody = 1;
+
+        try Assert.Equal<int>(expectedBody, test.probeCalls, "Probe body attempted only when admitted");
+        try Assert.Equal<int>(0, test.bodyCalls, "Explicit probe run never dispatches ordinary body");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> CancelledProbeAndNormalPrecancel(CancellationToken token,
+                                                                    CancellationToken probeToken) {
+        try Assert.False(probeToken.IsCancellationRequested, "Real probe starts live");
+        Result<void,string> stopped = control.RequestCancellation(0);
+        try Assert.True(stopped.IsSuccess, "Native cancellation effect succeeds");
+        try Assert.True(probeToken.IsCancellationRequested, "Actual probe token becomes cancelled");
+        TestRunner runner = new TestRunner();
+        ProbeScriptedCase test = Fixture("cancelled-probe", TestBehavior.Success,
+                                         TestBehavior.Success, TestBehavior.Success);
+        test.requireCancelledProbe = true;
+        TestResult result = runner.RunProbe(test, token, probeToken);
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, result.outcome,
+            "Cancelled probe does not suppress an authored body assertion");
+        try Assert.True(result.bodyRan && result.cleanupRan, "Actual probe body and cleanup ran");
+        try Assert.Equal<string>("setupprobecleanup", test.trace, "Scoped lifecycle order");
+        try ExactlyOnce(test, true);
+
+        ProbeScriptedCase skipped = Fixture("cancelled-normal", TestBehavior.Success,
+                                            TestBehavior.Success, TestBehavior.Success);
+        TestResult before = runner.RunProbe(skipped, probeToken, token);
+        try Assert.Equal<TestOutcome>(TestOutcome.Cancelled, before.outcome, "Cancelled normal token skips lifecycle");
+        try Assert.Equal<TestPhase>(TestPhase.NotRun, before.primaryPhase, "Pre-cancel phase remains NotRun");
+        try Assert.False(before.bodyRan || before.cleanupRan, "No hook is entered before setup");
+        try Assert.Equal<string>("", skipped.trace, "Pre-cancelled normal token enters no hook");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> NormalCancellationDuringBody(CancellationToken token,
+                                                                 CancellationToken probeToken) {
+        TestBehavior behavior = TestBehavior.Success;
+        if (scenario == 2)
+            behavior = TestBehavior.Failure;
+        else if (scenario == 3)
+            behavior = TestBehavior.Cancelled;
+
+        ProbeScriptedCase test = Fixture("cancel-during-probe", TestBehavior.Success, behavior, TestBehavior.Success);
+        test.cancelDuringBody = true;
+        TestRunner runner = new TestRunner();
+        TestResult result = runner.RunProbe(test, probeToken, token);
+        try Assert.True(probeToken.IsCancellationRequested, "Normal cancellation really occurred during body");
+        try Assert.False(token.IsCancellationRequested, "Outer runner retains its independent normal token");
+        try Assert.Equal<TestPhase>(TestPhase.Body, result.primaryPhase, "Actual probe body phase retained");
+        if (scenario == 1) {
+            try Assert.Equal<TestOutcome>(TestOutcome.Cancelled, result.primaryOutcome,
+                "Normal cancellation overrides a successful probe body");
+            try Assert.Equal<string>("test.cancelled", result.primaryFailure.Value.code,
+                "Runner owns successful-body cancellation conversion");
+        } else if (scenario == 2) {
+            try Assert.Equal<TestOutcome>(TestOutcome.Failed, result.primaryOutcome,
+                "Authored body failure wins over later normal cancellation");
+            try Assert.Equal<string>("probe.authored", result.primaryFailure.Value.code,
+                "Authored failure identity retained");
+        } else {
+            try Assert.Equal<TestOutcome>(TestOutcome.Cancelled, result.primaryOutcome,
+                "Authored body cancellation remains cancellation");
+            try Assert.Equal<string>("probe.authored_cancel", result.primaryFailure.Value.code,
+                "Authored cancellation is not overwritten by runner cancellation");
+        }
+        try ExactlyOnce(test, true);
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> DualFailure(CancellationToken token, CancellationToken probeToken) {
+        TestRunner runner = new TestRunner();
+        ProbeScriptedCase setup = Fixture("setup-and-cleanup", TestBehavior.Failure,
+                                          TestBehavior.Success, TestBehavior.Failure);
+        TestResult result = runner.RunProbe(setup, token, probeToken);
+        try Assert.Equal<TestOutcome>(TestOutcome.Failed, result.outcome, "Dual failure remains failed");
+        try Assert.Equal<TestPhase>(TestPhase.Setup, result.primaryPhase, "Setup remains primary phase");
+        try Assert.Equal<string>("setup", result.primaryFailure.Value.message, "Setup failure retained");
+        try Assert.Equal<string>("cleanup", result.cleanupFailure.Value.message, "Cleanup failure independently retained");
+        try Assert.False(result.bodyRan, "Failed setup suppresses the body");
+        try Assert.Equal<string>("setupcleanup", setup.trace, "Partial setup still owns cleanup");
+        try ExactlyOnce(setup, false);
+
+        ProbeScriptedCase cleanup = Fixture("cleanup-only", TestBehavior.Success,
+                                            TestBehavior.Success, TestBehavior.Failure);
+        TestResult only = runner.RunProbe(cleanup, token, probeToken);
+        try Assert.Equal<TestOutcome>(TestOutcome.Failed, only.outcome, "Cleanup-only failure fails final outcome");
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, only.primaryOutcome, "Cleanup does not rewrite a successful body");
+        try Assert.False(only.primaryFailure.HasValue, "No fabricated primary failure");
+        try Assert.Equal<string>("cleanup", only.cleanupFailure.Value.message, "Cleanup-only failure retained");
+        try ExactlyOnce(cleanup, true);
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Exceptions(CancellationToken token, CancellationToken probeToken) {
+        TestRunner runner = new TestRunner();
+        ProbeScriptedCase test = Fixture("body-cleanup-fault", TestBehavior.Success,
+                                         TestBehavior.Throw, TestBehavior.Throw);
+        TestResult result = runner.RunProbe(test, token, probeToken);
+        try Assert.Equal<string>("test.unexpected_error", result.primaryFailure.Value.code, "Probe exception is structured");
+        try Assert.Equal<string>("body", result.primaryFailure.Value.message, "Probe exception message retained");
+        try Assert.Equal<string>("test.unexpected_error", result.cleanupFailure.Value.code, "Cleanup exception is independent");
+        try Assert.Equal<string>("cleanup", result.cleanupFailure.Value.message, "Cleanup exception message retained");
+        try ExactlyOnce(test, true);
+
+        ProbeScriptedCase setup = Fixture("setup-fault", TestBehavior.Throw,
+                                          TestBehavior.Success, TestBehavior.Success);
+        TestResult before = runner.RunProbe(setup, token, probeToken);
+        try Assert.Equal<string>("test.unexpected_error", before.primaryFailure.Value.code, "Setup exception is structured");
+        try Assert.Equal<TestPhase>(TestPhase.Setup, before.primaryPhase, "Setup exception keeps its phase");
+        try ExactlyOnce(setup, false);
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Registration(CancellationToken token, CancellationToken probeToken) {
+        TestRunner runner = new TestRunner();
+        ProbeScriptedCase first = Fixture("duplicate", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success);
+        ProbeScriptedCase second = Fixture("duplicate", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success);
+        List<IProbeTestCase> duplicate = List<IProbeTestCase>.Empty();
+        duplicate.Add(first);
+        duplicate.Add(second);
+        bool refused = false;
+        try {
+            List<TestResult> unexpectedResults = runner.RunAllProbes(duplicate, token, probeToken);
+        } catch (Error error) {
+            refused = true;
+        }
+        try Assert.True(refused, "Duplicate scoped registration is refused");
+        try Assert.Equal<string>("", first.trace + second.trace, "All registration is checked before any hook");
+
+        List<IProbeTestCase> excessive = List<IProbeTestCase>.Empty();
+        List<ProbeScriptedCase> actual = List<ProbeScriptedCase>.Empty();
+        for (int index = 0; index < 129; index = index + 1) {
+            ProbeScriptedCase test = Fixture("case." + string.FromInt(index), TestBehavior.Success,
+                                              TestBehavior.Success, TestBehavior.Success);
+            excessive.Add(test);
+            actual.Add(test);
+        }
+
+        refused = false;
+        try {
+            List<TestResult> unexpectedResults = runner.RunAllProbes(excessive, token, probeToken);
+        } catch (Error error) {
+            refused = true;
+        }
+        try Assert.True(refused, "129-case scoped registration exceeds the unchanged 128-case bound");
+        int entered = 0;
+        foreach (ProbeScriptedCase test in actual)
+            entered = entered + test.setupCalls + test.bodyCalls + test.probeCalls + test.cleanupCalls;
+
+        try Assert.Equal<int>(0, entered, "Count refusal enters none of the 129 fixture lifecycles");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> OrdinaryCompatibility(CancellationToken token) {
+        TestRunner runner = new TestRunner();
+        ProbeScriptedCase test = Fixture("ordinary-dispatch", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success);
+        TestResult result = runner.Run(test, token);
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, result.outcome, "Ordinary Run remains successful");
+        try Assert.Equal<int>(1, test.bodyCalls, "Ordinary Run selects original Body");
+        try Assert.Equal<int>(0, test.probeCalls, "Ordinary Run never invokes BodyWithProbe");
+        try Assert.Equal<string>("setupbodycleanup", test.trace, "Ordinary lifecycle order unchanged");
+        List<ITestCase> tests = List<ITestCase>.Empty();
+        tests.Add(Fixture("ordinary.a", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success));
+        tests.Add(Fixture("ordinary.b", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success));
+        List<TestResult> results = runner.RunAll(tests, token);
+        try Assert.Equal<string>("ordinary.a", results.At(0).id, "Ordinary RunAll retains first declaration");
+        try Assert.Equal<string>("ordinary.b", results.At(1).id, "Ordinary RunAll retains second declaration");
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, results.At(0).outcome, "Ordinary first case passes");
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, results.At(1).outcome, "Ordinary second case passes");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> ProbeOrder(CancellationToken token, CancellationToken probeToken) {
+        TestRunner runner = new TestRunner();
+        List<IProbeTestCase> tests = List<IProbeTestCase>.Empty();
+        ProbeScriptedCase first = Fixture("probe.a", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success);
+        ProbeScriptedCase second = Fixture("probe.b", TestBehavior.Success, TestBehavior.Success, TestBehavior.Success);
+        first.requireCancelledProbe = true;
+        second.requireCancelledProbe = true;
+        tests.Add(first);
+        tests.Add(second);
+        List<TestResult> results = runner.RunAllProbes(tests, token, probeToken);
+        try Assert.Equal<string>("probe.a", results.At(0).id, "Probe RunAll retains first declaration");
+        try Assert.Equal<string>("probe.b", results.At(1).id, "Probe RunAll retains second declaration");
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, results.At(0).outcome, "Cancelled probe reaches first case");
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, results.At(1).outcome, "Cancelled probe reaches second case");
+        try ExactlyOnce(first, true);
+        try ExactlyOnce(second, true);
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> BodyWithProbe(CancellationToken token, CancellationToken probeToken) {
+        if (scenario == 0)
+            return CancelledProbeAndNormalPrecancel(token, probeToken);
+        if (scenario >= 1 && scenario <= 3)
+            return NormalCancellationDuringBody(token, probeToken);
+        if (scenario == 4)
+            return DualFailure(token, probeToken);
+        if (scenario == 5)
+            return Exceptions(token, probeToken);
+        if (scenario == 6)
+            return Registration(token, probeToken);
+        if (scenario == 7)
+            return OrdinaryCompatibility(token);
+        if (scenario == 8)
+            return ProbeOrder(token, probeToken);
+
+        return Assert.True(false, "Unknown Source probe contract");
+    }
+}

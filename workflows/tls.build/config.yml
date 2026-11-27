@@ -1,0 +1,8 @@
+name: pipelang-tls-build
+description: Build pinned maintained rustls-ffi with AWS-LC through the installed PipeLang native dependency resolver
+docker_preflight: false
+steps:
+  - id: tls
+    kind: host
+    cwd: repo
+    run: assets/scripts/run.sh

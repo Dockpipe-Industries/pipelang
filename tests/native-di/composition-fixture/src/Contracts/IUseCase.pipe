@@ -1,0 +1,14 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Contracts;
+
+public source Interface IUseCase {
+    pure int Identity();
+    pure int RequestIdentity();
+    pure int ScopeIdentity();
+    pure string Tenant();
+    pure int RootIdentity();
+    Result<int,string> ReadPolicy();
+    pure int OperationCount();
+    pure int Echo(int context, int execution, int outcome);
+    Result<int,string> ObserveCancellation(CancellationToken token);
+}

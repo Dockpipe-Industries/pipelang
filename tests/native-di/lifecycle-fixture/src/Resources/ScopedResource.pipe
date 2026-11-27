@@ -1,0 +1,62 @@
+module DiLifecycle.Resources;
+import DiLifecycle.Contracts;
+
+public Class ScopedResource : IScopedResource, IResourceCleanup {
+    private ResourcePort port;
+    private int resource;
+    private IRootResource root;
+    private int cleanupWork;
+    private SemaphoreSlim localGate;
+
+    public ScopedResource(ResourcePort resourcePort, int identity, IRootResource parent, ScopeStamp stamp) {
+        port = resourcePort;
+        resource = identity;
+        root = parent;
+        cleanupWork = stamp.cleanupWork;
+        if (stamp.failureMode == 3)
+            throw Error("fixture.constructor_failure");
+    }
+
+    public pure int Identity() => resource;
+    public pure int RootIdentity() => root.Identity();
+
+    public async Task<Result<int,string>> Work(CancellationToken token) {
+        try {
+            Result<int,string> outcome = await port.Wait(resource, token);
+            return outcome;
+        } finally {
+            Result<void,string> noted = port.Note("work-finally", resource, root.Identity());
+            if (!noted.IsSuccess)
+                throw Error(noted.Error);
+        }
+    }
+
+    public async Task<Result<int,string>> LocalWork() {
+        try {
+            await localGate.WaitAsync();
+            return Result<int,string>.Success(resource);
+        } finally {
+            Result<void,string> noted = port.Note("local-work-finally", resource, root.Identity());
+            if (!noted.IsSuccess)
+                throw Error(noted.Error);
+        }
+    }
+
+    public void ReleaseLocal() {
+        localGate.Release();
+    }
+
+    public Result<void,string> Close(CancellationToken token) {
+        Result<void,string> entered = port.Note("cleanup-enter", resource, root.Identity());
+        if (!entered.IsSuccess)
+            return entered;
+        int iteration = 0;
+        while (iteration < cleanupWork) {
+            iteration = iteration + 1;
+        }
+        Result<void,string> noted = port.Note("cleanup-live", resource, root.Identity());
+        if (!noted.IsSuccess)
+            return noted;
+        return port.Close(resource, token);
+    }
+}

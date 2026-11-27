@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "compiler.hpp"
+#include "XmlViewParser.hpp"
 #include "../lexer/lexer.hpp"
 #include <algorithm>
 #include <charconv>
@@ -24,7 +25,7 @@ bool safeName(const std::string &name)
         "char", "char8_t", "char16_t", "char32_t", "class", "compl", "concept", "const",
         "consteval", "constexpr", "constinit", "const_cast", "continue", "co_await", "co_return",
         "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast", "else",
-        "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto",
+        "enum", "explicit", "export", "extern", "false", "float", "uint32", "for", "friend", "goto",
         "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not",
         "not_eq", "nullptr", "operator", "or", "or_eq", "private", "protected", "public",
         "reflexpr", "register", "reinterpret_cast", "requires", "return", "short", "signed",
@@ -375,6 +376,33 @@ bool validType(const std::string &type, const std::set<std::string> &names, unsi
 }
 void validateManifest(const Json &manifest)
 {
+    std::size_t visited = 0;
+    const auto rejectUInt32 = [&](const auto& self, const Json& value, unsigned depth) -> void {
+        if (depth > 24 || ++visited > 50000)
+            throw std::runtime_error("model manifest capacity exceeded");
+        if (value.is_object()) {
+            for (const auto& [key, child] : value.items()) {
+                if ((key == "type" || key == "returnType") && child.is_string()) {
+                    const auto type = child.template get<std::string>();
+                    std::size_t position = 0;
+                    while ((position = type.find("uint32", position)) != std::string::npos) {
+                        const auto end = position + 6;
+                        const bool startsToken = position == 0 || type[position - 1] == '<' || type[position - 1] == ',';
+                        const bool endsToken = end == type.size() || type[end] == '>' || type[end] == ',';
+                        if (startsToken && endsToken)
+                            throw std::runtime_error("view bindings do not support uint32 values");
+                        position = end;
+                    }
+                }
+                self(self, child, depth + 1);
+            }
+        } else if (value.is_array()) {
+            for (const auto& child : value)
+                self(self, child, depth + 1);
+        }
+    };
+    rejectUInt32(rejectUInt32, manifest, 0);
+
     if (manifest.is_object() && manifest.contains("protocol") &&
         manifest.at("protocol") == "pipelang.native-model-manifest.v2")
         throw std::runtime_error("object and source-interface model view transport is not qualified");
@@ -489,13 +517,16 @@ Json decode(const std::string &input)
 Json compile(const Json &request)
 {
     try {
-        members(request, {"protocol", "source", "model_manifest", "model_header"}, {"namespace", "style_inspection"});
+        members(request, {"protocol", "source", "model_manifest", "model_header"}, {"namespace", "style_inspection", "source_format"});
         const bool inspectStyle = request.contains("style_inspection");
         if (inspectStyle && text(request, "style_inspection") != styleDescriptorProtocol)
             throw std::runtime_error("unsupported style inspection protocol");
         if (text(request, "protocol") != "pipelang.native-model-view.v1")
             throw std::runtime_error("unsupported model-view protocol");
         const auto source = text(request, "source");
+        const auto sourceFormat = request.contains("source_format") ? text(request, "source_format") : "pview";
+        if (sourceFormat != "pview" && sourceFormat != "pxml")
+            throw std::runtime_error("source_format must be pview or pxml");
         validateManifest(request.at("model_manifest"));
         const auto nameSpace = request.contains("namespace") ? text(request, "namespace") : "pipelang_models";
         if (!safeNamespace(nameSpace) || nameSpace != text(request.at("model_manifest"), "namespace"))
@@ -508,9 +539,15 @@ Json compile(const Json &request)
                 || (character >= '0' && character <= '9') || character == '_' || character == '-' || character == '.' || character == '/'))
                 throw std::runtime_error("model_header contains unsafe characters");
         }
-        const auto lexed = pipelang::native::lex(source);
-        if (lexed.failure)
+        const auto lexed = sourceFormat == "pxml" ? XmlViewParser(source).parse() : pipelang::native::lex(source);
+        if (lexed.failure) {
+            if (sourceFormat == "pxml") {
+                return {{"protocol", "pipelang.native-model-view.v1"}, {"ok", false},
+                    {"diagnostics", Json::array({{{"code", lexed.failure->code}, {"message", lexed.failure->message},
+                        {"start", lexed.failure->start}, {"end", lexed.failure->end}}})}};
+            }
             throw Failure{lexed.failure->message, lexed.failure->start, lexed.failure->end};
+        }
         Parser parser(lexed.tokens, request.at("model_manifest"));
         const auto view = parser.parse(nameSpace, header);
         Json response = {{"protocol", "pipelang.native-model-view.v1"}, {"ok", true}, {"header", emit(view)},

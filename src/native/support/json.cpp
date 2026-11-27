@@ -50,6 +50,19 @@ std::string Arguments::optional(const std::string& name, const std::string& fall
     require(std::find(values_.begin(), values_.end(), name) == values_.end(), "duplicate argument " + name);
     return result;
 }
+std::vector<std::string> Arguments::repeated(const std::string& name) {
+    std::vector<std::string> results;
+    for (auto position = std::find(values_.begin(), values_.end(), name);
+         position != values_.end();
+         position = std::find(values_.begin(), values_.end(), name)) {
+        const auto value = position + 1;
+        require(value != values_.end() && !value->empty() && !value->starts_with("--"),
+                "missing value for " + name);
+        results.push_back(std::move(*value));
+        values_.erase(position, value + 1);
+    }
+    return results;
+}
 std::string Arguments::take(const std::string& name) {
     const auto result = optional(name);
     require(!result.empty(), "required argument " + name);

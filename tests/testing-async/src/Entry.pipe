@@ -1,0 +1,4 @@
+module TestingAsyncEntry;
+import PipeLang.Testing;
+import PipeLang.Testing.Async;
+import PipeLang.Testing.AsyncSelfTests;

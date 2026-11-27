@@ -1,0 +1,131 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Record HostValue {
+    public int number = 0;
+    public string text = "";
+}
+
+public Interface World {
+    Result<int,string> Read(int first, int second);
+    Result<int,string> Read(string key);
+    Result<HostValue,string> Exchange(HostValue value);
+    Result<void,string> Touch(int delta);
+    Task<Result<int,string>> AsyncRead(int value, CancellationToken cancellation);
+}
+
+public Class SyncHostModel {
+    private World world;
+    public int value = 0;
+    public int cleanup = 0;
+    public string notice = "";
+
+    public SyncHostModel(World service) {
+        world = service;
+    }
+
+    public pure int Inspect() => value;
+
+    private int Next() {
+        value = value + 1;
+        return value;
+    }
+
+    public Result<int,string> Ordered() {
+        value = 0;
+        return world.Read(Next(), Next());
+    }
+
+    public Result<int,string> ReadAfterTouch() {
+        Result<void,string> touched = world.Touch(7);
+        if (!touched.IsSuccess)
+            return Result<int,string>.Failure(touched.Error);
+        return world.Read(0, 0);
+    }
+
+    public Result<int,string> Forward(string key) {
+        value = 9;
+        return world.Read(key);
+    }
+
+    public Result<HostValue,string> Exchange(HostValue input) {
+        value = 12;
+        return world.Exchange(input);
+    }
+
+    public int ThrowAfterTouch() {
+        value = 77;
+        Result<void,string> touched = world.Touch(3);
+        if (!touched.IsSuccess)
+            throw Error(touched.Error);
+        throw Error("source fault after host effect");
+    }
+
+    public int RecoverHostFault() {
+        try {
+            Result<int,string> result = world.Read("throw");
+            return result.Value;
+        } catch (Error error) {
+            notice = error.Message;
+            return -1;
+        } finally {
+            cleanup = cleanup + 1;
+        }
+    }
+
+    public Result<int,string> CancelWithCleanup() {
+        value = 55;
+        try {
+            return world.Read("cancel-throw");
+        } finally {
+            Result<void,string> touched = world.Touch(1);
+            if (!touched.IsSuccess)
+                throw Error(touched.Error);
+        }
+    }
+
+    public async Task<Result<int,string>> Mixed(int request, CancellationToken cancellation) {
+        value = 3;
+        Result<int,string> before = world.Read(request, 2);
+        if (!before.IsSuccess)
+            return before;
+        Result<int,string> after = await world.AsyncRead(before.Value, cancellation);
+        if (after.IsSuccess)
+            value = after.Value;
+        return after;
+    }
+}
+
+public Enum PureOwnedKind { First, Second }
+public Record PureOwnedRecord {
+    public float32 value = 0f;
+    public string label = "";
+    public PureOwnedKind kind = PureOwnedKind.First;
+}
+public Interface PureOwnedMath {
+    pure float32 Support(float32 compression, float32 relativeSpeed);
+    pure PureOwnedRecord ReadRecord();
+    pure PureOwnedKind ReadKind();
+    pure float32? ReadMaybe();
+    pure float32 FromRecord(PureOwnedRecord value);
+    pure Result<float32,string> Fallible();
+}
+public Class PureHostOwner {
+    private PureOwnedMath math;
+    public int prefix = 0;
+    public int suffix = 0;
+    public PureHostOwner(PureOwnedMath service) {
+        math = service;
+    }
+    public pure float32 Read(float32 value) => math.Support(value, 0f);
+    public pure PureOwnedRecord ReadRecord() => math.ReadRecord();
+    public pure PureOwnedKind ReadKind() => math.ReadKind();
+    public pure float32? ReadMaybe() => math.ReadMaybe();
+    public pure float32 FromRecord(PureOwnedRecord value) => math.FromRecord(value);
+    public pure Result<float32,string> Fallible() => math.Fallible();
+    public pure float32 Ordered(float32 value) => math.Support(value, math.Support(value, 0f));
+    public Result<float32,string> Checked(float32 value) {
+        prefix = prefix + 1;
+        float32 result = math.Support(value, 0f);
+        suffix = suffix + 1;
+        return Result<float32,string>.Success(result);
+    }
+}

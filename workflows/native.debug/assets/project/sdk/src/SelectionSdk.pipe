@@ -1,0 +1,11 @@
+module NativeProof.Sdk;
+
+public Class SelectionSdk {
+    public static pure int Read(int input) {
+        if (input >= 39) {
+            return 42;
+        }
+
+        return 7;
+    }
+}

@@ -1,0 +1,3 @@
+module TestingEntry;
+import PipeLang.Testing;
+import PipeLang.Testing.SelfTests;

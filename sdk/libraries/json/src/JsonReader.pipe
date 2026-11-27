@@ -1,0 +1,24 @@
+module PipeLang.Json;
+
+// Host effect contract: native syntax/encoding, source-owned schema and policy.
+public Interface JsonReader {
+    Result<int,string> BeginDocument(JsonReadLimits limits);
+    Result<void,string> AppendDocument(int document, ByteBuffer chunk);
+    Result<JsonNode,string> CompleteDocument(int document, CancellationToken token);
+    Result<void,string> CloseDocument(int document);
+
+    Result<JsonKind,string> Kind(JsonNode node);
+    Result<int,string> Count(JsonNode node);
+    Result<JsonNode,string> At(JsonNode node, int index);
+    Result<JsonNode?,string> FindMember(JsonNode node, string name);
+    Result<bool,string> BoolValue(JsonNode node);
+    Result<int,string> Int64Value(JsonNode node);
+    Result<float,string> FiniteFloatValue(JsonNode node);
+
+    Result<int,string> ScalarLength(JsonNode node);
+    Result<ByteBuffer,string> ScalarSlice(JsonNode node, int start, int count);
+    Result<int,string> NameLength(JsonNode node);
+    Result<ByteBuffer,string> NameSlice(JsonNode node, int start, int count);
+    Result<int,string> InputLength(int document);
+    Result<ByteBuffer,string> InputSlice(int document, int start, int count);
+}

@@ -49,7 +49,7 @@ The exact installed SDK exposes explicit build-time selection:
 pipelang_add_model_bindings(settings-bindings
     STYLE_INSPECTION
     MODEL "${CMAKE_CURRENT_SOURCE_DIR}/Settings.pipe"
-    VIEW "${CMAKE_CURRENT_SOURCE_DIR}/SettingsView.pipe"
+    VIEW "${CMAKE_CURRENT_SOURCE_DIR}/SettingsView.pview"
     NAMESPACE settings_models
     OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/compiled-ui")
 ```

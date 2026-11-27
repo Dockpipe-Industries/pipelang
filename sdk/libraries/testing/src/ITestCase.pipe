@@ -1,0 +1,9 @@
+module PipeLang.Testing;
+
+public source Interface ITestCase {
+    pure string Id();
+    pure string Name();
+    Result<void,TestFailure> Setup(CancellationToken token);
+    Result<void,TestFailure> Body(CancellationToken token);
+    Result<void,TestFailure> Cleanup();
+}

@@ -1,0 +1,20 @@
+public Class App {
+    public static async Task<Result<int,string>> Run(int index) {
+        var result = await App.Read(index);
+
+        return result;
+    }
+
+    private static async Task<Result<int,string>> Read(int index) {
+        var values = List<int>.Empty();
+        values.Add(7);
+        values.Add(42);
+
+        var count = values.Count;
+        if (index == count) {
+            return Result<int,string>.Success(count);
+        }
+
+        return Result<int,string>.Success(values.At(index));
+    }
+}

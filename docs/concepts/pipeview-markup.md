@@ -1,5 +1,16 @@
 # PipeView optional XML authoring
 
+The native typed-model XML dialect and its qualification scope are described in
+[Native typed PipeView XML](pipeview-native-xml.md). Native XML uses `.pxml`,
+declarative views use `.pview`, ordinary models retain `.pipe`, and `.vpipe` is
+not supported. The typed XML dialect binds external models and does not implement
+the historical inline State/Action runtime described below.
+
+The `sdk/pipeview/markup`, `pipelang-viewc`, Go-reference behavior and source-v1/v2
+examples below document a retired historical profile. They are not current native
+compiler or SDK entrypoints. Historical XML fixtures and their recorded filenames
+remain unchanged; renaming historical XML does not convert its profile.
+
 The optional `sdk/pipeview/markup` frontend maps the current declarative view
 profile to the same typed checker, document and state/action definition as
 PipeLang views. It introduces no rendering or state runtime. PipeLang remains

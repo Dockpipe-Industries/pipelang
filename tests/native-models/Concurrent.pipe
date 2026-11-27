@@ -22,11 +22,11 @@ public Class ConcurrentModel {
         int inserted = local.GetOrAdd("new", 3);
         bool mismatch = local.TryUpdate("key", 5, 9);
         bool replaced = local.TryUpdate("key", 5, 1);
-        Optional<int> found = local.TryGet("key");
-        Optional<int> absent = local.TryGet("missing");
+        int? found = local.TryGet("key");
+        int? absent = local.TryGet("missing");
         bool contains = local.ContainsKey("new");
-        Optional<int> removed = local.TryRemove("new");
-        Optional<int> removedAgain = local.TryRemove("new");
+        int? removed = local.TryRemove("new");
+        int? removedAgain = local.TryRemove("new");
         List<string> keys = local.Keys;
         List<int> values = local.Values;
         List<KeyValuePair<string,int>> entries = local.Entries;
@@ -42,8 +42,8 @@ public Class ConcurrentModel {
     public bool SequenceOperations() {
         ConcurrentQueue<int> fifo = ConcurrentQueue<int>.Empty();
         ConcurrentStack<int> lifo = ConcurrentStack<int>.Empty();
-        Optional<int> emptyQueue = fifo.TryPeek();
-        Optional<int> emptyStack = lifo.TryPop();
+        int? emptyQueue = fifo.TryPeek();
+        int? emptyStack = lifo.TryPop();
         fifo.Enqueue(1);
         fifo.Enqueue(2);
         lifo.Push(3);
@@ -52,10 +52,10 @@ public Class ConcurrentModel {
         List<int> stackSnapshot = lifo.ToList();
         ConcurrentQueue<int> alias = fifo;
         alias.Enqueue(5);
-        Optional<int> queuePeek = fifo.TryPeek();
-        Optional<int> stackPeek = lifo.TryPeek();
-        Optional<int> dequeued = fifo.TryDequeue();
-        Optional<int> popped = lifo.TryPop();
+        int? queuePeek = fifo.TryPeek();
+        int? stackPeek = lifo.TryPeek();
+        int? dequeued = fifo.TryDequeue();
+        int? popped = lifo.TryPop();
         bool valid = !emptyQueue.HasValue && !emptyStack.HasValue
             && queueSnapshot.Count == 2 && queueSnapshot.At(0) == 1
             && stackSnapshot.At(0) == 4 && fifo.Count == 2

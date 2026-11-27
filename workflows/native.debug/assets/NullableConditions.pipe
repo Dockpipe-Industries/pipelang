@@ -1,0 +1,28 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.NullableConditions;
+
+public Class ConditionLog {
+    private int observed;
+
+    private bool Record(bool value, int marker) {
+        observed = observed * 10 + marker;
+        return value;
+    }
+
+    public bool Check(bool choose, int expected) {
+        observed = 0;
+        int? result = Record(choose, 1)
+            ? (Record(false, 2) ? null : null)
+            : (Record(true, 3) ? null : null);
+        return !result.HasValue && observed == expected;
+    }
+}
+
+public Class App {
+    public static int Run() {
+        var log = new ConditionLog();
+        if (!log.Check(true, 12) || !log.Check(false, 13))
+            throw Error("nullable conditional did not execute only its selected condition");
+        return 42;
+    }
+}

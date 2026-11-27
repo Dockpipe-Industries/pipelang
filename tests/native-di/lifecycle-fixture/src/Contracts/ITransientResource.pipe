@@ -1,0 +1,6 @@
+module DiLifecycle.Contracts;
+
+public source Interface ITransientResource {
+    pure int Identity();
+    pure int ScopedIdentity();
+}

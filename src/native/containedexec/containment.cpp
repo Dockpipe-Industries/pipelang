@@ -1,5 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "containment.hpp"
+#include "estate.hpp"
 #include <algorithm>
 #include <csignal>
 #include <fstream>
@@ -58,27 +59,6 @@ Json events(const fs::path& group) {
     while (input >> key >> value)
         result[key] = value;
     return result;
-}
-std::uint64_t allocated(const fs::path& estate, std::uint64_t limit) {
-    std::uint64_t total = 0;
-    std::size_t entries = 0;
-    for (const auto& entry : fs::recursive_directory_iterator(estate)) {
-        require(++entries <= 1000000, "proof estate entry limit exceeded");
-#ifndef _WIN32
-        struct stat status{};
-        if (::lstat(entry.path().c_str(), &status) != 0) {
-            require(errno == ENOENT, "cannot inspect proof estate");
-            continue;
-        }
-        if (S_ISREG(status.st_mode))
-            total += static_cast<std::uint64_t>(status.st_blocks) * 512;
-#else
-        if (entry.is_regular_file())
-            total += entry.file_size();
-#endif
-        require(total < limit, "proof estate reached its byte limit");
-    }
-    return total;
 }
 std::string manager(const std::vector<std::string>& arguments, bool requireSuccess = true) {
     const auto result = process(arguments, {}, std::chrono::seconds(5), 65536, 65536);
@@ -201,7 +181,7 @@ int execute(const Request& request, const fs::path& executable) {
     Json before;
     bool attempted = false;
     try {
-        bytes = allocated(request.estate, request.estateLimit);
+        bytes = allocatedEstate(request.estate, request.estateLimit);
         if (request.job) {
             attempted = true;
             manager({"/usr/bin/busctl", "--user", "--timeout=5", "call", "org.freedesktop.systemd1",
@@ -247,7 +227,7 @@ int execute(const Request& request, const fs::path& executable) {
             require(interrupted == 0, "contained execution interrupted");
             const auto now = std::chrono::steady_clock::now();
             if (now - lastEstate >= std::chrono::milliseconds(200)) {
-                bytes = allocated(request.estate, request.estateLimit);
+                bytes = allocatedEstate(request.estate, request.estateLimit);
                 lastEstate = now;
             }
             if (group.empty()) {

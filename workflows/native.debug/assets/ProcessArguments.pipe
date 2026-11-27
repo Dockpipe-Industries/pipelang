@@ -1,0 +1,62 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ProcessArguments;
+
+public Class App {
+    public static int Run(Array<string> arguments) {
+        if (arguments.Count == 0)
+            return 17;
+
+        if (arguments.Count == 4 && arguments.At(0) == "" &&
+            arguments.At(1) == "two words" && arguments.At(2) == "--source-trace" &&
+            arguments.At(3) == "你好") {
+            return 42;
+        }
+
+        return -1;
+    }
+
+    public static async Task<Result<int,string>> Resume(Array<string> arguments, CancellationToken token) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var waited = await gate.WaitAsync(35, token);
+        if (token.IsCancellationRequested)
+            return Result<int,string>.Failure("argument changed token state");
+
+        if (arguments.Count == 2 && arguments.At(0) == "--cancel" && arguments.At(1) == "mañana")
+            return Result<int,string>.Success(42);
+
+        return Result<int,string>.Success(-1);
+    }
+
+    public static int Fault(Array<string> arguments) {
+        if (arguments.Count != 0)
+            throw Error("argument-triggered source fault");
+
+        return 17;
+    }
+}
+
+public Class QuietApp {
+    public static void Run(int input) {
+        if (input < 0)
+            throw Error("void source failed");
+    }
+
+    public static Result<void,string> ResultRun(int input) {
+        if (input < 0)
+            return Result<void,string>.Failure("void returned failure");
+
+        if (input == 0)
+            return Result<void,string>.Cancelled("void returned cancellation");
+
+        return Result<void,string>.Success();
+    }
+
+    public static async Task<Result<void,string>> AsyncRun(int input) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var waited = await gate.WaitAsync(30);
+        if (waited)
+            return Result<void,string>.Failure("unexpected semaphore acquisition");
+
+        return QuietApp.ResultRun(input);
+    }
+}

@@ -87,8 +87,14 @@ void refusalContracts() {
     refuse("public Class A {} public Class B : A { public pure A Read() => base; }", "expected '.'");
     refuse("public Class A {} public Class B : A {} public Class C { public pure B Read(A value) => value; }", "expected B");
     refuse("public Class A {} public Class B : A {} public Class C : A {} public Class D { public pure B Read(C value) => value; }", "expected B");
-    refuse("public Class A { public virtual pure int Read() => 1; public pure int Call() => Read(); } public Class B : A { public override pure int Read() => Call(); }", "recursive");
-    refuse("public Class A { public int value; } public Class B : A { public B(int value) {} }", "shadow");
+    require(models::compileObjects(
+        "public Class A { public virtual pure int Read() => 1; public pure int Call() => Read(); } public Class B : A { public override pure int Read() => Call(); } public Class App {}",
+        {"App"}, "bounded_virtual").at("ok") == true,
+        "virtual recursion did not retain runtime-bounded source admission");
+    require(models::compileObjects(
+        "public Class A { public int value; } public Class B : A { public B(int value) { this.value = value; } } public Class App {}",
+        {"App"}, "inherited_parameter").at("ok") == true,
+        "constructor parameter could not shadow an inherited field");
     refuse("public source Interface I { pure int Read(); } public Class A : I {} public Class B : A { public pure int Read() => 1; }", "implement");
     refuse("public Class A { protected int value; } public Record R { protected int value; }", "protected");
     refuse("public Class A { public virtual void Wait(SemaphoreSlim gate) {} } public Class B : A { public override void Wait(SemaphoreSlim gate) { gate.Wait(); } } public Class C { public async Task<Result<int,string>> Run(A target, SemaphoreSlim gate) { target.Wait(gate); return Result<int,string>.Success(1); } }", "blocking");

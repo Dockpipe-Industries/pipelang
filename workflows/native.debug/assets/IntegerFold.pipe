@@ -1,0 +1,34 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.IntegerFold;
+
+public model Class Session {
+    public Session() {}
+
+    public int Run(int count) {
+        if (count == -1) {
+            try {
+                return 9223372036854775807 + 1;
+            } catch (Error error) {
+                if (error.Message == "integer addition overflow")
+                    return 41;
+                throw error;
+            }
+        }
+        if (count == -2) {
+            try {
+                return 8 / 0;
+            } catch (Error error) {
+                if (error.Message == "integer division by zero")
+                    return 42;
+                throw error;
+            }
+        }
+        if (count == -3)
+            return -9223372036854775808 % -1;
+
+        int total = 0;
+        for (int index = 0; index < count; index = index + 1)
+            total = total + ((6 * 7) + (9 / 3) - (7 % 4));
+        return total;
+    }
+}

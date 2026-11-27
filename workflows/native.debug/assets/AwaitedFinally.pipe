@@ -1,0 +1,101 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.AwaitedFinally;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int input) {
+        var worker = new Worker();
+        var outcome = await worker.Execute(input);
+        int expected = 12;
+        if (input == 1) {
+            expected = 14;
+        } else if (input == 2) {
+            expected = 10;
+        } else if (input == 3) {
+            expected = 13;
+        } else if (input == 4) {
+            expected = 15;
+        }
+        if (worker.Read() != expected) {
+            return Result<int,string>.Failure("cleanup did not commit the expected receiver state");
+        }
+        return outcome;
+    }
+}
+
+public Class Worker {
+    private int trace;
+
+    public Worker() {
+        this.trace = 0;
+    }
+
+    public pure int Read() {
+        return this.trace;
+    }
+
+    public async Task<Result<int,string>> Execute(int input) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        try {
+            var body = await gate.WaitAsync(50);
+            if (input == 1) {
+                this.trace = this.trace + 4;
+                return Result<int,string>.Success(input / (input - 1));
+            }
+            if (input == 3) {
+                try {
+                    return Result<int,string>.Success(42);
+                } finally {
+                    this.trace = this.trace + 1;
+                }
+            }
+            if (input == 4) {
+                var index = 0;
+                while (index < 3) {
+                    index = index + 1;
+                    try {
+                        if (index == 1)
+                            continue;
+                        if (index == 3)
+                            break;
+                    } finally {
+                        this.trace = this.trace + 1;
+                    }
+                }
+            }
+            if (input == 5) {
+                var exhausted = await Helper.Exhaust();
+            }
+            return Result<int,string>.Success(42);
+        } finally {
+            this.trace = this.trace + 10;
+            var completed = await Helper.Close();
+            this.trace = this.trace + completed.Value;
+            if (input == 0) {
+                var confirmed = await Helper.Confirm();
+            }
+            if (input == 1 || input == 2) {
+                var absent = Result<int,string>.Failure("cleanup fault");
+                this.trace = absent.Value;
+            }
+        }
+    }
+}
+
+public Class Helper {
+    public static async Task<Result<int,string>> Confirm() {
+        return Result<int,string>.Success(0);
+    }
+
+    public static async Task<Result<int,string>> Close() {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var cleanup = await gate.WaitAsync(70);
+        return Result<int,string>.Success(2);
+    }
+
+    public static async Task<Result<int,string>> Exhaust() {
+        var count = 0;
+        while (true) {
+            count = count + 1;
+        }
+    }
+}

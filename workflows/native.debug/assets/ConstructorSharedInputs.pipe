@@ -1,0 +1,30 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ConstructorSharedInputs;
+
+public Record Value {
+    public int id;
+}
+
+public model Class Session {
+    private ConcurrentQueue<string> queue;
+    private ConcurrentDictionary<string,Value> table;
+    private Atomic<int> calls;
+
+    public Session(ConcurrentQueue<string> incoming, ConcurrentDictionary<string,Value> shared, Atomic<int> visits, int mode) {
+        queue = incoming;
+        table = shared;
+        calls = visits;
+        queue.Enqueue("constructor");
+        table.Set("constructor", new Value { id = 17 });
+        calls.Increment();
+        if (mode == 1)
+            throw Error("constructor failed after shared effects");
+    }
+
+    public int Run() {
+        queue.Enqueue("method");
+        table.Set("method", new Value { id = 42 });
+        calls.Increment();
+        return queue.Count + table.Count + calls.Load();
+    }
+}

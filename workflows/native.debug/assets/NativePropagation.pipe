@@ -1,0 +1,62 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.NativePropagation;
+
+public Record Capture {
+    public int baseline;
+    public int reading;
+}
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        int baseline = 10;
+        try {
+            var captured = Capture(baseline, (try await Worker.Read(scenario)) + (try await Worker.Read(0)));
+            var samples = List<int>.Empty();
+            samples.Add(captured.reading);
+            var selected = samples.At(try await Worker.Index());
+            try await Worker.Validate(scenario);
+            if (scenario == 5 && (try await Worker.Read(1)) == 0)
+                return Result<int,string>.Failure("short circuit evaluated its right operand");
+
+            int? total = scenario == 0 ? try Worker.Total(captured.baseline, selected) : null;
+            if (total.HasValue)
+                return Result<int,string>.Success(total.Value);
+            return Result<int,string>.Success(42);
+        } catch (Error error) {
+            return Result<int,string>.Failure("a returned failure reached the exception handler");
+        } finally {
+            var cleaned = await gate.WaitAsync(30);
+            if (scenario == 3)
+                throw Error("cleanup ran after propagation");
+        }
+    }
+}
+
+public Class Worker {
+    public static async Task<Result<int,string>> Read(int scenario) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var finished = await gate.WaitAsync(35);
+        if (scenario == 1 || scenario == 3)
+            return Result<int,string>.Failure("source reading failed");
+        if (scenario == 2)
+            return Result<int,string>.Cancelled("source reading cancelled");
+        return Result<int,string>.Success(16);
+    }
+
+    public static async Task<Result<int,string>> Index() {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var finished = await gate.WaitAsync(30);
+        return Result<int,string>.Success(0);
+    }
+
+    public static async Task<Result<void,string>> Validate(int scenario) {
+        if (scenario == 4)
+            return Result<void,string>.Failure("void validation failed");
+        return Result<void,string>.Success();
+    }
+
+    public static pure Result<int,string> Total(int baseline, int reading) {
+        return Result<int,string>.Success(baseline + reading);
+    }
+}

@@ -14,6 +14,11 @@ esac
 case "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/" in
     "$PWD/"*) echo 'Native proof must be outside sources' >&2; exit 1 ;;
 esac
+native_objects=${PIPELANG_BUILD_NATIVE_OBJECT_PROOF:-ON}
+case "$native_objects" in
+    ON|OFF) ;;
+    *) echo 'PIPELANG_BUILD_NATIVE_OBJECT_PROOF must be ON or OFF' >&2; exit 1 ;;
+esac
 build=${PIPELANG_NATIVE_BUILD_DIRECTORY:-$PIPELANG_NATIVE_TOOLCHAIN_PROOF/build}
 runner=${PIPELANG_NATIVE_RUNNER:-}
 if [ -z "$runner" ]; then
@@ -31,12 +36,14 @@ actual_hash=$(sha256sum "$runner" | cut -d' ' -f1)
 test "$actual_hash" = "$PIPELANG_NATIVE_RUNNER_SHA256"
 if [ "${1:-}" != --inside ]; then
     mkdir "$PIPELANG_NATIVE_TOOLCHAIN_PROOF"
-    exec "$runner" job --output "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/job" \
+    run_native_job "$runner" "$PIPELANG_NATIVE_TOOLCHAIN_PROOF/job" \
             --estate "$PIPELANG_NATIVE_TOOLCHAIN_PROOF" --timeout 3600 -- \
             /usr/bin/env PIPELANG_NATIVE_TOOLCHAIN_PROOF="$PIPELANG_NATIVE_TOOLCHAIN_PROOF" \
             PIPELANG_NATIVE_BUILD_DIRECTORY="$build" PIPELANG_NATIVE_RUNNER="$runner" \
+            PIPELANG_BUILD_NATIVE_OBJECT_PROOF="$native_objects" \
             PIPELANG_NATIVE_TOOL_PATH="${PIPELANG_NATIVE_TOOL_PATH:-}" PIPELANG_NATIVE_TRACE_EXEC="${PIPELANG_NATIVE_TRACE_EXEC:-0}" \
             PIPELANG_NATIVE_RUNNER_SHA256="$PIPELANG_NATIVE_RUNNER_SHA256" sh "$0" --inside
+    exit
 fi
 if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
     : "${PIPELANG_MACOS_COORDINATOR:?Native workflow requires a macOS coordinator}"
@@ -52,7 +59,7 @@ unit() {
     shift
     prefix="$proof/units/$name"
     if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ "${PIPELANG_NATIVE_TRACE_EXEC:-0}" = 1 ]; then
-        set -- /usr/bin/strace -f -e trace=execve -s 4096 -o "$prefix.exec" "$@"
+        set -- /bin/sh "$platform_directory/trace-executions.sh" "$prefix.exec" "$@"
     fi
     if "$runner" unit --output "$prefix" --estate "$proof" --timeout 900 -- "$@" > "$prefix.launcher.log" 2>&1; then
         echo "$name: passed"
@@ -62,9 +69,16 @@ unit() {
     tail -c 3000 "$prefix.launcher.log" >&2
     exit 1
 }
-unit configure "$PIPELANG_CMAKE" -S sdk/pipeview/model -B "$build" \
+set -- -S sdk/pipeview/model -B "$build" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" \
-    -DPIPELANG_BUILD_SDK_TOOL_TESTS=ON -DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON
+    -DPIPELANG_BUILD_SDK_TOOL_TESTS=ON -DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON \
+    "-DPIPELANG_BUILD_NATIVE_OBJECT_PROOF=$native_objects"
+unit configure "$PIPELANG_CMAKE" "$@"
+if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
+    # Keep the slower hosted Intel compile within the per-unit deadline.
+    unit build-model-compiler "$PIPELANG_CMAKE" --build "$build" --parallel 1 --target pipelang_model_compiler
+    unit build-sdk-tool-tests "$PIPELANG_CMAKE" --build "$build" --parallel 1 --target pipelang-sdk-tool-tests
+fi
 unit build "$PIPELANG_CMAKE" --build "$build" --parallel 1
 unit install "$PIPELANG_CMAKE" --install "$build" --prefix "$proof/sdk"
 if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ -f "$PIPELANG_NATIVE_TOOLCHAIN_PROOF-bootstrap/build.exec" ]; then
@@ -72,6 +86,18 @@ if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ -f "$PIPELANG_NATIVE_TOOLCHAIN_P
 fi
 unit inventory "$proof/sdk/bin/pipelang-sdk-tool" inventory --source-root "$PWD" --output "$proof/inventory.json"
 unit sdk-tests "$build/sdk-tools/pipelang-sdk-tool-tests" "$PWD" "$proof/sdk" "$proof/sdk-tests"
+unit resource-budget-tests "$build/sdk-tools/pipelang-resource-budget-tests" "$proof/resource-budget-tests"
+unit resource-budget-sdk-tests "$build/sdk-tools/pipelang-resource-budget-tests" --sdk "$proof/sdk" "$proof/resource-budget-sdk-tests"
+unit composition-planner-tests "$build/sdk-tools/pipelang-composition-planner-tests"
+unit composition-lifecycle-tests "$build/sdk-tools/pipelang-composition-lifecycle-tests"
+unit composition-sdk-tests "$build/sdk-tools/pipelang-composition-sdk-tests" "$proof/sdk" "$proof/composition-sdk-tests"
+unit composition-factory-profile-tests "$build/sdk-tools/pipelang-composition-factory-profile-tests"
+unit di-scope-tests "$build/sdk-tools/pipelang-di-scope-tests"
+unit di-execution-tests "$build/sdk-tools/pipelang-di-execution-tests"
+for lifecycle_test in ResourceJournal AsyncScopeExecution TaskGroupRuntime OrdinaryExecutionAllocation; do
+    unit "di-$lifecycle_test-tests" "$build/sdk-tools/pipelang-di-$lifecycle_test-tests"
+done
+unit object-root-set-tests "$build/sdk-tools/pipelang-object-root-set-tests"
 unit package-tests "$build/sdk-tools/pipelang-package-tests" "$proof/package-tests"
 unit legacy-compiler-tests "$build/legacy-compiler/pipelang-legacy-compiler-tests" "$PWD" "$proof/legacy-compiler-tests" "$proof/sdk/bin/pipelang-native"
 unit materialize-tests "$build/legacy-compiler/pipelang-materialize-tests" "$proof/materialize-tests" "$proof/sdk/bin/pipelang-native"

@@ -1,0 +1,7 @@
+module PipeLang.Testing.AsyncSelfTests;
+
+public Record AsyncNumberData {
+    public string id;
+    public int input;
+    public int expected;
+}

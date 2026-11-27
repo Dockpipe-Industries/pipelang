@@ -1,0 +1,93 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.AsyncCalls;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int input) {
+        if (input == 5) {
+            var gate = SemaphoreSlim.Create(0, 1);
+            while (true) {
+                var ready = await gate.WaitAsync(0);
+                var immediate = await Helper.Immediate();
+            }
+        }
+
+        var worker = new Counter(input);
+        var changed = await worker.Change(2, input);
+        if (!changed.IsSuccess) {
+            if (input == 3 || input == 4) {
+                if (worker.Read() != input + 10) {
+                    return Result<int,string>.Failure("failed segment did not restore the receiver");
+                }
+                var recovery = await Helper.Next(41, 1);
+                if (input == 4) {
+                    return recovery;
+                }
+            }
+            if (changed.IsCancelled) {
+                return Result<int,string>.Cancelled(changed.Error);
+            }
+            return Result<int,string>.Failure(changed.Error);
+        }
+
+        var next = await Helper.Next(changed.Value, 1);
+        if (worker.Read() != changed.Value) {
+            return Result<int,string>.Failure("child receiver did not retain its field update");
+        }
+        return next;
+    }
+}
+
+public Class Counter {
+    private int value;
+
+    public Counter(int input) {
+        this.value = input;
+    }
+
+    public pure int Read() {
+        return this.value;
+    }
+
+    public async Task<Result<int,string>> Change(int delta, int scenario) {
+        if (scenario == 3 || scenario == 4) {
+            this.value = this.value + 10;
+        }
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(40);
+        if (scenario == 1) {
+            return Result<int,string>.Failure("child failed");
+        }
+        if (scenario == 2) {
+            return Result<int,string>.Cancelled("child cancelled");
+        }
+        if (scenario == 3 || scenario == 4) {
+            this.value = this.value + 100;
+            return Result<int,string>.Success(this.value / (scenario - scenario));
+        }
+
+        this.value = this.value + delta;
+        return Result<int,string>.Success(this.value);
+    }
+}
+
+public Class Helper {
+    public static async Task<Result<int,string>> Immediate() {
+        return Result<int,string>.Success(0);
+    }
+
+    public static async Task<Result<int,string>> Next(int input, int delta) {
+        var pause = await Helper.Pause(delta == 1, false);
+        if (!pause.IsSuccess) {
+            return pause;
+        }
+        return Result<int,string>.Success(input + delta);
+    }
+
+    private static async Task<Result<int,string>> Pause(bool expected, bool unexpected) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(45);
+        if (!expected || unexpected)
+            return Result<int,string>.Failure("async Boolean arguments changed");
+        return Result<int,string>.Success(0);
+    }
+}

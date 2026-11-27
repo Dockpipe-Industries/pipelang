@@ -2,7 +2,7 @@ public Record IterationLabel {
     public string text;
 }
 public Record IterationEnvelope {
-    public Optional<Result<List<int>,string>> values;
+    public Result<List<int>,string>? values;
 }
 public Class IterationModel {
     public List<int> numbers = List<int>.Empty();

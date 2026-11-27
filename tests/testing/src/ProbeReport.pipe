@@ -1,0 +1,7 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+public Record ProbeReport {
+    public bool allPassed = false;
+    public List<TestResult> results;
+}

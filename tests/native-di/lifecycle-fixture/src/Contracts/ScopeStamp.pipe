@@ -1,0 +1,7 @@
+module DiLifecycle.Contracts;
+
+public Record ScopeStamp {
+    public int identity = 0;
+    public int failureMode = 0;
+    public int cleanupWork = 0;
+}

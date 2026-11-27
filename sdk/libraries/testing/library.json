@@ -1,0 +1,80 @@
+{
+  "protocol": "pipelang.source-library.v1",
+  "name": "PipeLang.Testing",
+  "version": "0.1.0",
+  "source_root": "src",
+  "sources": [
+    {
+      "path": "Assert.pipe",
+      "sha256": "e8020bb9ea17be69afc07a59ec6913171509addf4085de1421f8d0b40e043dca"
+    },
+    {
+      "path": "Assertions.pipe",
+      "sha256": "e97d5423a2486bdb0d878bc0c45e6f94b8f6960f6c3e8e83ebf5c5cde5c9fe93"
+    },
+    {
+      "path": "IProbeTestCase.pipe",
+      "sha256": "4ffc7c616c34a6e77dd0114fc1277096ff0820439fb2199bc72601045a3a2087"
+    },
+    {
+      "path": "ITestCase.pipe",
+      "sha256": "84b9219843079b408dd83fcfc006326cd33d200110f96ce060a9252d1fef42f4"
+    },
+    {
+      "path": "TestFailure.pipe",
+      "sha256": "7461e87f1865fddd73199acdc781191ae00047e74810b7311f5037f959a17d94"
+    },
+    {
+      "path": "TestOutcome.pipe",
+      "sha256": "b5b9296d8a9dfb4c7787758ce6d2aa314116b4c47b3d4f753f2b47d263f1bd1f"
+    },
+    {
+      "path": "TestPhase.pipe",
+      "sha256": "1d5b9adfa72aed204a6ab054617f9eeabf7a94f57fb7481336bffddf97cdf416"
+    },
+    {
+      "path": "TestResult.pipe",
+      "sha256": "effaa7690010226e90a4fabbe7c7879213deb1ce9ebe5eccb0702a94fb179e57"
+    },
+    {
+      "path": "TestRunner.pipe",
+      "sha256": "0c59cf7da894177aafa72699ae276b7c818a31b06b7050e10f0d061e728e6821"
+    },
+    {
+      "path": "async/AsyncCleanupResult.pipe",
+      "sha256": "9951424474f0cb2baa329719ede3172e94afa1bb0465c7421518b754e16fe9e1"
+    },
+    {
+      "path": "async/AsyncTestResult.pipe",
+      "sha256": "35ebbedda38df6324ac279f678e8a27dc023b0f8bd717b7b7b0a3e8919092220"
+    },
+    {
+      "path": "async/AsyncTestRunner.pipe",
+      "sha256": "5e5b6a674164a7a2ed9df886bc5080871e238ad865c07edce984802334c9654c"
+    },
+    {
+      "path": "async/IAsyncTestCase.pipe",
+      "sha256": "34c241baa12bc168764d1e120f191ce75878fabdf6d763351ade7dd863af29fd"
+    },
+    {
+      "path": "async/TestClock.pipe",
+      "sha256": "abe1878d6cd5dbbac21dddfd95bca6183a86029dc51e4459c48bbb8227c576a2"
+    },
+    {
+      "path": "async/TestDeadline.pipe",
+      "sha256": "d600006ce50cd8d0c7f7e706c1c786893df150e49e2cd49d132b28f1ba04b020"
+    },
+    {
+      "path": "async/TestDeadlines.pipe",
+      "sha256": "23b648c00ba04ce7574d5a8d963a81d8bb326105b9d33cd2f5b5f87e23e02284"
+    },
+    {
+      "path": "async/TestStepResult.pipe",
+      "sha256": "096a5ae09794800aea5c8e845340d9b2faac2074f98aabc020f909b9dcb48991"
+    },
+    {
+      "path": "async/TestSteps.pipe",
+      "sha256": "6d2aca6c18acfb9650929a80f493cb937cb6d47081a9f50e6809ed41ea83c043"
+    }
+  ]
+}

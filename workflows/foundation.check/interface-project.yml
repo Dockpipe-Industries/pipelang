@@ -1,0 +1,10 @@
+name: pipelang-result-interface-project-check
+description: Verify the owning common result interface through installed native and WASM SDK service facades.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: interface-project
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/foundation.check/assets/scripts/interface-project.sh

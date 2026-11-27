@@ -1,6 +1,8 @@
 #include "lexer.hpp"
 
 #include <string_view>
+#include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace pipelang::native {
@@ -16,7 +18,13 @@ bool isDigit(unsigned char character) {
     return character >= '0' && character <= '9';
 }
 
+bool isHexDigit(unsigned char character) {
+    return isDigit(character) || (character >= 'a' && character <= 'f') ||
+           (character >= 'A' && character <= 'F');
+}
+
 bool isIdentifierStart(unsigned char character) {
+
     return (character >= 'a' && character <= 'z') ||
            (character >= 'A' && character <= 'Z') || character == '_';
 }
@@ -122,8 +130,14 @@ LexResult lex(const std::string& source) {
 }
 
 LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
+    return lex(source, numericSyntax, std::numeric_limits<std::size_t>::max());
+}
+
+LexResult lex(const std::string& source, NumericSyntax numericSyntax, std::size_t maximumTokens) {
+    if (maximumTokens == 0)
+        return failure("PL1009", "token resource budget exceeded; configure tokens", 0, 0);
     LexResult result;
-    result.tokens.reserve(128);
+    result.tokens.reserve(std::min<std::size_t>(128, maximumTokens));
     std::size_t offset = 0;
     const auto append = [&](std::string kind, std::size_t start, std::size_t end) {
         result.tokens.push_back({std::move(kind), source.substr(start, end - start), start, end});
@@ -141,6 +155,8 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
                 ++offset;
             continue;
         }
+        if (result.tokens.size() >= maximumTokens - 1)
+            return failure("PL1009", "token resource budget exceeded; configure tokens", offset, offset);
         if (isIdentifierStart(character)) {
             const auto start = offset++;
             while (offset < source.size() &&
@@ -151,6 +167,18 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
         }
         if (isDigit(character)) {
             const auto start = offset++;
+            if (numericSyntax == NumericSyntax::Binary64 && character == '0' &&
+                offset < source.size() && (source[offset] == 'x' || source[offset] == 'X')) {
+                ++offset;
+                const auto digits = offset;
+                while (offset < source.size() && isHexDigit(source[offset]))
+                    ++offset;
+                if (offset == digits || offset == source.size() || source[offset] != 'u')
+                    return failure("PL1002", "uint32 hexadecimal literal requires digits and lowercase u suffix", start, offset);
+                ++offset;
+                append("uint32", start, offset);
+                continue;
+            }
             while (offset < source.size() && isDigit(source[offset]))
                 ++offset;
             bool floatingPoint = false;
@@ -173,7 +201,12 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
                 while (offset < source.size() && isDigit(source[offset]))
                     ++offset;
             }
-            if (numericSyntax == NumericSyntax::Binary64 && offset < source.size() && source[offset] == 'f') {
+            if (numericSyntax == NumericSyntax::Binary64 && offset < source.size() && source[offset] == 'u') {
+                if (floatingPoint)
+                    return failure("PL1002", "uint32 literal cannot contain a fraction or exponent", start, offset + 1);
+                ++offset;
+                append("uint32", start, offset);
+            } else if (numericSyntax == NumericSyntax::Binary64 && offset < source.size() && source[offset] == 'f') {
                 ++offset;
                 append("float32", start, offset);
             } else {
@@ -256,6 +289,26 @@ LexResult lex(const std::string& source, NumericSyntax numericSyntax) {
             break;
         case '/':
             kind = "slash";
+            break;
+        case '&':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "bit_and";
+            break;
+        case '|':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "bit_or";
+            break;
+        case '^':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "bit_xor";
+            break;
+        case '~':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "bit_not";
+            break;
+        case '%':
+            if (numericSyntax == NumericSyntax::Binary64)
+                kind = "percent";
             break;
         case '=':
             kind = "assign";

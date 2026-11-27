@@ -1,0 +1,12 @@
+module PipeLang.Testing.Async;
+import PipeLang.Testing;
+
+public Class TestDeadlines {
+    public pure int RemainingMilliseconds(TestDeadline deadline, int nowMilliseconds) {
+        if (nowMilliseconds < 0)
+            return 0;
+        if (nowMilliseconds >= deadline.expiresAtMilliseconds)
+            return 0;
+        return deadline.expiresAtMilliseconds - nowMilliseconds;
+    }
+}

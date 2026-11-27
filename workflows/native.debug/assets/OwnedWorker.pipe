@@ -1,0 +1,59 @@
+module NativeProof.OwnedWorker;
+
+public Class Worker {
+    private int value;
+    private int alternate = 7;
+    private bool enabled;
+    private string label = "worker";
+
+    public Worker(int input) {
+        this.value = input;
+        this.enabled = input >= 39;
+    }
+
+    private pure int Fallback() {
+        return alternate;
+    }
+
+    public pure int Read() {
+        if (label != "worker")
+            return -1;
+        if (enabled) {
+            return this.value;
+        }
+        return Fallback();
+    }
+}
+
+public Class Session {
+    private int retained = 7;
+
+    public Session(int input) {
+        if (input >= 39) {
+            retained = 42;
+        }
+    }
+
+    public async Task<Result<int,string>> Execute(int input) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(100);
+        var worker = new Worker(retained);
+        var alias = worker;
+        var independent = new Worker(0);
+        if (acquired) {
+            return Result<int,string>.Success(independent.Read());
+        }
+        if (input == 0) {
+            return Result<int,string>.Success(independent.Read());
+        }
+        return Result<int,string>.Success(alias.Read());
+    }
+}
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int input) {
+        var session = new Session(input);
+        var result = await session.Execute(input);
+        return result;
+    }
+}

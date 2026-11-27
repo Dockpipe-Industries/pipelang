@@ -1,0 +1,8 @@
+module NativeProof.Helper;
+import NativeProof.Sdk;
+
+public Class SelectionHelper {
+    public static pure int Read(int input) {
+        return SelectionSdk.Read(input);
+    }
+}

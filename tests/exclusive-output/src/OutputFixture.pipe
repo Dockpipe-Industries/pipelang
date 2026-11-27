@@ -1,0 +1,10 @@
+module PipeLang.IO.OutputTests;
+
+public Interface OutputFixture {
+    Result<void,string> Arm(string relative, string fault, int scope);
+    Result<void,string> Restore();
+    Result<int,string> Mode(string relative);
+    Result<ByteBuffer,string> Block(int length);
+    Result<int,string> Effects();
+    Result<int,string> OpenOperations();
+}

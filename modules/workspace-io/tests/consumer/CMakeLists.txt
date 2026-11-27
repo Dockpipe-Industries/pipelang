@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.21.1)
+project(WorkspaceIoInstalledConsumer LANGUAGES CXX)
+find_package(PipeLangWorkspaceIo 0.1.0 EXACT CONFIG REQUIRED)
+add_executable(installed-consumer main.cpp)
+target_link_libraries(installed-consumer PRIVATE PipeLang::WorkspaceIo)

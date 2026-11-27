@@ -1,0 +1,7 @@
+module PipeLang.IO.OutputTests;
+import PipeLang.Testing;
+
+public Record OutputReport {
+    public bool allPassed = false;
+    public List<TestResult> results;
+}

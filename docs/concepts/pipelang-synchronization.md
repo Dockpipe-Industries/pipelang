@@ -99,7 +99,8 @@ WaitAsync is a directly awaited compiler intrinsic that unwraps to void or bool.
 Its non-timed overload may be an await expression statement; timed overloads must
 initialize or assign a bool. This does not admit general source Task<void> or
 Task<bool> declarations, task storage/escape, await in arbitrary expressions or
-asynchronous finally.
+asynchronous finally in legacy profiles. The modern object-enabled profile supports
+awaited finally under the cleanup contract below.
 
 ## Owner execution and teardown
 
@@ -118,16 +119,20 @@ The acquired result is authoritative once the probe decrements the count. Waiter
 order and fairness are not promised.
 
 Waiters retain their shared handles in owned frames. Frame destruction invalidates
-registrations before a stale continuation can run. Scope teardown first preserves
-already produced host outcomes, then cancels pending polling waits on the owner
-without invoking acquisition predicates or consuming new permits. Authored finally
-is attempted under its existing reserve before remaining frame/state release;
-cleanup exhaustion does not promise every authored cleanup effect completes.
+registrations before a stale continuation can run. Scope teardown closes normal admission and cancels normal operations, preserving
+already produced host outcomes. Normal pending polling waits cancel without
+invoking acquisition predicates or consuming new permits. Admitted source cleanup
+can continue to await under its own cleanup context. The owner drains those
+continuations before stopping the host worker or destroying services and resource
+lifetime roots. Cleanup exhaustion or an explicitly cancelled cleanup operation
+does not promise every authored cleanup effect completes.
 
 Both successful and exceptional resumption refresh the working transaction from
 live state before source recovery/finally. Only actual suspension begins a fresh
-normal/cleanup evaluation segment. Immediate acquisition, timeout-zero completion,
-closing refusal and local-child completion do not replenish budgets.
+normal/cleanup evaluation segment outside cleanup. A suspension during cleanup,
+including in an awaited helper, never replenishes its shared cleanup reserve.
+Immediate acquisition, timeout-zero completion, closing refusal and local-child
+completion do not replenish budgets.
 
 ## Ownership and integration limits
 
@@ -143,6 +148,83 @@ headers include `pipelang/model/synchronization.hpp` only when needed. Existing
 source that does not select synchronization retains its generated model artifacts.
 
 Arbitrary object/Monitor locking, condition-variable source APIs, callback factories,
-channels, general resource disposal and asynchronous finally remain separate
-capabilities. ThreadSanitizer execution is unavailable on the currently qualified
+channels and general resource disposal remain separate capabilities. ThreadSanitizer execution is unavailable on the currently qualified
 host; this is not race-sanitizer, performance, platform or release qualification.
+
+## Awaited finally in the modern profile
+
+Finally may directly await host, local, source-interface, virtual and generic
+source methods, or SemaphoreSlim.WaitAsync. Locks and parallel workers still
+cannot suspend. Cleanup cannot start parallel work, use blocking Wait, return
+from the enclosing method, propagate its Result, or break/continue out of the
+cleanup scope. Local loops and nested try/catch/finally remain supported.
+
+The protected exit is retained across suspension. A return expression is evaluated
+once; its owned value and Task result are published only after applicable cleanup
+finishes. A thrown cleanup fault replaces a normal exit, including an attempted
+return. When a fault is already propagating, that original fault wins. Returned
+Failure/Cancelled values are ordinary values; finally does not implicitly inspect
+or propagate them. Source code owns any combination of phase Results.
+
+Cleanup shields inherited normal operation cancellation. Explicit tokens passed
+to cleanup operations remain effective; CancellationToken.None permits cleanup
+after ordinary Task cancellation. Nested cleanup and awaited helpers inherit the
+same cleanup phase. This does not renew a revoked InvocationPermit or permit stale
+publication/host effects. The native port must still honor its effective token or
+supply its existing bounded deadline; source work tickets cannot terminate arbitrary
+native code. Keep body and cleanup deadlines distinct when the application needs
+that policy.
+
+Each await retains the usual segment publication/refresh boundary, including an
+await in finally while a primary exception is pending. Writes before that await
+can therefore be published; only an uncommitted tail rolls back on a later fault.
+There is no atomic rollback across asynchronous cleanup or host/resource effects.
+Synchronous finally retains its existing rollback behavior.
+
+Cleanup uses the independent 65,536-ticket reserve and the same source ancestry
+limit of 32. Finally itself adds no source activation or helper coroutine. At
+depth32 inline cleanup may run, while another source call is refused until an
+ancestor unwinds. Repeated real suspensions cannot refill cleanup tickets.
+
+The native TaskScope owner drains admitted cleanup before destroying its frames.
+Cleanup-phase authority belongs to that entry and phase: a native await descriptor
+cannot be transferred to a sibling task, another scope, or a later cleanup phase.
+Checks precede readiness predicates and submission. Standalone native/noop awaiter
+probes remain supported. Frames deliberately suspended by native code without a
+registered wakeup retain the nonthrowing abandonment fallback; source-generated
+awaits always register their leaf wakeup. Forced process termination does not
+establish completed cleanup. A raw frame destructor cannot perform asynchronous
+source cleanup.
+
+This capability requires the matching compiler and runtime headers. It does not
+change Task.Result's public Success/Cancelled/Failure envelope, task/polling
+capacities, physical containment caps or legacy profile admission.
+
+## Independent authored cancellation tokens
+
+In the modern object-enabled profile, source CancellationToken parameters are
+ordinary independent values. Root wrappers, local/object/interface/virtual/generic
+calls and composition SourceMethods do not merge them with each other or with the
+implicit task token. For example, a cancelled cleanupToken does not cancel a body
+operation passed bodyToken, and body cancellation does not turn CancellationToken.None
+into a cancelled cleanup token. Source IsCancellationRequested observes the authored
+value; Task.cancel does not mutate that value.
+
+Task.cancel, group and context cancellation retain their separate implicit operation
+context. A concrete host or semaphore operation combines that context with the token
+operands actually supplied to that operation. Tokens elsewhere in the source method's
+signature do not participate. Host operation admission and effective host arguments
+keep the existing operation-level combination rule. Successful authoritative host
+outcomes are not relabelled after completion, and this correction adds no blanket
+cancellation check to every expression/evaluation-budget step.
+
+Locks and parallel foreach have no authored token operand in the current syntax;
+they inherit the implicit task/context cancellation only. An otherwise unused modern
+method token no longer silently controls them. Explicit Wait/WaitAsync token operands
+remain effective. Synchronous host arguments retain their existing explicit source
+value contract. Legacy profiles retain their previous parameter aggregation behavior.
+
+Composition handles additionally have a separate native boundary token. It controls
+admission independently of the source arguments; only that boundary token can cause
+pre-admission cancellation. Authored cancelled tokens can therefore reach source
+cleanup logic rather than preventing the method from running altogether.

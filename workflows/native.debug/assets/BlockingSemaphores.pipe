@@ -1,0 +1,36 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.BlockingSemaphores;
+
+public model Class Session {
+    public Session() {}
+
+    private bool TryWait(SemaphoreSlim value, int timeout, CancellationToken token) {
+        return value.Wait(timeout, token);
+    }
+
+    private int Check(CancellationToken token) {
+        SemaphoreSlim gate = SemaphoreSlim.Create(2, 2);
+        SemaphoreSlim alias = gate;
+        alias.Wait();
+        gate.Wait(token);
+        if (alias.CurrentCount != 0 || TryWait(alias, 0, token) || gate.Wait(0))
+            return 1;
+        if (alias.Release() != 0 || !TryWait(gate, 0, token) || gate.CurrentCount != 0)
+            return 2;
+        if (gate.Wait(3))
+            return 3;
+
+        try {
+            bool acquired = TryWait(alias, -2, token);
+            return 4;
+        } catch (Error error) {
+            if (error.Message != "semaphore timeout must be -1 or between 0 and 60000 milliseconds")
+                return 5;
+        }
+        return 42;
+    }
+
+    public int Run(CancellationToken token) {
+        return Check(token);
+    }
+}

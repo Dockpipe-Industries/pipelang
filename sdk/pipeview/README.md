@@ -1,5 +1,11 @@
 # Experimental PipeView declaration SDK
 
+Current native model/view consumers use the [C++ model SDK](model/README.md).
+Declarative views and styles use `.pview`, ordinary models use `.pipe`, and
+`.vpipe` is unsupported. `.pxml` names the native typed-model XML dialect described in
+[the XML contract](../../docs/concepts/pipeview-native-xml.md). The Go packages and source-v1/v2 examples below are
+retained historical documentation, not current executable SDK entrypoints.
+
 The declaration SDK now has an optional bounded PipeLang source frontend,
 selected through `pipelang-viewc`. It is experimental and does not implement a
 general reactive language runtime or a production UI framework. The bounded

@@ -1,0 +1,56 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.MultipleAwaits;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int input) {
+        var result = await App.Execute(input);
+        return result;
+    }
+
+    private static async Task<Result<int,string>> Execute(int input) {
+        var carrier = new Carrier(input);
+        var original = Result<int,string>.Success(input);
+        var gate = SemaphoreSlim.Create(1, 1);
+        var acquired = await gate.WaitAsync(0);
+        if (!acquired) {
+            return Result<int,string>.Failure("initial permit was lost");
+        }
+
+        if (input == 0) {
+            await gate.WaitAsync();
+            return Result<int,string>.Failure("infinite wait resumed without a permit");
+        }
+
+        input = input + 1;
+        var timeouts = List<int>.Empty();
+        timeouts.Add(35);
+        timeouts.Add(45);
+        var completed = 0;
+        foreach (var timeout in timeouts) {
+            acquired = await gate.WaitAsync(timeout);
+            if (acquired) {
+                return Result<int,string>.Failure("semaphore gained an unexpected permit");
+            }
+            if (timeout == 35) {
+                timeouts.Add(60);
+            }
+            completed = completed + 1;
+        }
+        if (completed != 2 || timeouts.Count != 3) {
+            return Result<int,string>.Failure("iteration state changed across await");
+        }
+        return Result<int,string>.Success(carrier.Read() + completed + (input - original.Value));
+    }
+}
+
+public Class Carrier {
+    private int value;
+
+    public Carrier(int input) {
+        this.value = input;
+    }
+
+    public pure int Read() {
+        return value;
+    }
+}

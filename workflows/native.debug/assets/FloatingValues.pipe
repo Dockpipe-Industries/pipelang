@@ -1,0 +1,123 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.FloatingValues;
+
+public Record Samples {
+    public float wide;
+    public float32 narrow;
+}
+
+public Class App {
+    private const float32 Unit = 1.0f;
+
+    private static async Task<Result<float32?,string>> Sample(float32 value) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(15);
+        if (acquired)
+            return Result<float32?,string>.Failure("unexpected semaphore signal");
+        return Result<float32?,string>.Success(value);
+    }
+
+    public static async Task<Result<int,string>> Run(int scenario) {
+        if (scenario == 1)
+            return Result<int,string>.Success(int.FromFloat(float.PositiveInfinity));
+        if (scenario == 2)
+            return Result<int,string>.Success(int.RoundFromFloat32(float32.NaN));
+        if (scenario == 3)
+            return Result<int,string>.Success(int.FromUInt32(uint32.FromFloat(-1.0)));
+        if (scenario == 4)
+            return Result<int,string>.Success(int.FromFloat(float.Clamp(1.0, 2.0, 0.0)));
+
+        float32 sign = -0.0f;
+        float32 payload = float32.FromBits(0x7fc00011u);
+        float32 boundary = Unit + 5.9604644775390625e-8f;
+        float32? saved = try await Sample(boundary);
+        if (!saved.HasValue || saved.Value != 1.0f ||
+            float32.ToBits(sign) != 0x80000000u ||
+            float32.ToBits(-sign) != 0u ||
+            float32.ToBits(payload) != 0x7fc00011u ||
+            float32.ToBits(1.4012984643248171e-45f) != 1u ||
+            float32.ToBits(float32.FromFloat(1.4012984643248171e-45)) != 1u)
+            return Result<int,string>.Failure("float32 bit pattern changed");
+
+        float zero = 0.0;
+        float infinity = 1.0 / zero;
+        float nan = zero / zero;
+        float32 negativeInfinity = Unit / sign;
+        if (float.IsFinite(infinity) || infinity != float.PositiveInfinity ||
+            negativeInfinity != float32.NegativeInfinity ||
+            nan == nan || nan < 0.0 || nan >= 0.0 || !(nan != nan) ||
+            !(float.FromUInt32(4294967295u) > float.FromInt(2147483648)))
+            return Result<int,string>.Failure("IEEE comparison or division changed");
+
+        List<Samples> values = List<Samples>.Empty();
+        values.Add(Samples(0.0, payload));
+        var alias = values;
+        if (values == alias)
+            return Result<int,string>.Failure("list identity hid a NaN comparison");
+        List<Samples> zeros = List<Samples>.Empty();
+        zeros.Add(Samples(-0.0, 0.0f));
+        List<Samples> otherZeros = List<Samples>.Empty();
+        otherZeros.Add(Samples(0.0, sign));
+        if (zeros != otherZeros)
+            return Result<int,string>.Failure("owned equality distinguished signed zeros");
+
+        float distance = float.Hypot(3.0, 4.0, 12.0);
+        float root = float.Sqrt(81.0);
+        float logarithm = float.Log(1.0);
+        float32 remainder = float32.Remainder(7.0f, 2.0f);
+        if (distance < 12.9999 || distance > 13.0001 || root != 9.0 || logarithm != 0.0 ||
+            remainder != -1.0f || float32.ILogB(8.0f) != 3 ||
+            float32.ScaleB(1.5f, 3) != 12.0f ||
+            int.RoundFromFloat(-2.5) != -3 || uint32.FromFloat32(7.75f) != 7u ||
+            float.FromFloat32(float32.FromInt(16)) != 16.0 ||
+            float32.FromUInt32(16777217u) != 16777216.0f)
+            return Result<int,string>.Failure("math or conversion changed");
+
+        if (!MathTable())
+            return Result<int,string>.Failure("standard math operations changed");
+        float difference = (11.0 - 4.0) * 3.0;
+        return Result<int,string>.Success(int.FromFloat(difference + 21.0));
+    }
+
+    private static bool MathTable() {
+        float cubeRoot = float.Cbrt(8.0);
+        return float.Abs(-3.0) == 3.0 &&
+            float.Sin(0.0) == 0.0 && float.Cos(0.0) == 1.0 && float.Tan(0.0) == 0.0 &&
+            float.Asin(0.0) == 0.0 && float.Acos(1.0) == 0.0 && float.Atan(0.0) == 0.0 &&
+            float.Atan2(0.0, 1.0) == 0.0 && float.Exp(0.0) == 1.0 && float.Expm1(0.0) == 0.0 &&
+            float.Pow(2.0, 10.0) == 1024.0 && float.Hypot(3.0, 4.0) == 5.0 &&
+            float.Fmod(7.0, 2.0) == 1.0 && float.Tanh(0.0) == 0.0 &&
+            cubeRoot > 1.9999 && cubeRoot < 2.0001 &&
+            float.Floor(-1.25) == -2.0 && float.Ceiling(-1.25) == -1.0 &&
+            float.Clamp(3.0, 0.0, 2.0) == 2.0 &&
+            float32.ToBits(float32.CopySign(0.0f, -1.0f)) == 0x80000000u;
+    }
+}
+
+public model Class ReferenceApp {
+    public ReferenceApp() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        var result = await App.Run(scenario);
+        return result;
+    }
+}
+
+public Interface FloatPort {
+    Result<float32,string> Echo(float32 value);
+}
+
+public Class Session {
+    private float initial;
+    private FloatPort port;
+
+    public Session(float initial, FloatPort port) {
+        this.initial = initial;
+        this.port = port;
+    }
+
+    public async Task<Result<Samples,string>> Run() {
+        float32 value = try port.Echo(float32.FromFloat(initial));
+        return Result<Samples,string>.Success(Samples(initial, value));
+    }
+}

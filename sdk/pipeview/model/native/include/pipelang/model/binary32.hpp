@@ -2,6 +2,7 @@
 #pragma once
 
 #include "numeric.hpp"
+#include "floating_environment.hpp"
 #include "result.hpp"
 
 #include <cfenv>
@@ -25,12 +26,12 @@ namespace pipelang::model {
 // Check native control registers where their semantics are known; otherwise
 // probe gradual subnormal production and consumption without changing modes.
 inline void requireBinary32Environment() {
-    if (std::fegetround() != FE_TONEAREST)
+    if (floating_environment_detail::portableRoundingMode() != FE_TONEAREST)
         throw ExecutionFailure("float32 requires round-to-nearest floating mode");
 #if defined(__SSE__) || defined(_M_X64)
     // Native hosts can change SSE rounding separately from the x87 control word
     // observed by some fenv implementations.
-    const unsigned control = _mm_getcsr();
+    const unsigned control = floating_environment_detail::binary32ControlWord();
     if ((control & 0x6000U) != 0)
         throw ExecutionFailure("float32 requires round-to-nearest SSE mode");
     // FTZ (bit 15) and DAZ (bit 6) fully identify non-IEEE subnormal handling

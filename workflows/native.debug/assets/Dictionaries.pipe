@@ -1,0 +1,125 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.Dictionaries;
+
+public Enum Status { Ready, Done }
+
+public Record Payload {
+    public string label;
+    public ByteBuffer bytes;
+}
+
+public Record Work {
+    public Dictionary<string,Payload> items;
+}
+
+public Class App {
+    private static async Task<Result<int,string>> Check(Dictionary<string,Payload> saved, Payload expected) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(15);
+        if (opened || saved.Count != 2 || saved.At("étape") != expected)
+            return Result<int,string>.Failure("dictionary value changed across suspension");
+        return Result<int,string>.Success(42);
+    }
+
+    public static async Task<Result<int,string>> Run(int scenario) {
+        Payload first = Payload("first", ByteBuffer.FromUtf8("é"));
+        Payload other = Payload("second", ByteBuffer.FromUtf8("tail"));
+        var items = Dictionary<string,Payload>.Empty();
+        items.Add("étape", first);
+        if (scenario == 1) {
+            items.Add("étape", other);
+            return Result<int,string>.Success(items.Count);
+        }
+        if (scenario == 2)
+            return Result<int,string>.Success(items.At("missing").bytes.Length);
+        if (scenario == 3) {
+            var bytes = ByteBuffer.FromUtf8("x");
+            for (int power = 0; power < 19; power = power + 1)
+                bytes.Append(bytes);
+            var budgeted = Dictionary<int,ByteBuffer>.Empty();
+            budgeted.Add(1, bytes);
+            budgeted.Add(2, bytes);
+            return Result<int,string>.Success(budgeted.Count);
+        }
+
+        items.Add("second", other);
+        var saved = items;
+        Work work = Work(items);
+        work.items.Set("étape", other);
+        var found = work.items.TryGet("étape");
+        if (!found.HasValue || found.Value != other || work.items.TryGet("missing").HasValue ||
+            !work.items.ContainsKey("étape") || work.items.ContainsKey("missing"))
+            return Result<int,string>.Failure("key lookup changed");
+        if (work.items.Keys.At(0) != "étape" || work.items.Values.At(0) != other ||
+            work.items.Entries.At(0).Key != "étape" || work.items.Entries.At(0).Value != other ||
+            saved.At("étape") != first)
+            return Result<int,string>.Failure("replacement disturbed the original copy or insertion order");
+
+        if (!work.items.Remove("étape") || work.items.Remove("étape"))
+            return Result<int,string>.Failure("remove lost its Boolean outcome");
+        work.items.Set("étape", first);
+        if (work.items != saved || work.items.Keys.At(0) != "second")
+            return Result<int,string>.Failure("dictionary equality depended on insertion order");
+        int visited = 0;
+        foreach (KeyValuePair<string,Payload> entry in work.items) {
+            if ((visited == 0 && (entry.Key != "second" || entry.Value != other)) ||
+                (visited == 1 && (entry.Key != "étape" || entry.Value != first)))
+                return Result<int,string>.Failure("iteration changed its snapshot");
+            work.items.Clear();
+            visited = visited + 1;
+        }
+        if (visited != 2 || work.items.Count != 0 || saved.Count != 2)
+            return Result<int,string>.Failure("clearing changed an older dictionary");
+
+        var flags = Dictionary<bool,bool>.Empty();
+        var enums = Dictionary<Status,uint32>.Empty();
+        var numbers = Dictionary<uint32,int>.Empty();
+        flags.Add(true, false);
+        enums.Add(Status.Ready, 17u);
+        numbers.Add(4294967295u, -42);
+        var flag = flags.TryGet(true);
+        if (!flag.HasValue || flag.Value || enums.At(Status.Ready) != 17u || numbers.At(4294967295u) != -42)
+            return Result<int,string>.Failure("dictionary key or value ABI changed");
+        var floats = Dictionary<int,float>.Empty();
+        floats.Add(-1, float.NaN);
+        if (floats == floats)
+            return Result<int,string>.Failure("dictionary storage identity hid NaN");
+        var pair = KeyValuePair<string,Payload>.Create("étape", first);
+        if (pair.Key != "étape" || pair.Value != first)
+            return Result<int,string>.Failure("pair construction changed its members");
+
+        var result = await App.Check(saved, first);
+        return result;
+    }
+}
+
+public model Class ReferenceApp {
+    public ReferenceApp() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        var result = await App.Run(scenario);
+        return result;
+    }
+}
+
+public Interface DictionaryPort {
+    Task<Result<Dictionary<string,int>,string>> Send(Dictionary<string,int> values, CancellationToken token);
+}
+
+public Class Session {
+    private DictionaryPort port;
+
+    public Session(DictionaryPort port) {
+        this.port = port;
+    }
+
+    public async Task<Result<Dictionary<string,int>,string>> Run(int scenario, CancellationToken token) {
+        var values = Dictionary<string,int>.Empty();
+        values.Add("étape", 42);
+        values.Add("other", 17);
+        var returned = try await port.Send(values, token);
+        if (returned.At("new") != 43 || returned.Keys.At(0) != "new")
+            return Result<Dictionary<string,int>,string>.Failure("host dictionary response changed");
+        return Result<Dictionary<string,int>,string>.Success(returned);
+    }
+}

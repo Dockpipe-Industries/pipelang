@@ -1,0 +1,8 @@
+module PipeLang.IO;
+
+// This capability binds the target directory and its controlled staging
+// directory at composition. Source selects the two leaf names.
+public Interface AtomicFileReplacement {
+    Result<OutputEffect,IoFailure> ReplaceFile(string stagedName, string destinationName,
+                                               FileIdentity stagedIdentity, int stagedBytes, CancellationToken token);
+}

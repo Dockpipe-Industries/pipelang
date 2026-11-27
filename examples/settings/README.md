@@ -7,7 +7,8 @@ updates its own baseline/status/error. There is no Set/Save/Revert runtime opcod
 list or handwritten native state-transition controller in this application.
 
 The exact installed experimental PipeLangModel 0.1.0 SDK compiles Settings.pipe
-and SettingsView.pipe. Generated model/view headers provide typed snapshots,
+and SettingsView.pview by default. Set `PIPEVIEW_SETTINGS_VIEW_FORMAT=pxml` to
+compile the equivalent typed SettingsView.pxml. Generated headers provide typed snapshots,
 actions, field/getter bindings and inspection metadata. The C++ shell supplies
 SettingsStore I/O and pumps owner-thread completions through the generated bridge.
 SettingsValue is an alias of the generated source record; file-format migration
@@ -45,7 +46,7 @@ Optional, loops, arbitrary generics and XML authoring for the new model profile
 remain separate language work. This example does not claim those features, GPU
 qualification, native input qualification, performance or release readiness.
 
-`SettingsView.pipe` selects a typed `SettingsTheme`. Its length/color tokens and
+`SettingsView.pview` selects a typed `SettingsTheme`. Its length/color tokens and
 explicit properties compile to the existing ForgePipe style contract; application
 state and async Save remain in the unchanged `Settings.pipe`. This consumer's
 style qualification is headless layout/draw and model behavior only.

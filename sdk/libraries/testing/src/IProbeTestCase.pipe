@@ -1,0 +1,7 @@
+module PipeLang.Testing;
+
+// The runner's normal token governs its lifecycle. A separate probe token is
+// passed only to the body so tests can inspect cancellation without being skipped.
+public source Interface IProbeTestCase : ITestCase {
+    Result<void,TestFailure> BodyWithProbe(CancellationToken token, CancellationToken probeToken);
+}

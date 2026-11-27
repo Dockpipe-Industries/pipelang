@@ -1,0 +1,125 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Record Pair {
+    public int value;
+}
+
+public Class Counter {
+    private int value = 0;
+
+    public void Set(int next) {
+        value = next;
+    }
+
+    public pure int Read() => value;
+
+    public async Task<Result<int,string>> ReadAsync(CancellationToken token) {
+        if (token.IsCancellationRequested)
+            return Result<int,string>.Cancelled("static.cancelled");
+
+        if (value < 0)
+            return Result<int,string>.Failure("static.failed");
+
+        return Result<int,string>.Success(value);
+    }
+}
+
+public Class Utility {
+    private int unusedState = 99;
+
+    public Utility() {
+        throw Error("static calls must not construct a receiver");
+    }
+
+    private static pure int Offset(int value) => value + 2;
+
+    public static pure T Echo<T>(T value) => value;
+
+    public static pure int Overloaded(int value) => Offset(value);
+
+    public static pure string Overloaded(string value) => value;
+
+    public static void Set(Counter counter, int value) {
+        counter.Set(value);
+    }
+
+    public static void SetAndThrow(Counter counter, int value) {
+        counter.Set(value);
+
+        throw Error("static.rollback");
+    }
+
+    public static async Task<Result<int,string>> ReadAsync(Counter counter, CancellationToken token) {
+        Result<int,string> result = await counter.ReadAsync(token);
+
+        return result;
+    }
+
+    public static pure int Recurse() => Recurse();
+}
+
+public Class App {
+    private Counter counter;
+
+    public App() {
+        counter = new Counter();
+    }
+
+    public static pure int StaticRoot() => Utility.Overloaded(40);
+
+    public pure bool AssertionOutcomes() {
+        Result<void,TestFailure> trueFailure = Assert.True(false, "true message");
+        Result<void,TestFailure> falseFailure = Assert.False(true, "false message");
+        Result<void,TestFailure> equalFailure = Assert.Equal<int>(1, 2, "equal message");
+        Result<void,TestFailure> unequalFailure = Assert.NotEqual<string>("same", "same", "unequal message");
+
+        return Assert.True(true, "pass").IsSuccess && Assert.False(false, "pass").IsSuccess &&
+            Assert.Equal<Pair>(Pair(42), Pair(42), "record").IsSuccess &&
+            Assert.NotEqual<int>(1, 2, "pass").IsSuccess &&
+            trueFailure.IsFailure && trueFailure.Error.code == "assert.true" &&
+            trueFailure.Error.message == "true message" &&
+            falseFailure.IsFailure && falseFailure.Error.code == "assert.false" &&
+            falseFailure.Error.message == "false message" &&
+            equalFailure.IsFailure && equalFailure.Error.code == "assert.equal" &&
+            equalFailure.Error.message == "equal message" &&
+            unequalFailure.IsFailure && unequalFailure.Error.code == "assert.not_equal" &&
+            unequalFailure.Error.message == "unequal message";
+    }
+
+    public bool Compatibility() {
+        Assertions assertions = new Assertions();
+
+        return assertions.True(true, "pass").IsSuccess &&
+            assertions.Equal<int>(42, 42, "pass").IsSuccess;
+    }
+
+    public pure bool Values() {
+        Pair pair = Utility.Echo<Pair>(Pair(42));
+
+        return Utility.Echo<int>(42) == 42 && Utility.Echo<string>("text") == "text" &&
+            Utility.Overloaded(40) == 42 && Utility.Overloaded("text") == "text" &&
+            pair.value == 42 && StaticRoot() == 42;
+    }
+
+    public Result<int,string> Set(int value, bool fail) {
+        Utility.Set(counter, value);
+
+        if (fail)
+            return Result<int,string>.Failure("static.returned_failure");
+
+        return Result<int,string>.Success(counter.Read());
+    }
+
+    public void SetAndThrow(int value) {
+        Utility.SetAndThrow(counter, value);
+    }
+
+    public pure int Current() => counter.Read();
+
+    public pure int ExhaustDepth() => Utility.Recurse();
+
+    public async Task<Result<int,string>> ReadAsync(CancellationToken token) {
+        Result<int,string> result = await Utility.ReadAsync(counter, token);
+
+        return result;
+    }
+}

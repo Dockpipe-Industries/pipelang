@@ -1,0 +1,57 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ResultInterface;
+
+public Record Fault {
+    public int code;
+    public string text;
+}
+
+public model Class Session {
+    public Session() {}
+
+    private async Task<Result<int,string>> Complete(List<IResult<Fault>> results, IResult<Fault> alias,
+                                                   CancellationToken token) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(10, token);
+        if (acquired || results.At(0) != alias || results.At(1) == alias)
+            return Result<int,string>.Failure("erased result identity changed across suspension");
+        if (!results.At(1).IsFailure || results.At(1).Error.code != 7 || results.At(1).Error.text != "failure")
+            return Result<int,string>.Failure("erased failure lost its typed error");
+        if (!results.At(2).IsCancelled || results.At(2).Error.code != 8 ||
+            results.At(2).Error.text != "cancelled" || !results.At(3).IsSuccess)
+            return Result<int,string>.Failure("erased status changed");
+        return Result<int,string>.Success(42);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        Fault failure = new Fault {code = 7, text = "failure"};
+        Fault cancelled = new Fault {code = 8, text = "cancelled"};
+        IResult<Fault> first = Result<int,Fault>.Failure(failure);
+        IResult<Fault> alias = first;
+        IResult<Fault> separate = Result<string,Fault>.Failure(failure);
+        IResult<Fault> interruption = Result<int,Fault>.Cancelled(cancelled);
+        IResult<Fault>? succeeded = Result<int,Fault>.Success(1);
+        if (first != alias || first == separate || !succeeded.HasValue)
+            return Result<int,string>.Failure("erased result alias or value conversion changed");
+        List<IResult<Fault>> results = List<IResult<Fault>>.Empty();
+        results.Add(first);
+        results.Add(separate);
+        results.Add(interruption);
+        results.Add(succeeded.Value);
+        if (scenario == 0) {
+            List<int> maximum = List<int>.Empty();
+            for (int index = 0; index < 4096; index = index + 1)
+                maximum.Add(index);
+            try {
+                IResult<Fault> excessive = Result<List<int>,Fault>.Success(maximum);
+                if (excessive.IsSuccess)
+                    return Result<int,string>.Failure("erased result ignored the owned element limit");
+            } catch (Error limit) {
+                if (limit.Message != "result interface exceeds owned value limits")
+                    return Result<int,string>.Failure(limit.Message);
+            }
+        }
+        Result<int,string> observed = await Complete(results, alias, token);
+        return observed;
+    }
+}

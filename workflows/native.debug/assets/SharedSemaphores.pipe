@@ -1,0 +1,97 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.SharedSemaphores;
+
+public Class Waiter {
+    private SemaphoreSlim gate;
+
+    public Waiter(SemaphoreSlim shared) {
+        gate = shared;
+    }
+
+    public int Open(int permits) {
+        return gate.Release(permits);
+    }
+
+    public async Task<Result<bool,string>> Wait(int timeout, CancellationToken token) {
+        bool acquired = await gate.WaitAsync(timeout, token);
+        return Result<bool,string>.Success(acquired);
+    }
+}
+
+public Class DefaultWaiter {
+    private SemaphoreSlim gate;
+
+    public DefaultWaiter() {}
+
+    public int Open() {
+        return gate.Release();
+    }
+
+    public async Task<Result<bool,string>> Wait(CancellationToken token) {
+        bool acquired = await gate.WaitAsync(0, token);
+        return Result<bool,string>.Success(acquired);
+    }
+}
+
+public Class FailedSemaphore {
+    public FailedSemaphore() {
+        SemaphoreSlim gate = SemaphoreSlim.Create(0, 1);
+        if (gate.CurrentCount == 0)
+            throw Error("semaphore constructor failed");
+    }
+}
+
+public model Class Session {
+    public Session() {}
+
+    private static async Task<Result<bool,string>> Consume(SemaphoreSlim gate, CancellationToken token) {
+        bool acquired = await gate.WaitAsync(0, token);
+        return Result<bool,string>.Success(acquired);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        SemaphoreSlim gate = SemaphoreSlim.Create(0, 2);
+        SemaphoreSlim alias = gate;
+        Waiter waiter = new Waiter(alias);
+        if (scenario == 1) {
+            bool acquired = try await waiter.Wait(5000, token);
+            return Result<int,string>.Failure(acquired ? "unexpected permit" : "unexpected timeout");
+        }
+
+        for (int attempt = 0; attempt < 4200; attempt = attempt + 1) {
+            var temporary = SemaphoreSlim.Create(1, 1);
+            bool acquired = await temporary.WaitAsync(0, token);
+            if (!acquired)
+                return Result<int,string>.Failure("local semaphore reuse lost its permit");
+            try {
+                FailedSemaphore failed = new FailedSemaphore();
+                return Result<int,string>.Failure("failed semaphore constructor returned normally");
+            } catch (Error error) {
+                if (error.Message != "semaphore constructor failed")
+                    return Result<int,string>.Failure(error.Message);
+            }
+        }
+
+        DefaultWaiter ready = new DefaultWaiter();
+        if (ready.Open() != 0)
+            return Result<int,string>.Failure("default semaphore count was not zero");
+        bool defaultAcquired = try await ready.Wait(token);
+        if (!defaultAcquired)
+            return Result<int,string>.Failure("default semaphore lost its permit");
+
+
+        if (waiter.Open(2) != 0 || gate.CurrentCount != 2)
+            return Result<int,string>.Failure("receiver field did not share the semaphore");
+        bool first = try await Consume(gate, token);
+        bool second = try await waiter.Wait(0, token);
+        if (!first || !second || alias.CurrentCount != 0)
+            return Result<int,string>.Failure("a child call consumed the wrong semaphore");
+        bool timed = try await waiter.Wait(4, token);
+        if (timed)
+            return Result<int,string>.Failure("empty semaphore acquired after suspension");
+        int released = alias.Release();
+        if (released != 0 || gate.CurrentCount != 1)
+            return Result<int,string>.Failure("semaphore alias lost its identity");
+        return Result<int,string>.Success(42);
+    }
+}

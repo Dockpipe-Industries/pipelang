@@ -3,8 +3,10 @@
 
 #include "extended_collections.hpp"
 #include "task.hpp"
+#include "source_call.hpp"
 
 #include <array>
+#include <atomic>
 #include <compare>
 #include <cstdint>
 #include <functional>
@@ -72,6 +74,7 @@ struct ObjectEdge {
 namespace object_detail {
 
 struct RootLease {
+    ~RootLease() noexcept;
     std::shared_ptr<ObjectDomain> domain;
     ObjectId id;
 };
@@ -94,33 +97,27 @@ public:
     static constexpr std::size_t maximumBytes = 1024 * 1024;
     static constexpr std::size_t maximumTransactions = 33;
 
-    ObjectDomain() : owner_(std::this_thread::get_id()) {
-    }
+    ObjectDomain();
 
     ObjectDomain(const ObjectDomain&) = delete;
     ObjectDomain& operator=(const ObjectDomain&) = delete;
 
-    void requireOwner() const {
-        if (owner_ != std::this_thread::get_id())
-            throw ExecutionFailure("object accessed from a different owner thread");
-        if (closed_)
-            throw ExecutionFailure("object domain is closed");
-    }
+    void requireOwner() const;
 
     void close() noexcept;
     void collect();
     std::size_t liveCount() const;
     std::size_t logicalBytes() const;
 
-    std::uint64_t runtimeType(ObjectId id) const {
-        return checked(id).typeId;
-    }
+    std::uint64_t runtimeType(ObjectId id) const;
 
     template<class Tag>
     ObjectRef<Tag> root(ObjectId id);
 
 private:
     friend class GraphTransaction;
+    friend struct object_detail::RootLease;
+    template<class Tag> friend class ObjectRef;
 
     struct Cell {
         std::uint64_t generation = 1;
@@ -130,18 +127,16 @@ private:
         std::weak_ptr<object_detail::RootLease> root;
     };
 
-    Cell& checked(ObjectId id) {
-        requireOwner();
-        if (id.isNull() || id.slot >= maximumCells)
-            throw ExecutionFailure("object reference is uninitialized");
-        auto& cell = cells_[id.slot];
-        if (!cell.state || cell.generation != id.generation)
-            throw ExecutionFailure("object identity is no longer valid");
-        return cell;
-    }
+    Cell& checked(ObjectId id);
 
-    const Cell& checked(ObjectId id) const {
-        return const_cast<ObjectDomain*>(this)->checked(id);
+    const Cell& checked(ObjectId id) const;
+
+    template<class Tag>
+    Cell& checkedTag(ObjectId id) {
+        auto& cell = checked(id);
+        if (!Tag::accepts(cell.typeId))
+            throw ExecutionFailure("object does not implement the requested type");
+        return cell;
     }
 
     object_detail::VersionPtr version(std::unique_ptr<ObjectState> state, GraphTransaction* transaction);
@@ -155,7 +150,10 @@ private:
     std::pair<std::size_t, std::size_t> resourceCost() const;
 
     std::thread::id owner_;
+    std::atomic<bool> rootSetDirty_{true};
     bool closed_ = false;
+    // Provisional cells count as live; allocation and matching-generation destruction own updates.
+    std::size_t liveCells_ = 0;
     std::array<Cell, maximumCells> cells_{};
     std::array<GraphTransaction*, maximumTransactions> transactions_{};
 };
@@ -203,9 +201,17 @@ public:
         if (!root_)
             throw ExecutionFailure("object reference is uninitialized");
         root_->domain->requireOwner();
-        // root() performs the identity and runtime tag checks without allocating
-        // another lease: this handle itself keeps the cached lease alive.
-        root_->domain->template root<Tag>(root_->id);
+        // Compiler-emitted self-owned metadata certifies a pure type predicate.
+        // An inherited marker must not opt a custom derived predicate into this
+        // path. Unmarked predicates retain root()'s exact acquisition behavior.
+        if constexpr (requires {
+            typename Tag::PureObjectTagOwner;
+            requires std::is_same_v<Tag, typename Tag::PureObjectTagOwner>;
+        }) {
+            root_->domain->template checkedTag<Tag>(root_->id);
+        } else {
+            root_->domain->template root<Tag>(root_->id);
+        }
     }
 
     template<class Other>
@@ -227,15 +233,14 @@ private:
 
 template<class Tag>
 ObjectRef<Tag> ObjectDomain::root(ObjectId id) {
-    auto& cell = checked(id);
-    if (!Tag::accepts(cell.typeId))
-        throw ExecutionFailure("object does not implement the requested type");
+    auto& cell = checkedTag<Tag>(id);
     auto lease = cell.root.lock();
     if (!lease) {
         lease = std::make_shared<object_detail::RootLease>();
         lease->domain = shared_from_this();
         lease->id = id;
         cell.root = lease;
+        rootSetDirty_.store(true, std::memory_order_release);
     }
     return ObjectRef<Tag>(std::move(lease));
 }
@@ -264,50 +269,23 @@ class GraphTransaction {
 public:
     static constexpr std::size_t maximumSavepoints = 64;
 
-    explicit GraphTransaction(std::shared_ptr<ObjectDomain> domain) : domain_(std::move(domain)) {
-        domain_->requireOwner();
-        domain_->addTransaction(this);
-    }
+    explicit GraphTransaction(std::shared_ptr<ObjectDomain> domain);
 
     GraphTransaction(const GraphTransaction&) = delete;
     GraphTransaction& operator=(const GraphTransaction&) = delete;
 
-    ~GraphTransaction() {
-        discard();
-        domain_->removeTransaction(this);
-    }
+    ~GraphTransaction();
 
     class Savepoint {
     public:
-        explicit Savepoint(GraphTransaction& transaction)
-            : transaction_(transaction), saved_(transaction.changes_),
-              allocated_(transaction.nextSerial_) {
-            for (auto& slot : transaction_.savepoints_) {
-                if (!slot) {
-                    slot = this;
-                    return;
-                }
-            }
-            throw ExecutionFailure("object construction nesting limit exceeded");
-        }
+        explicit Savepoint(GraphTransaction& transaction);
 
         Savepoint(const Savepoint&) = delete;
         Savepoint& operator=(const Savepoint&) = delete;
 
-        ~Savepoint() {
-            if (!committed_) {
-                transaction_.changes_.swap(saved_);
-                transaction_.rollbackAllocations(allocated_);
-            }
-            for (auto& slot : transaction_.savepoints_) {
-                if (slot == this)
-                    slot = nullptr;
-            }
-        }
+        ~Savepoint();
 
-        void commit() noexcept {
-            committed_ = true;
-        }
+        void commit() noexcept;
 
     private:
         friend class ObjectDomain;
@@ -318,9 +296,22 @@ public:
         bool committed_ = false;
     };
 
-    Savepoint savepoint() {
-        domain_->requireOwner();
-        return Savepoint(*this);
+    Savepoint savepoint();
+
+    // A checked observation of this transaction's provisional allocations.
+    // It grants no access to cells or native pointers and changes no GC state.
+    std::uint64_t allocationMark() const;
+
+    template<class Tag>
+    bool allocatedSince(const ObjectRef<Tag>& reference, std::uint64_t mark) const {
+        const auto id = checkedReference(reference);
+        if (mark > nextSerial_)
+            throw ExecutionFailure("object allocation mark is invalid");
+        for (const auto& allocation : allocated_) {
+            if (allocation.id == id && allocation.serial > mark)
+                return true;
+        }
+        return false;
     }
 
     template<class State, class Tag>
@@ -338,6 +329,7 @@ public:
         auto replacement = domain_->version(std::move(candidate), this);
         domain_->ensureCapacity(replacement);
         changes_.insert_or_assign(id, std::move(replacement));
+        markReachabilityChanged();
         prepared_ = false;
     }
 
@@ -357,44 +349,41 @@ public:
             prepared_ = false;
             return result;
         } catch (...) {
+            markReachabilityChanged();
             domain_->destroy(id);
             allocated_.pop_back();
             throw;
         }
     }
 
-    void validateInitialized() const {
-        domain_->requireOwner();
-        for (const auto& allocation : allocated_) {
-            if (isLive(allocation.id))
-                validateVersion(*current(allocation.id));
-        }
-        for (const auto& [id, value] : changes_) {
-            if (isLive(id))
-                validateVersion(*value);
-        }
-    }
+    void validateInitialized() const;
 
     template<class Tag>
     void validateInitialized(const ObjectRef<Tag>& reference) const {
         validateVersion(*current(checkedReference(reference)));
     }
 
-    void prepareCommit() {
-        if (hasSavepoint())
-            throw ExecutionFailure("cannot commit during object construction");
-        // Collection may allocate its bounded marking scratch, so it belongs
-        // to preparation, never after root/graph publication has begun.
-        domain_->collect();
-        validateInitialized();
-        prepared_ = true;
-    }
+    void prepareCommit();
 
     template<class CommitRoot>
-    void commit(CommitRoot commitRoot) noexcept {
+    void commit(CommitRoot commitRoot) {
         static_assert(std::is_nothrow_invocable_v<CommitRoot>);
         if (!prepared_ || hasSavepoint())
             std::terminate();
+        domain_->requireOwner();
+        requirePublication();
+        publishUnchecked(std::move(commitRoot));
+    }
+
+private:
+    template<class State>
+    friend class GraphModelTransaction;
+
+    void requirePublication() const;
+
+    template<class CommitRoot>
+    void publishUnchecked(CommitRoot commitRoot) noexcept {
+        static_assert(std::is_nothrow_invocable_v<CommitRoot>);
         for (const auto& [id, value] : changes_) {
             auto& cell = domain_->cells_[id.slot];
             if (cell.state && cell.generation == id.generation)
@@ -407,32 +396,23 @@ public:
                 cell.provisional = nullptr;
         }
         commitRoot();
+        // The precommit trace retained old and new edges; publication can drop
+        // old reachability without destroying a RootLease. Sweep once more.
+        if (!changes_.empty() || !allocated_.empty())
+            domain_->rootSetDirty_.store(true, std::memory_order_release);
         changes_.clear();
         allocated_.clear();
         prepared_ = false;
     }
 
-    void commit() {
-        prepareCommit();
-        commit([]() noexcept {});
-    }
+public:
+    void commit();
 
-    void discard() noexcept {
-        changes_.clear();
-        rollbackAllocations(0);
-        prepared_ = false;
-    }
+    void discard() noexcept;
 
-    void refresh() {
-        domain_->requireOwner();
-        if (hasSavepoint())
-            throw ExecutionFailure("cannot refresh during object construction");
-        discard();
-    }
+    void refresh();
 
-    const std::shared_ptr<ObjectDomain>& domain() const noexcept {
-        return domain_;
-    }
+    const std::shared_ptr<ObjectDomain>& domain() const noexcept;
 
 private:
     friend class ObjectDomain;
@@ -453,10 +433,7 @@ private:
         return *typed;
     }
 
-    bool isLive(ObjectId id) const noexcept {
-        const auto& cell = domain_->cells_[id.slot];
-        return cell.state && cell.generation == id.generation;
-    }
+    bool isLive(ObjectId id) const noexcept;
 
     template<class Tag>
     ObjectId checkedReference(const ObjectRef<Tag>& reference) const {
@@ -469,36 +446,18 @@ private:
         return id;
     }
 
-    object_detail::VersionPtr current(ObjectId id) const {
-        domain_->checked(id);
-        const auto changed = changes_.find(id);
-        if (changed != changes_.end())
-            return changed->second;
-        return domain_->cells_[id.slot].state;
-    }
+    object_detail::VersionPtr current(ObjectId id) const;
 
-    void validateVersion(const object_detail::Version& version) const {
-        version.state->validateInitialized();
-        for (auto edge : version.edges)
-            domain_->checked(edge);
-    }
+    void validateVersion(const object_detail::Version& version) const;
 
-    bool hasSavepoint() const noexcept {
-        for (auto* savepoint : savepoints_) {
-            if (savepoint)
-                return true;
-        }
-        return false;
-    }
+    bool hasSavepoint() const noexcept;
 
-    void rollbackAllocations(std::uint64_t serial) noexcept {
-        while (!allocated_.empty() && allocated_.back().serial > serial) {
-            domain_->destroy(allocated_.back().id);
-            allocated_.pop_back();
-        }
-    }
+    void markReachabilityChanged() noexcept;
+
+    void rollbackAllocations(std::uint64_t serial) noexcept;
 
     std::shared_ptr<ObjectDomain> domain_;
+    PublicationGuard publication_ = currentPublicationGuard();
     object_detail::Changes changes_;
     struct Allocation {
         ObjectId id;
@@ -510,234 +469,6 @@ private:
     std::array<Savepoint*, maximumSavepoints> savepoints_{};
     bool prepared_ = false;
 };
-
-inline void ObjectDomain::addTransaction(GraphTransaction* transaction) {
-    requireOwner();
-    for (auto& slot : transactions_) {
-        if (!slot) {
-            slot = transaction;
-            return;
-        }
-    }
-    throw ExecutionFailure("object transaction capacity exceeded");
-}
-
-inline void ObjectDomain::removeTransaction(GraphTransaction* transaction) noexcept {
-    for (auto& slot : transactions_) {
-        if (slot == transaction)
-            slot = nullptr;
-    }
-}
-
-inline void ObjectDomain::destroy(ObjectId id) noexcept {
-    auto& cell = cells_[id.slot];
-    if (cell.state && cell.generation == id.generation) {
-        cell.state.reset();
-        cell.root.reset();
-        cell.provisional = nullptr;
-        cell.typeId = 0;
-        if (cell.generation == std::numeric_limits<std::uint64_t>::max())
-            std::terminate();
-        ++cell.generation;
-    }
-}
-
-inline void ObjectDomain::close() noexcept {
-    if (owner_ != std::this_thread::get_id())
-        std::terminate();
-    closed_ = true;
-    for (auto* transaction : transactions_) {
-        if (transaction) {
-            transaction->discard();
-            for (auto* savepoint : transaction->savepoints_) {
-                if (savepoint)
-                    savepoint->saved_.clear();
-            }
-        }
-    }
-    for (std::size_t index = 0; index < maximumCells; ++index)
-        destroy({static_cast<std::uint32_t>(index), cells_[index].generation});
-}
-
-inline std::size_t ObjectDomain::liveCount() const {
-    requireOwner();
-    std::size_t count = 0;
-    for (const auto& cell : cells_) {
-        if (cell.state)
-            ++count;
-    }
-    return count;
-}
-
-inline std::pair<std::size_t, std::size_t> ObjectDomain::resourceCost() const {
-    requireOwner();
-    // Count every distinct immutable version, including rollback savepoints.
-    std::map<const object_detail::Version*, const object_detail::Version*> versions;
-    std::size_t bytes = 0;
-    std::size_t edges = 0;
-    const auto add = [&](const object_detail::VersionPtr& version) {
-        if (version)
-            versions.emplace(version.get(), version.get());
-    };
-    // Published/provisional base versions are unique to one cell. Only overlay
-    // and savepoint versions need deduplication, avoiding allocation per live
-    // cell during the common creation/read-only path.
-    for (const auto& cell : cells_) {
-        if (cell.state) {
-            bytes = boundedOwnedSum(bytes, cell.state->bytes, maximumBytes);
-            edges = boundedOwnedSum(edges, cell.state->edges.size(), maximumEdges);
-        }
-    }
-    for (auto* transaction : transactions_) {
-        if (!transaction)
-            continue;
-        for (const auto& [id, version] : transaction->changes_)
-            add(version);
-        for (auto* savepoint : transaction->savepoints_) {
-            if (savepoint) {
-                for (const auto& [id, version] : savepoint->saved_)
-                    add(version);
-            }
-        }
-    }
-    for (const auto& [identity, version] : versions) {
-        bytes = boundedOwnedSum(bytes, version->bytes, maximumBytes);
-        edges = boundedOwnedSum(edges, version->edges.size(), maximumEdges);
-    }
-    return {bytes, edges};
-}
-
-inline std::size_t ObjectDomain::logicalBytes() const {
-    return resourceCost().first;
-}
-
-inline object_detail::VersionPtr ObjectDomain::version(std::unique_ptr<ObjectState> state,
-                                                       GraphTransaction* transaction) {
-    requireOwner();
-    state->validate();
-    auto version = std::make_shared<object_detail::Version>();
-    version->bytes = state->logicalBytes();
-    if (version->bytes > maximumBytes)
-        throw ExecutionFailure("object logical byte limit exceeded");
-    ObjectTrace trace;
-    state->trace(trace);
-    version->edges = trace.edges();
-    version->state = std::move(state);
-    for (auto edge : version->edges) {
-        if (!edge.isNull()) {
-            const auto& target = checked(edge);
-            if (target.provisional && target.provisional != transaction)
-                throw ExecutionFailure("object construction belongs to another transaction");
-        }
-    }
-    return version;
-}
-
-inline void ObjectDomain::ensureCapacity(const object_detail::VersionPtr& candidate) {
-    requireOwner();
-    const auto fits = [&] {
-        const auto [bytes, edges] = resourceCost();
-        return candidate->bytes <= maximumBytes - std::min(bytes, maximumBytes)
-            && candidate->edges.size() <= maximumEdges - std::min(edges, maximumEdges);
-    };
-    if (!fits()) {
-        collect(candidate->edges);
-        if (!fits())
-            throw ExecutionFailure("object aggregate logical byte or edge limit exceeded");
-    }
-}
-
-inline ObjectId ObjectDomain::allocate(std::uint64_t typeId, object_detail::VersionPtr state,
-                                       GraphTransaction* transaction) {
-    requireOwner();
-    for (int attempt = 0; attempt < 2; ++attempt) {
-        for (std::size_t index = 0; index < maximumCells; ++index) {
-            auto& cell = cells_[index];
-            if (!cell.state) {
-                cell.typeId = typeId;
-                cell.state = state;
-                cell.provisional = transaction;
-                return {static_cast<std::uint32_t>(index), cell.generation};
-            }
-        }
-        collect(state->edges);
-    }
-    throw ExecutionFailure("object live cell limit exceeded");
-}
-
-inline void ObjectDomain::collect() {
-    collect({});
-}
-
-inline void ObjectDomain::collect(const std::vector<ObjectId>& extraRoots) {
-    requireOwner();
-    std::array<bool, maximumCells> marked{};
-    std::vector<ObjectId> pending;
-    pending.reserve(maximumCells);
-    const auto mark = [&](ObjectId id) {
-        if (id.isNull())
-            return;
-        checked(id);
-        if (!marked[id.slot]) {
-            marked[id.slot] = true;
-            pending.push_back(id);
-        }
-    };
-    for (std::size_t index = 0; index < maximumCells; ++index) {
-        const auto& cell = cells_[index];
-        if (cell.state && !cell.root.expired())
-            mark({static_cast<std::uint32_t>(index), cell.generation});
-    }
-    for (auto id : extraRoots)
-        mark(id);
-    while (!pending.empty()) {
-        const auto id = pending.back();
-        pending.pop_back();
-        for (auto edge : cells_[id.slot].state->edges)
-            mark(edge);
-        for (auto* transaction : transactions_) {
-            if (!transaction)
-                continue;
-            const auto visit = [&](const object_detail::Changes& changes) {
-                const auto position = changes.find(id);
-                if (position != changes.end()) {
-                    for (auto edge : position->second->edges)
-                        mark(edge);
-                }
-            };
-            visit(transaction->changes_);
-            for (auto* savepoint : transaction->savepoints_) {
-                if (savepoint)
-                    visit(savepoint->saved_);
-            }
-        }
-    }
-    for (std::size_t index = 0; index < maximumCells; ++index) {
-        auto& cell = cells_[index];
-        if (!cell.state || marked[index])
-            continue;
-        const ObjectId id{static_cast<std::uint32_t>(index), cell.generation};
-        for (auto* transaction : transactions_) {
-            if (transaction) {
-                transaction->changes_.erase(id);
-                for (auto* savepoint : transaction->savepoints_) {
-                    if (savepoint)
-                        savepoint->saved_.erase(id);
-                }
-            }
-        }
-        destroy(id);
-    }
-    for (auto* transaction : transactions_) {
-        if (transaction) {
-            auto& allocations = transaction->allocated_;
-            allocations.erase(std::remove_if(allocations.begin(), allocations.end(),
-                [&](const GraphTransaction::Allocation& allocation) {
-                    return !transaction->isLive(allocation.id);
-                }), allocations.end());
-        }
-    }
-}
 
 // Owned records without references use this fallback. Generated records with
 // live references are refused in this slice; they cannot hide edges here.
@@ -832,6 +563,18 @@ struct SequenceStorage {
             }
         }
         return result;
+    }
+
+    // Read only the selected owned element. Stored object edges must never
+    // escape; decoding restores the normal root lease for object references.
+    static T storedAt(const Stored& value, std::int64_t index, const std::shared_ptr<ObjectDomain>& domain) {
+        domain->requireOwner();
+        return Element::decode(value.at(index), domain);
+    }
+
+    static std::int64_t storedCount(const Stored& value, const std::shared_ptr<ObjectDomain>& domain) {
+        domain->requireOwner();
+        return value.count();
     }
 
     static Sequence<T> decode(const Stored& value, const std::shared_ptr<ObjectDomain>& domain) {
@@ -999,16 +742,59 @@ public:
         : scope(scope), budget(budget), transaction(transaction), callbacks_(std::move(callbacks)) {
     }
 
+    [[nodiscard]] ObjectExecution enterCall() const & {
+        const auto entered = calls_.enter();
+        ObjectExecution child(scope, budget, transaction, {});
+        // A synchronous child cannot outlive its parent. Borrow the original
+        // lease instead of incrementing a shared_ptr for every source call.
+        child.borrowedCallbacks_ = &callbackOwner();
+        child.borrowedCancellation_ = &cancellationToken();
+        child.calls_ = entered;
+        child.maximumDegree = maximumDegree;
+        return child;
+    }
+
+    ObjectExecution enterCall() && = delete;
+    ObjectExecution enterCall() const && = delete;
+
+    [[nodiscard]] ObjectExecution enterAsyncCall() const {
+        auto child = enterCall();
+        // A lazy native coroutine can outlive the factory's stack context.
+        // Retain the original callback owner in that frame, even when the
+        // invoking synchronous context was itself borrowing the lease.
+        child.callbacks_ = callbackOwner();
+        child.borrowedCallbacks_ = nullptr;
+        child.cancellation = cancellationToken();
+        child.borrowedCancellation_ = nullptr;
+        return child;
+    }
+
+    const CancellationToken& cancellationToken() const noexcept {
+        return borrowedCancellation_ ? *borrowedCancellation_ : cancellation;
+    }
+
+    [[nodiscard]] ObjectExecution withCalls(SourceCallContext calls) const {
+        auto child = *this;
+        child.calls_ = calls;
+        return child;
+    }
+
+    SourceCallContext calls() const noexcept {
+        return calls_;
+    }
+
     void commitSegment() {
-        if (callbacks_ && callbacks_->commit)
-            callbacks_->commit(callbacks_->context);
+        const auto& callbacks = callbackOwner();
+        if (callbacks && callbacks->commit)
+            callbacks->commit(callbacks->context);
         else
             transaction.commit();
     }
 
     void refreshSegment() {
-        if (callbacks_ && callbacks_->refresh)
-            callbacks_->refresh(callbacks_->context);
+        const auto& callbacks = callbackOwner();
+        if (callbacks && callbacks->refresh)
+            callbacks->refresh(callbacks->context);
         else
             transaction.refresh();
     }
@@ -1020,7 +806,14 @@ public:
     GraphTransaction& transaction;
 
 private:
+    const std::shared_ptr<ObjectRootCallbacks>& callbackOwner() const noexcept {
+        return borrowedCallbacks_ ? *borrowedCallbacks_ : callbacks_;
+    }
+
     std::shared_ptr<ObjectRootCallbacks> callbacks_;
+    const std::shared_ptr<ObjectRootCallbacks>* borrowedCallbacks_ = nullptr;
+    const CancellationToken* borrowedCancellation_ = nullptr;
+    SourceCallContext calls_;
 };
 
 template<class Tag>
@@ -1029,3 +822,10 @@ void validate(const ObjectRef<Tag>& value) {
 }
 
 }
+
+// Header-only mode owns inline definitions; linked mode uses the SDK archive.
+#if !defined(PIPELANG_MODEL_LINKED_RUNTIME) || !PIPELANG_MODEL_LINKED_RUNTIME
+#define PIPELANG_MODEL_RUNTIME_INLINE inline
+#include "detail/object_domain_impl.hpp"
+#undef PIPELANG_MODEL_RUNTIME_INLINE
+#endif

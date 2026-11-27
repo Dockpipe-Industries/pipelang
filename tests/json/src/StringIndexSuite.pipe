@@ -1,0 +1,112 @@
+module PipeLang.Json.Tests;
+import PipeLang.Json;
+import PipeLang.Testing;
+
+// The native fixture supplies input bytes and invokes one bounded source step
+// per call. Assertions, node selection, duplicate interpretation and index
+// cleanup cross the actual compiler-generated optional host interface.
+public model Class StringIndexSuite {
+    private JsonReader reader;
+    private JsonStringIndexer indexer;
+    private int document = 0;
+    private JsonNode root = new JsonNode {};
+    private JsonStringIndex index = new JsonStringIndex {};
+
+    public StringIndexSuite(JsonReader documents, JsonStringIndexer strings) {
+        reader = documents;
+        indexer = strings;
+    }
+
+    public Result<void,TestFailure> Open(ByteBuffer input, int entries, CancellationToken token) {
+        JsonReadLimits limits = new JsonReadLimits {};
+        Result<int,string> begun = reader.BeginDocument(limits);
+        try Assert.True(begun.IsSuccess, "source document admission");
+        document = begun.Value;
+
+        try Assert.True(reader.AppendDocument(document, input).IsSuccess, "source input append");
+        Result<JsonNode,string> completed = reader.CompleteDocument(document, token);
+        try Assert.True(completed.IsSuccess, "source document completion");
+        root = completed.Value;
+
+        JsonStringIndexLimits admission = new JsonStringIndexLimits {};
+        admission.entries = entries;
+        admission.retainedBytes = 524288;
+        Result<JsonStringIndex,string> opened = indexer.BeginStringIndex(document, admission);
+        try Assert.True(opened.IsSuccess, "source explicit index admission");
+        index = opened.Value;
+        try Assert.True(indexer.BeginStringIndex(document, admission).IsFailure, "one live index per document");
+
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Insert(int position, bool expected, CancellationToken token) {
+        Result<JsonNode,string> selected = reader.At(root, position);
+        try Assert.True(selected.IsSuccess, "source selection");
+        Result<bool,string> added = indexer.AddString(index, selected.Value, token);
+        try Assert.True(added.IsSuccess, "source string insertion succeeds");
+        try Assert.Equal<bool>(expected, added.Value, "source decoded equality outcome");
+
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> AtCapacity(int position, CancellationToken token) {
+        JsonNode selected = reader.At(root, position).Value;
+        Result<bool,string> added = indexer.AddString(index, selected, token);
+        try Assert.True(added.IsFailure, "source unique entry limit refusal");
+        try Assert.Equal<string>("json.string_index_entry_limit", added.Error, "source entry limit identity");
+
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Cancelled(int position, CancellationToken token) {
+        JsonNode selected = reader.At(root, position).Value;
+        Result<bool,string> added = indexer.AddString(index, selected, token);
+        try Assert.True(added.IsCancelled, "actual source adapter preserves Cancelled");
+        try Assert.Equal<string>("json.cancelled", added.Error, "source cancellation identity");
+
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> CrossDocumentLookup(CancellationToken token, CancellationToken probeToken) {
+        int candidates = 0;
+        try {
+            Result<int,string> begun = reader.BeginDocument(new JsonReadLimits {});
+            try Assert.True(begun.IsSuccess, "second document admitted");
+            candidates = begun.Value;
+            try Assert.True(reader.AppendDocument(candidates,
+                ByteBuffer.FromUtf8("[\"\\u0061\",\"missing\",17]")).IsSuccess, "second document bytes");
+            Result<JsonNode,string> parsed = reader.CompleteDocument(candidates, token);
+            try Assert.True(parsed.IsSuccess, "second document completed");
+
+            JsonNode equivalent = reader.At(parsed.Value, 0).Value;
+            Result<bool,string> exists = indexer.ContainsString(index, equivalent, token);
+            try Assert.True(exists.IsSuccess && exists.Value, "escaped equivalent matched across documents");
+            JsonNode absent = reader.At(parsed.Value, 1).Value;
+            Result<bool,string> missing = indexer.ContainsString(index, absent, token);
+            try Assert.True(missing.IsSuccess && !missing.Value, "absent key refused at capacity");
+            Result<bool,string> wrongKind = indexer.ContainsString(index, reader.At(parsed.Value, 2).Value, token);
+            try Assert.True(wrongKind.IsFailure && wrongKind.Error == "json.kind", "wrong candidate type refused");
+            Result<bool,string> cancelled = indexer.ContainsString(index, equivalent, probeToken);
+            try Assert.True(cancelled.IsCancelled && cancelled.Error == "json.cancelled", "actual scoped cancellation");
+            try Assert.True(indexer.AddString(index, equivalent, token).IsFailure, "insertion still binds owner document");
+            return Result<void,TestFailure>.Success();
+        } finally {
+            if (candidates != 0) {
+                Result<void,string> closed = reader.CloseDocument(candidates);
+                if (!closed.IsSuccess)
+                    throw Error(closed.Error);
+            }
+        }
+    }
+
+    public Result<void,TestFailure> Close(CancellationToken token) {
+        try Assert.True(indexer.CloseStringIndex(index).IsSuccess, "source closes index without a token");
+        try Assert.True(indexer.CloseStringIndex(index).IsSuccess, "source repeated index close");
+        try Assert.True(indexer.AddString(index, reader.At(root, 0).Value, token).IsFailure,
+                        "source closed index is stale");
+        try Assert.True(reader.CloseDocument(document).IsSuccess, "source closes document after index");
+        document = 0;
+
+        return Result<void,TestFailure>.Success();
+    }
+}

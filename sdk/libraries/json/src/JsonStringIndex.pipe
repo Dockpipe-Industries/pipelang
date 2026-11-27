@@ -1,0 +1,7 @@
+module PipeLang.Json;
+
+// Opaque reader/document-owned identity; generation is never reused.
+public Record JsonStringIndex {
+    public int document = 0;
+    public int generation = 0;
+}

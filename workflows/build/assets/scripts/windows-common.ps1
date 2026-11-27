@@ -180,6 +180,14 @@ function Set-WindowsTools($Tools) {
     }
     $env:PIPELANG_CMAKE = $Tools.cmake
     $env:PIPELANG_CXX = $Tools.cxx
+    # Nested CMake consumers use the same pinned toolchain even when they do
+    # not supply generator/compiler cache arguments themselves.
+    $env:CMAKE_GENERATOR = 'Ninja'
+    $env:CXX = '"' + $Tools.cxx.Replace('\', '/') + '"'
+    foreach ($name in @('CMAKE_GENERATOR_PLATFORM', 'CMAKE_GENERATOR_TOOLSET', 'CMAKE_GENERATOR_INSTANCE')) {
+        Remove-Item -LiteralPath ('Env:' + $name) -ErrorAction SilentlyContinue
+    }
+
     $env:RC = $Tools.rc.Replace('\', '/')
     $env:PATH = @([IO.Path]::GetDirectoryName($Tools.cmake), [IO.Path]::GetDirectoryName($Tools.ninja),
         (Join-Path $env:SystemRoot 'System32'), $PSHOME) -join ';'
@@ -239,15 +247,68 @@ function Initialize-Units([string] $Proof, [string] $Runner) {
     [void] [IO.Directory]::CreateDirectory((Join-Path $Proof 'units'))
     $env:DOCKPIPE_EVENT_LOG = Join-Path $Proof 'operation-events.jsonl'
 }
-function Compile-Fixture([string] $Name, [string] $Source, [string] $Generated, [string] $Sdk, $Tools) {
+function Initialize-CxxResourceProfile([string] $Sdk, $Tools) {
+    $selected = [Environment]::GetEnvironmentVariable('PIPELANG_CXX_RESOURCE_PROFILE')
+    if ($null -eq $selected) {
+        $selected = 'system'
+    }
+    if ($selected -cne 'system' -and $selected -cne 'gnu-conservative-gc') {
+        throw 'PIPELANG_CXX_RESOURCE_PROFILE must be system or gnu-conservative-gc'
+    }
+    $script:CxxResourceProfile = $selected
+    $script:CxxResourceArguments = @()
+    $response = $null
+    $responseHash = $null
+    $macroReceipt = $null
+    $versionReceipt = $null
+    if ($selected -ceq 'gnu-conservative-gc') {
+        $response = Join-Path $Sdk 'share/pipelang-model/compiler-profiles/gnu-conservative-gc.rsp'
+        if (!(Test-Path -LiteralPath $response -PathType Leaf)) {
+            throw 'Selected installed SDK is missing the GNU compiler resource profile'
+        }
+        $responseInfo = Get-Item -LiteralPath $response
+        if (($responseInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Selected installed SDK compiler resource profile cannot be a reparse entry'
+        }
+        $probeSource = Join-Path $script:Proof 'cxx-resource-profile-probe.cpp'
+        if (Test-Path -LiteralPath $probeSource) {
+            throw 'Compiler resource profile probe requires a fresh proof file'
+        }
+        [IO.File]::WriteAllText($probeSource, '', (New-Object Text.UTF8Encoding($false)))
+        Invoke-Unit 'cxx-resource-profile-probe' $Tools.cxx @('-dM', '-E', '-x', 'c++', $probeSource)
+        $macroReceipt = Join-Path $script:Proof 'units/cxx-resource-profile-probe.output'
+        $macros = Get-Content -LiteralPath $macroReceipt -Raw
+        $compatibility = '(?m)^#define (__clang__|__INTEL_COMPILER|__INTEL_LLVM_COMPILER|__NVCOMPILER|__PGI|__PGIC__|__ibmxl__|__IBMCPP__|__SUNPRO_CC|__CUDACC__|__COMO__|__TINYC__|__DMC__)( |$)'
+        if ($macros -cnotmatch '(?m)^#define __GNUC__ [0-9]+' -or
+            $macros -cnotmatch '(?m)^#define __GNUG__ [0-9]+' -or $macros -cmatch $compatibility) {
+            throw 'gnu-conservative-gc requires the actual GNU C++ compiler, not a compatibility frontend'
+        }
+        Invoke-Unit 'cxx-resource-profile-version' $Tools.cxx @('--version')
+        $versionReceipt = Join-Path $script:Proof 'units/cxx-resource-profile-version.output'
+        $responseHash = Get-Sha256 $response
+        $script:CxxResourceArguments = @("@$response")
+    }
+    $env:PIPELANG_CXX_RESOURCE_PROFILE = $selected
+    Write-JsonFile (Join-Path $script:Proof 'cxx-resource-profile.json') ([ordered]@{
+        profile = $selected; compiler = $Tools.cxx; response = $response
+        response_sha256 = $responseHash; macro_receipt = $macroReceipt; version_receipt = $versionReceipt
+    })
+}
+function Invoke-CxxUnit([string] $Name, $Tools, [string[]] $ToolArguments) {
+    if (!(Get-Variable -Name CxxResourceArguments -Scope Script -ErrorAction SilentlyContinue)) {
+        throw 'Initialize the compiler resource profile before compiling native fixtures'
+    }
+    Invoke-Unit $Name $Tools.cxx (@($script:CxxResourceArguments) + $ToolArguments)
+}
+function Compile-Fixture([string] $Name, [string] $Source, [string] $Generated, [string] $Sdk, $Tools, [string[]] $ExtraArguments = @()) {
     $runtime = Join-Path $script:Proof "$Name-runtime"
     [void] [IO.Directory]::CreateDirectory($runtime)
-    $base = @('-std=c++20', '-pthread', '-Wall', '-Wextra', '-Werror', "-I$Sdk/include", "-I$Generated", $Source)
+    $base = @('-std=c++20', '-pthread', '-Wall', '-Wextra', '-Werror', "-I$Sdk/include", "-I$Generated", $Source) + $ExtraArguments
     $normal = Join-Path $runtime 'test.exe'
-    Invoke-Unit "$Name-build" $Tools.cxx ($base + @('-O2', '-static', '-o', $normal))
+    Invoke-CxxUnit "$Name-build" $Tools ($base + @('-O2', '-static', '-o', $normal))
     Invoke-Unit "$Name-run" $normal @()
     $sanitized = Join-Path $runtime 'test-sanitized.exe'
-    Invoke-Unit "$Name-sanitizer-build" $Tools.cxx ($base + @('-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-o', $sanitized))
+    Invoke-CxxUnit "$Name-sanitizer-build" $Tools ($base + @('-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-o', $sanitized))
     # Dynamic sanitizer/runtime DLLs stay beside this isolated test executable.
     # They are not copied into the installed SDK or placed on the producer PATH.
     foreach ($library in Get-ChildItem -LiteralPath $Tools.runtime -Filter '*.dll' -File) {

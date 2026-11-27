@@ -1,0 +1,31 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class Worker {
+    private int value = 0;
+
+    public Worker(int iterations) {
+        int index = 0;
+        while (index < iterations)
+            index = index + 1;
+        value = index;
+    }
+
+    public pure int Value() => value;
+}
+
+public Class Holder {
+    private Worker worker = new Worker(9000);
+    public pure int Value() => worker.Value();
+}
+
+public Class App {
+    private Worker first = new Worker(9000);
+    private Holder? second;
+
+    public App(bool createSecond) {
+        if (createSecond)
+            second = new Holder();
+    }
+
+    public pure int First() => first.Value();
+    public pure bool HasSecond() => second.HasValue;
+}

@@ -1,0 +1,7 @@
+module AssignmentOrder;
+
+public Interface AssignmentPort {
+    Result<int,string> Acquire();
+    Result<void,string> Release(int resource, CancellationToken token);
+    Result<int,string> Mark(int phase);
+}

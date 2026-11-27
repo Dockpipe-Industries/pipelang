@@ -1,0 +1,118 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedByteStreaming;
+
+public Record ChunkError {
+    public string code = "";
+    public ByteBuffer details;
+}
+
+public Interface ChunkPort {
+    Result<ByteBuffer,string> Read(int index, bool large);
+    Result<ByteBuffer,ChunkError> ReadTyped(int index);
+    Result<void,string> Consume(int index, ByteBuffer bytes);
+}
+
+public Class Session {
+    private ChunkPort port;
+
+    public Session(ChunkPort port) {
+        this.port = port;
+    }
+
+    private Result<int,string> Synchronous() {
+        int total = 0;
+        for (int index = 0; index < 84; index = index + 1) {
+            var chunk = port.Read(index, true);
+            if (chunk.IsSuccess) {
+                try port.Consume(index, chunk.Value);
+                total = total + chunk.Value.Length;
+            } else if (index == 17 && chunk.IsFailure && chunk.Error == "chunk.failed") {
+                continue;
+            } else if (index == 18 && chunk.IsCancelled && chunk.Error == "chunk.cancelled") {
+                continue;
+            } else {
+                return Result<int,string>.Failure("unexpected stream outcome");
+            }
+        }
+        return Result<int,string>.Success(total);
+    }
+
+    private Result<int,string> TypedStream() {
+        int total = 0;
+        ChunkError remembered = ChunkError("", ByteBuffer.Empty());
+        for (int index = 0; index < 84; index = index + 1) {
+            var chunk = port.ReadTyped(index);
+            if (chunk.IsSuccess) {
+                try port.Consume(index, chunk.Value);
+                total = total + chunk.Value.Length;
+            } else if (index == 17 && chunk.IsFailure && chunk.Error.code == "chunk.failed") {
+                remembered = chunk.Error;
+            } else if (index == 18 && chunk.IsCancelled && chunk.Error.code == "chunk.cancelled") {
+                if (chunk.Error.details.Length != 2 || chunk.Error.details.At(0) != 18u)
+                    return Result<int,string>.Failure("typed cancellation details changed");
+            } else {
+                return Result<int,string>.Failure("unexpected typed stream outcome");
+            }
+        }
+        if (remembered.details.Length != 2 || remembered.details.At(0) != 17u)
+            return Result<int,string>.Failure("escaped typed failure details changed");
+        return Result<int,string>.Success(total);
+    }
+
+    private bool RetainedAlias() {
+        ByteBuffer first = ByteBuffer.Empty();
+        for (int index = 0; index < 3; index = index + 1) {
+            var chunk = port.Read(index, false);
+            if (!chunk.IsSuccess)
+                return false;
+            if (index == 0)
+                first = chunk.Value;
+        }
+        return first.Length == 21 && first.At(0) == 1u;
+    }
+
+    private bool RetainedInitializer() {
+        ByteBuffer first = ByteBuffer.Empty();
+        for (int index = 0; index < 3; index = index + 1) {
+            int count = 0;
+            for (Result<ByteBuffer,string> chunk = port.Read(index, false);
+                 chunk.IsSuccess && count == 0; count = count + 1) {
+                if (index == 0)
+                    first = chunk.Value;
+            }
+        }
+        return first.Length == 21 && first.At(0) == 1u;
+    }
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        if (scenario == 1)
+            return Synchronous();
+        if (scenario == 2) {
+            if (RetainedAlias() && RetainedInitializer())
+                return Result<int,string>.Success(42);
+            return Result<int,string>.Failure("retained byte alias changed");
+        }
+
+        if (scenario == 3)
+            return TypedStream();
+
+        SemaphoreSlim gate = SemaphoreSlim.Create(0, 1);
+        int total = 0;
+        for (int index = 0; index < 84; index = index + 1) {
+            var chunk = port.Read(index, true);
+            if (chunk.IsSuccess) {
+                if (index == 3) {
+                    var signalled = await gate.WaitAsync(5);
+                    if (signalled)
+                        return Result<int,string>.Failure("unexpected semaphore signal");
+                }
+
+                try port.Consume(index, chunk.Value);
+                total = total + chunk.Value.Length;
+            } else if (index != 17 && index != 18) {
+                return Result<int,string>.Failure(chunk.Error);
+            }
+        }
+        return Result<int,string>.Success(total);
+    }
+}

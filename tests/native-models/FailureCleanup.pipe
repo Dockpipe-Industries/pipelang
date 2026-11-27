@@ -3,6 +3,8 @@ public Interface CleanupHost {
 }
 
 public Class FailureCleanup {
+    private pure int? AbsentInteger() => null;
+
     private CleanupHost host;
     public int count = 0;
     public string detail = "";
@@ -52,7 +54,7 @@ public Class FailureCleanup {
     public int CatchPartial() {
         try {
             count = 3;
-            int invalid = Optional<int>.None().Value;
+            int invalid = AbsentInteger().Value;
             count = invalid;
         } catch (Error error) {
             detail = error.Message;

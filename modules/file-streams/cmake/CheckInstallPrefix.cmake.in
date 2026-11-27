@@ -1,0 +1,57 @@
+# Used during configure and again as the first install rule. This is a
+# point-in-time check of existing aliases, not a hostile filesystem race guard.
+function(_pipelang_file_streams_resolve_prefix proposed_prefix output)
+    if(NOT IS_ABSOLUTE "${proposed_prefix}")
+        message(FATAL_ERROR "The optional FileStreams install prefix must be absolute")
+    endif()
+    if("${proposed_prefix}" MATCHES "(^|/)\\.\\.?(/|$)")
+        message(FATAL_ERROR "The optional FileStreams install prefix must not contain dot traversal")
+    endif()
+
+    # REAL_PATH is applied to an existing directory so a fresh suffix cannot
+    # conceal an alias in an existing ancestor on supported CMake versions.
+    set(existing_ancestor "${proposed_prefix}")
+    set(missing_suffix "")
+    while(NOT EXISTS "${existing_ancestor}" AND NOT IS_SYMLINK "${existing_ancestor}")
+        get_filename_component(parent "${existing_ancestor}" DIRECTORY)
+        get_filename_component(component "${existing_ancestor}" NAME)
+        if(parent STREQUAL existing_ancestor OR "${parent}" STREQUAL "")
+            message(FATAL_ERROR "Cannot resolve the proposed FileStreams install prefix")
+        endif()
+
+        set(missing_suffix "/${component}${missing_suffix}")
+        set(existing_ancestor "${parent}")
+    endwhile()
+
+    if(NOT IS_DIRECTORY "${existing_ancestor}")
+        message(FATAL_ERROR "FileStreams install prefix has a broken or nondirectory ancestor")
+    endif()
+
+    file(REAL_PATH "${existing_ancestor}" resolved_ancestor)
+    set(resolved_prefix "${resolved_ancestor}${missing_suffix}")
+    cmake_path(NORMAL_PATH resolved_prefix)
+    set(${output} "${resolved_prefix}" PARENT_SCOPE)
+endfunction()
+
+function(_pipelang_file_streams_require_separate_prefix proposed_prefix)
+    if(NOT IS_DIRECTORY "@PipeLangModel_SDK_PREFIX@")
+        message(FATAL_ERROR "The selected core SDK prefix is no longer an existing directory")
+    endif()
+
+    _pipelang_file_streams_resolve_prefix("@PipeLangModel_SDK_PREFIX@" resolved_core)
+    _pipelang_file_streams_resolve_prefix("${proposed_prefix}" resolved_install)
+    cmake_path(IS_PREFIX resolved_core "${resolved_install}" NORMALIZE inside_core_prefix)
+    _pipelang_file_streams_resolve_prefix("@crypto_prefix@" resolved_crypto)
+    cmake_path(IS_PREFIX resolved_crypto "${resolved_install}" NORMALIZE inside_crypto_prefix)
+    cmake_path(IS_PREFIX resolved_install "${resolved_core}" NORMALIZE contains_core_prefix)
+    cmake_path(IS_PREFIX resolved_install "${resolved_crypto}" NORMALIZE contains_crypto_prefix)
+    if(inside_core_prefix OR inside_crypto_prefix OR contains_core_prefix OR contains_crypto_prefix)
+        message(FATAL_ERROR
+            "The optional FileStreams install prefix overlaps a selected dependency SDK: ${proposed_prefix}")
+    endif()
+endfunction()
+
+_pipelang_file_streams_require_separate_prefix("${CMAKE_INSTALL_PREFIX}")
+if(NOT "$ENV{DESTDIR}" STREQUAL "")
+    _pipelang_file_streams_require_separate_prefix("$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+endif()

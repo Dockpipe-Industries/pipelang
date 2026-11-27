@@ -1,0 +1,68 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.LockScopes;
+
+public Class Counter {
+    private Lock gate;
+    private int total = 30;
+
+    private int Reenter(int amount) {
+        lock (gate) {
+            total = total + amount;
+            return total;
+        }
+    }
+
+    public int Add() {
+        Lock alias = gate;
+        lock (alias) {
+            return Reenter(2);
+        }
+    }
+}
+
+public model Class Session {
+    public Session() {}
+
+    private void Fail(Lock gate) {
+        lock (gate) {
+            throw Error("expected locked failure");
+        }
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        Counter counter = new Counter();
+        int total = counter.Add();
+        Lock gate = Lock.Create();
+        for (int item = 0; item < 3; item = item + 1) {
+            lock (gate) {
+                if (item == 0)
+                    continue;
+                if (item == 2)
+                    break;
+                total = total + 3;
+            }
+        }
+
+        try {
+            lock (gate) {
+                try {
+                    Fail(gate);
+                } finally {
+                    total = total + 4;
+                }
+            }
+        } catch (Error error) {
+            if (error.Message != "expected locked failure")
+                return Result<int,string>.Failure(error.Message);
+            lock (gate) {
+                total = total + 3;
+            }
+        }
+
+        var wait = SemaphoreSlim.Create(0, 1);
+        bool acquired = await wait.WaitAsync(4, token);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected permit");
+        return Result<int,string>.Success(total);
+    }
+}

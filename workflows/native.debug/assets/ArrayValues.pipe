@@ -1,0 +1,124 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ArrayValues;
+
+public Record ArrayState {
+    public Array<string> labels;
+    public Dictionary<string,int> counts = Dictionary<string,int>.Empty();
+}
+
+public Class ArrayBuilder {
+    private Array<bool> selected = Array<bool>.Create(2, false);
+    private ArrayState state = new ArrayState {};
+
+    public ArrayBuilder(int size) {
+        state.labels = Array<string>.Create(AdjustedSize(size), "seed");
+        state.counts.Add("labelCount", state.labels.Length);
+        selected.Set(1, true);
+    }
+
+    private pure int AdjustedSize(int size) {
+        return size + 1;
+    }
+
+    public bool Valid() {
+        ArrayState before = state;
+        state.labels.Set(1, "changed");
+        state.counts.Set("labelCount", 4);
+        return selected.At(1) && state.labels.Length == 3 && state.labels.At(1) == "changed" &&
+            state.counts.At("labelCount") == 4 && before.labels.At(1) == "seed" &&
+            before.counts.At("labelCount") == 3;
+    }
+}
+
+public model Class Session {
+    public Session() {}
+
+    private Result<Array<bool>,string> Select(int size) {
+        Array<bool> selected = Array<bool>.Create(size, false);
+        if (size != 0)
+            selected.Set(size - 1, true);
+        return Result<Array<bool>,string>.Success(selected);
+    }
+
+    private async Task<Result<Array<string>,string>> Fill(Array<string> values) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(2);
+        if (opened)
+            return Result<Array<string>,string>.Failure("opened array gate");
+        values.Set(0, "new");
+        return Result<Array<string>,string>.Success(values);
+    }
+
+    private string Repeated(int doublings) {
+        string text = "x";
+        for (int step = 0; step < doublings; step = step + 1) {
+            text = text + text;
+        }
+        return text;
+    }
+
+    public async Task<Result<Array<string>,string>> Run(int input) {
+        Array<bool> selected = try Select(input);
+        if (selected.Length != input)
+            return Result<Array<string>,string>.Failure("wrong array extent");
+
+        Array<string> original = Array<string>.Create(2, "old");
+        Array<string> updated = try await Fill(original);
+        if (updated.At(0) != "new" || updated.At(1) != "old" || original.At(0) != "old")
+            return Result<Array<string>,string>.Failure("array mutation changed a copy");
+
+        if (input == 11) {
+            Array<string> words = Array<string>.Create(65, Repeated(13));
+            bool rejected = false;
+            try {
+                words.Set(32, Repeated(19));
+            } catch (Error error) {
+                rejected = error.Message == "collection owned byte limit exceeded";
+            }
+            if (!rejected || string.Utf8Length(words.At(32)) != 8192)
+                return Result<Array<string>,string>.Failure("oversized replacement changed an array");
+        }
+        if (input == 12) {
+            Array<Array<string>> nested = Array<Array<string>>.Create(3, original);
+            nested.Set(1, updated);
+            if (nested.At(1) != updated || nested.At(0) != original || nested.At(2) == updated)
+                return Result<Array<string>,string>.Failure("nested array snapshot changed");
+        }
+        if (input == 13) {
+            Array<string> tooLarge = Array<string>.Create(65, Repeated(14));
+            return Result<Array<string>,string>.Success(tooLarge);
+        }
+        if (input == 14)
+            updated.Set(-1, "invalid");
+        if (input == 15)
+            updated.Set(updated.Length, "invalid");
+        if (input == 16) {
+            string invalid = updated.At(updated.Length);
+            return Result<Array<string>,string>.Failure(invalid);
+        }
+        if (input == 17) {
+            var constructed = new ArrayBuilder(2);
+            if (!constructed.Valid())
+                return Result<Array<string>,string>.Failure("constructor array changed");
+        }
+        if (input == 18) {
+            var invalid = new ArrayBuilder(-2);
+            if (invalid.Valid())
+                return Result<Array<string>,string>.Failure("constructor admitted an invalid array");
+        }
+
+        Array<bool> saved = selected;
+        int enabled = 0;
+        foreach (bool item in selected) {
+            if (item)
+                enabled = enabled + 1;
+            if (input == 4)
+                selected.Set(0, true);
+        }
+        if (input != 0 && (enabled != 1 || !selected.At(input - 1)))
+            return Result<Array<string>,string>.Failure("Boolean array lost its final entry");
+        if (input == 4 && (!selected.At(0) || saved.At(0) || selected == saved))
+            return Result<Array<string>,string>.Failure("array iteration changed a saved version");
+        return Result<Array<string>,string>.Success(updated);
+    }
+}

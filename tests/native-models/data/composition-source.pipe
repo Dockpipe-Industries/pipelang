@@ -1,6 +1,6 @@
 
 public Record Box<T> { public T Value; }
-public Record Envelope<T> { public Optional<T> Value = Optional<T>.None(); }
+public Record Envelope<T> { public T? Value = null; }
 public Class Composition {
     public int Seed;
     public Composition() { Seed = 0; }

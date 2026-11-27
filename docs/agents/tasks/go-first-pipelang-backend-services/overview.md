@@ -1,5 +1,43 @@
 # TASK-022 Go-First PipeLang Backend Services And Typed Clients
 
+## Current direction — 2026-11-08
+
+The user explicitly selected **PipeServe as a separately owned reusable `.pipe`
+HTTPS module**, consumed by DorkPipe's `.pipe` knowledge/MCP implementation. This
+supersedes the Go-first production implementation and generator sequencing below
+for the active slice. Python runtime implementation is rejected. The older design
+is retained as historical context, not an instruction to implement a replacement
+Go/C++ service or wait for desktop/Qt/application UI work.
+
+TASK-022 remains the canonical service initiative; do not create a duplicate backlog.
+PipeLang/TASK-021 owns general language/compiler/runtime capabilities and external
+API interoperability. PipeServe owns `.pipe` HTTP parsing, service lifecycle and
+generic identity/policy integration. Its trusted native OpenSSL binding provides
+TLS accept/read/write/close and verified peer identity; it must not implement HTTP
+routing, MCP dispatch or domain algorithms. DorkPipe/DORK-001 owns `.pipe` MCP,
+knowledge-source grants and knowledge operations, consuming a separately installed
+PipeServe package without sibling-source build coupling.
+
+The local PipeServe candidate is `/home/jamie/source/pipeserve`; remote repository
+baseline checks found no existing product implementation. Initial native MCP work
+uses mandatory client certificates and explicit per-client source grants for
+managed machine clients. This restricted mode does not claim OAuth client
+interoperability. No inference, desktop UI, service deployment, branch publication
+or release is required or authorized by this direction record.
+
+The first status/source-discovery operation is a bounded foundation, not proof that
+native Markdown ingestion, persistent indexes, search, graph/DAG or context services
+are complete. Real HTTPS fixtures and installed-package consumption must qualify
+this slice; broader knowledge acceptance remains DORK-001 work.
+
+General UTF-8 operations needed by `.pipe` parsing are owned and qualified in
+PipeLang, rather than hidden in a native HTTP implementation. Prepared local SDK
+receipts identify the complete tested compiler/runtime input, including concurrent
+unrelated changes; they do not establish a released compiler dependency.
+
+## Historical Go-first proposal
+
+
 ## Goal
 
 Define first-class backend web-service support across PipeLang and Dockpipe so one typed,

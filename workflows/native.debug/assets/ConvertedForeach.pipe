@@ -1,0 +1,37 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ConvertedForeach;
+
+public model Class Session {
+    public Session() {}
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        int score = 0;
+        List<int> values = List<int>.Empty();
+        values.Add(19);
+        values.Add(21);
+        foreach (int? value in values) {
+            if (!value.HasValue)
+                return Result<int,string>.Failure("the foreach item lost its value");
+            score = score + value.Value;
+            values.Add(900);
+        }
+        Dictionary<string,int> widths = Dictionary<string,int>.Empty();
+        widths.Add("first", 2);
+        foreach (KeyValuePair<string,int>? item in widths) {
+            if (!item.HasValue || item.Value.Key != "first")
+                return Result<int,string>.Failure("the dictionary item lost its key");
+            score = score + item.Value.Value;
+            widths.Clear();
+        }
+        var bytes = ByteBuffer.FromUtf8("A");
+        foreach (uint32? byte in bytes) {
+            if (!byte.HasValue || byte.Value != 65u)
+                return Result<int,string>.Failure("the byte did not widen before optional conversion");
+        }
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(4, token);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected permit");
+        return Result<int,string>.Success(score);
+    }
+}

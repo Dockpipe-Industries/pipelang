@@ -13,7 +13,7 @@ public Class Base : IReadable {
     protected int count;
     private int secret = 3;
     public int Tag = 7;
-    public Optional<Base> Next;
+    public Base? Next;
 
     protected Base(int initial) {
         count = initial;
@@ -30,7 +30,7 @@ public Class Base : IReadable {
     public pure int Fixed() => secret;
     public pure int ViaThis() => Read();
     public void Set(int replacement) { count = replacement; }
-    public void Link(Base other) { Next = Optional<Base>.Some(other); }
+    public void Link(Base other) { Next = other; }
     public pure bool Linked(Base other) => Next.HasValue && Next.Value == other;
     protected virtual pure int ProtectedRead() => count;
     public pure int ViaProtected() => ProtectedRead();

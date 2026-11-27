@@ -36,6 +36,11 @@
   ],
   "main": "extension.js",
   "contributes": {
+    "breakpoints": [
+      {
+        "language": "pipelang"
+      }
+    ],
     "languages": [
       {
         "id": "pipelang",

@@ -138,6 +138,8 @@ void ownerAndTaskLifetime() {
 
 void physicalStateAndLimits() {
     using namespace class_inheritance;
+    static_assert(std::is_same_v<pl_object_tag_Base::PureObjectTagOwner, pl_object_tag_Base>);
+    static_assert(std::is_same_v<pl_object_tag_Deep::PureObjectTagOwner, pl_object_tag_Deep>);
     using BaseReference = pipelang::model::ObjectRef<pl_object_tag_Base>;
     pipelang::model::ObjectOwner owner;
     {

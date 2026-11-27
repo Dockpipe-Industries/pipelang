@@ -1,6 +1,14 @@
 param([switch] $Inside)
 . (Join-Path $PSScriptRoot 'windows-common.ps1')
 
+$nativeObjects = [Environment]::GetEnvironmentVariable('PIPELANG_BUILD_NATIVE_OBJECT_PROOF')
+if (!$nativeObjects) {
+    $nativeObjects = 'ON'
+}
+if ($nativeObjects -cnotin @('ON', 'OFF')) {
+    throw 'PIPELANG_BUILD_NATIVE_OBJECT_PROOF must be ON or OFF'
+}
+
 if (!$Inside) {
     $proof = [Environment]::GetEnvironmentVariable('PIPELANG_NATIVE_TOOLCHAIN_PROOF')
     if (!$proof) {
@@ -61,15 +69,28 @@ Set-WindowsTools $tools
 Initialize-Units $proof $runner
 $build = Join-Path $proof 'build'
 $sdk = Join-Path $proof 'sdk'
-Invoke-Unit 'configure' $tools.cmake @('-S', (Join-Path $script:SourceRoot 'sdk/pipeview/model'), '-B', $build,
+$configureArguments = @('-S', (Join-Path $script:SourceRoot 'sdk/pipeview/model'), '-B', $build,
     '-G', 'Ninja', "-DCMAKE_CXX_COMPILER:FILEPATH=$($tools.cxx.Replace('\', '/'))", "-DCMAKE_MAKE_PROGRAM:FILEPATH=$($tools.ninja.Replace('\', '/'))",
     "-DCMAKE_RC_COMPILER:FILEPATH=$($tools.rc.Replace('\', '/'))", '-DCMAKE_BUILD_TYPE=Release', '-DPIPELANG_BUILD_SDK_TOOL_TESTS=ON',
-    '-DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON')
+    '-DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON', "-DPIPELANG_BUILD_NATIVE_OBJECT_PROOF=$nativeObjects")
+Invoke-Unit 'configure' $tools.cmake $configureArguments
 Invoke-Unit 'build' $tools.cmake @('--build', $build, '--parallel', '1') 1800
 Invoke-Unit 'install' $tools.cmake @('--install', $build, '--prefix', $sdk)
 $tool = Join-Path $sdk 'bin/pipelang-sdk-tool.exe'
 Invoke-Unit 'inventory' $tool @('inventory', '--source-root', $script:SourceRoot, '--output', (Join-Path $proof 'inventory.json'))
 Invoke-Unit 'sdk-tests' (Join-Path $build 'sdk-tools/pipelang-sdk-tool-tests.exe') @($script:SourceRoot, $sdk, (Join-Path $proof 'sdk-tests'))
+Invoke-Unit 'resource-budget-tests' (Join-Path $build 'sdk-tools/pipelang-resource-budget-tests.exe') @((Join-Path $proof 'resource-budget-tests'))
+Invoke-Unit 'resource-budget-sdk-tests' (Join-Path $build 'sdk-tools/pipelang-resource-budget-tests.exe') @('--sdk', $sdk, (Join-Path $proof 'resource-budget-sdk-tests'))
+Invoke-Unit 'composition-planner-tests' (Join-Path $build 'sdk-tools/pipelang-composition-planner-tests.exe') @()
+Invoke-Unit 'composition-lifecycle-tests' (Join-Path $build 'sdk-tools/pipelang-composition-lifecycle-tests.exe') @()
+Invoke-Unit 'composition-sdk-tests' (Join-Path $build 'sdk-tools/pipelang-composition-sdk-tests.exe') @($sdk, (Join-Path $proof 'composition-sdk-tests'))
+Invoke-Unit 'composition-factory-profile-tests' (Join-Path $build 'sdk-tools/pipelang-composition-factory-profile-tests.exe') @()
+Invoke-Unit 'di-scope-tests' (Join-Path $build 'sdk-tools/pipelang-di-scope-tests.exe') @()
+Invoke-Unit 'di-execution-tests' (Join-Path $build 'sdk-tools/pipelang-di-execution-tests.exe') @()
+foreach ($lifecycleTest in @('ResourceJournal', 'AsyncScopeExecution', 'TaskGroupRuntime', 'OrdinaryExecutionAllocation')) {
+    Invoke-Unit "di-$lifecycleTest-tests" (Join-Path $build "sdk-tools/pipelang-di-$lifecycleTest-tests.exe") @()
+}
+Invoke-Unit 'object-root-set-tests' (Join-Path $build 'sdk-tools/pipelang-object-root-set-tests.exe') @()
 Invoke-Unit 'package-tests' (Join-Path $build 'sdk-tools/pipelang-package-tests.exe') @((Join-Path $proof 'package-tests'))
 $legacy = Join-Path $sdk 'bin/pipelang-native.exe'
 Invoke-Unit 'legacy-compiler-tests' (Join-Path $build 'legacy-compiler/pipelang-legacy-compiler-tests.exe') @($script:SourceRoot, (Join-Path $proof 'legacy-compiler-tests'), $legacy)

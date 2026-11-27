@@ -10,10 +10,16 @@ find_package(ForgePipe 0.9.0 EXACT CONFIG REQUIRED COMPONENTS ${forgepipe_compon
 find_package(PipeLangModel 0.1.0 EXACT CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
+set(PIPEVIEW_SETTINGS_VIEW_FORMAT "pview" CACHE STRING "Settings view format: pview or pxml")
+set_property(CACHE PIPEVIEW_SETTINGS_VIEW_FORMAT PROPERTY STRINGS pview pxml)
+if(NOT PIPEVIEW_SETTINGS_VIEW_FORMAT STREQUAL "pview" AND NOT PIPEVIEW_SETTINGS_VIEW_FORMAT STREQUAL "pxml")
+    message(FATAL_ERROR "PIPEVIEW_SETTINGS_VIEW_FORMAT must be pview or pxml")
+endif()
+
 pipelang_add_model_bindings(settings-bindings
     STYLE_INSPECTION
     MODEL "${CMAKE_CURRENT_SOURCE_DIR}/Settings.pipe"
-    VIEW "${CMAKE_CURRENT_SOURCE_DIR}/SettingsView.pipe"
+    VIEW "${CMAKE_CURRENT_SOURCE_DIR}/SettingsView.${PIPEVIEW_SETTINGS_VIEW_FORMAT}"
     NAMESPACE settings_models
     OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/compiled-ui")
 add_library(settings-application STATIC Example.cpp SettingsStore.cpp Inspection.cpp)

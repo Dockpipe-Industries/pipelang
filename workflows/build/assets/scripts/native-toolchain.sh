@@ -77,6 +77,7 @@ unit configure "$PIPELANG_CMAKE" "$@"
 if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
     # Keep the slower hosted Intel compile within the per-unit deadline.
     unit build-model-compiler "$PIPELANG_CMAKE" --build "$build" --parallel 1 --target pipelang_model_compiler
+    unit build-sdk-tool-tests "$PIPELANG_CMAKE" --build "$build" --parallel 1 --target pipelang-sdk-tool-tests
 fi
 unit build "$PIPELANG_CMAKE" --build "$build" --parallel 1
 unit install "$PIPELANG_CMAKE" --install "$build" --prefix "$proof/sdk"

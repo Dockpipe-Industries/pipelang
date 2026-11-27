@@ -30,11 +30,12 @@ case "$proof/" in
 esac
 if [ "${1:-}" != --inside ]; then
     mkdir "$proof"
-    exec "$PIPELANG_NATIVE_RUNNER" job --output "$proof/job" --estate "$proof" --timeout 900 -- \
+    run_native_job "$PIPELANG_NATIVE_RUNNER" "$proof/job" --estate "$proof" --timeout 900 -- \
         /usr/bin/env PIPELANG_CHECK_NATIVE_TOOLCHAIN=1 PIPELANG_NATIVE_TOOLCHAIN_PROOF="$PIPELANG_NATIVE_TOOLCHAIN_PROOF" \
         PIPELANG_NATIVE_BUILD_DIRECTORY="$build" PIPELANG_NATIVE_CHECK_PROOF="$proof" \
         PIPELANG_NATIVE_RUNNER="$PIPELANG_NATIVE_RUNNER" PIPELANG_NATIVE_RUNNER_SHA256="$PIPELANG_NATIVE_RUNNER_SHA256" \
         PIPELANG_NATIVE_TOOL_PATH="${PIPELANG_NATIVE_TOOL_PATH:-}" DOCKPIPE_BIN="$DOCKPIPE_BIN" sh "$0" --inside
+    exit
 fi
 if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
     : "${PIPELANG_MACOS_COORDINATOR:?Native workflow requires a macOS coordinator}"
@@ -42,10 +43,18 @@ else
     : "${CONTAINED_JOB_SLICE:?Repository checks require verified aggregate containment}"
 fi
 if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
-    "$PIPELANG_NATIVE_RUNNER" unit --output "$proof/check" --estate "$proof" --timeout 600 -- \
+    if "$PIPELANG_NATIVE_RUNNER" unit --output "$proof/check" --estate "$proof" --timeout 600 -- \
         "$build/sdk-tools/pipelang-repository-check" --source-root "$PWD" --dockpipe "$DOCKPIPE_BIN" \
-        --output "$proof/contracts" > "$proof/check.launcher.log" 2>&1
-    exit
+        --output "$proof/contracts" > "$proof/check.launcher.log" 2>&1; then
+        exit 0
+    else
+        check_result=$?
+        if [ -f "$proof/check.output" ]; then
+            tail -c 6000 "$proof/check.output" >&2
+        fi
+        tail -c 3000 "$proof/check.launcher.log" >&2
+        exit "$check_result"
+    fi
 fi
 "$PIPELANG_NATIVE_RUNNER" unit --output "$proof/check" --estate "$proof" --timeout 600 -- \
     /bin/sh "$script_directory/../../../build/assets/scripts/trace-executions.sh" "$proof/check.exec" \

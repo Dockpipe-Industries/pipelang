@@ -27,13 +27,7 @@ case "$(uname -s)" in
         PIPELANG_CXX=${PIPELANG_CXX:-/usr/bin/clang++}
         export PIPELANG_CMAKE PIPELANG_CXX
         sha256sum() { "$PIPELANG_CMAKE" -E sha256sum "$@"; }
-        readlink() {
-            if [ "${1:-}" = -f ]; then
-                /usr/bin/realpath "$2"
-            else
-                /usr/bin/readlink "$@"
-            fi
-        }
+        readlink() { /usr/bin/readlink "$@"; }
         ;;
     *) echo 'No qualified native workflow backend for this host' >&2; exit 1 ;;
 esac

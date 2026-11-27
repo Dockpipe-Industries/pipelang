@@ -214,26 +214,30 @@ unit native-numeric-generate "$build/sdk-tools/pipelang-sdk-tool-tests" --native
 compile_fixture native-numeric "$proof/native-numeric/main.cpp" "$proof/native-numeric/generated"
 case " $fixture_selection " in
     *" all "*|*" native-numeric "*)
-        active_project="$proof/native-numeric/active"
-        for active_mode in normal sanitizer; do
-            active_sanitizers=OFF
-            if [ "$active_mode" = sanitizer ]; then
-                active_sanitizers=ON
-            fi
-            active_build="$active_project/$active_mode"
-            unit "active-numeric-$active_mode-configure" "$PIPELANG_CMAKE" -S "$active_project" \
-                -B "$active_build" -DCMAKE_PREFIX_PATH="$sdk" \
-                -DPipeLangModel_CXX_RESOURCE_PROFILE="$PIPELANG_CXX_RESOURCE_PROFILE" -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" -DCMAKE_BUILD_TYPE=Release \
-                -DACTIVE_SANITIZERS="$active_sanitizers"
-            unit "active-numeric-$active_mode-build" "$PIPELANG_CMAKE" --build "$active_build" --parallel 1
-            if [ "$active_mode" = sanitizer ]; then
-                unit active-numeric-sanitizer-run /usr/bin/env \
-                    ASAN_OPTIONS=detect_leaks=$([ "$PIPELANG_NATIVE_PLATFORM" = linux ] && echo 1 || echo 0):halt_on_error=1 \
-                    UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 "$active_build/active_numeric"
-            else
-                unit active-numeric-normal-run "$active_build/active_numeric"
-            fi
-        done
+        if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ "$(uname -m)" = x86_64 ]; then
+            active_project="$proof/native-numeric/active"
+            for active_mode in normal sanitizer; do
+                active_sanitizers=OFF
+                if [ "$active_mode" = sanitizer ]; then
+                    active_sanitizers=ON
+                fi
+                active_build="$active_project/$active_mode"
+                unit "active-numeric-$active_mode-configure" "$PIPELANG_CMAKE" -S "$active_project" \
+                    -B "$active_build" -DCMAKE_PREFIX_PATH="$sdk" \
+                    -DPipeLangModel_CXX_RESOURCE_PROFILE="$PIPELANG_CXX_RESOURCE_PROFILE" -DCMAKE_CXX_COMPILER="$PIPELANG_CXX" -DCMAKE_BUILD_TYPE=Release \
+                    -DACTIVE_SANITIZERS="$active_sanitizers"
+                unit "active-numeric-$active_mode-build" "$PIPELANG_CMAKE" --build "$active_build" --parallel 1
+                if [ "$active_mode" = sanitizer ]; then
+                    unit active-numeric-sanitizer-run /usr/bin/env \
+                        ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+                        UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 "$active_build/active_numeric"
+                else
+                    unit active-numeric-normal-run "$active_build/active_numeric"
+                fi
+            done
+        else
+            echo 'Active-host narrowing fixture requires Linux x86-64 SSE2'
+        fi
         structured_project="$proof/native-numeric/structured-values"
         for structured_mode in normal sanitizer; do
             structured_sanitizers=OFF

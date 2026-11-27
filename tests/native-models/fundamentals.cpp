@@ -349,8 +349,11 @@ void typedMathSemantics(Model& model) {
     }
     // fmod truncates its quotient; IEEE remainder chooses the nearest/even one.
     assert(model.Hypot3(Float(0), Float(0), Float(7)) == Float(7));
-    expectSameNumeric(model.Hypot3(maximum / Float(2), maximum / Float(2), maximum / Float(2)),
-                      std::hypot(maximum / Float(2), maximum / Float(2), maximum / Float(2)));
+    // Compare against the runtime math library rather than a compiler-folded hypot.
+    volatile Float materializedHalfMaximum = maximum / Float(2);
+    const Float halfMaximum = materializedHalfMaximum;
+    expectSameNumeric(model.Hypot3(halfMaximum, halfMaximum, halfMaximum),
+                      std::hypot(halfMaximum, halfMaximum, halfMaximum));
     assert(model.Fmod(Float(3), Float(2)) == Float(1));
 
     assert(model.Remainder(Float(3), Float(2)) == Float(-1));

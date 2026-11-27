@@ -335,7 +335,8 @@ private:
         line(": pl_owner_(std::move(owner)), pl_execution_(std::move(execution)), pl_inputs_(std::move(inputs)) {}", 2);
         line("std::shared_ptr<pipelang::di::ExecutionOwner> pl_owner_;", 1);
         line("std::shared_ptr<pipelang::di::ScopeExecution> pl_execution_;", 1);
-        line("RootInputs pl_inputs_;", 1);
+        line(inputParameters(graph, ServiceLifetime::Singleton).empty()
+            ? "[[maybe_unused]] RootInputs pl_inputs_;" : "RootInputs pl_inputs_;", 1);
         line("RootCache pl_cache_;", 1);
         line("Retained pl_retained_;", 1);
         line("};");
@@ -362,7 +363,8 @@ private:
         line(": pl_root_(std::move(root)), pl_inputs_(std::move(inputs)) {}", 2);
         line("std::shared_ptr<Root> pl_root_;", 1);
         line("std::shared_ptr<pipelang::di::ScopeExecution> pl_execution_;", 1);
-        line("ScopeInputs pl_inputs_;", 1);
+        line(inputParameters(graph, ServiceLifetime::Scoped).empty()
+            ? "[[maybe_unused]] ScopeInputs pl_inputs_;" : "ScopeInputs pl_inputs_;", 1);
         line("ScopeCache pl_cache_;", 1);
         line("Retained pl_retained_;", 1);
         line("};");

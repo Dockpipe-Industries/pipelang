@@ -18,6 +18,11 @@ ASan/UBSan counterparts. Packaging verifies the installed manifest, writes a
 bounded deterministic archive, extracts by exact checksum, and qualifies relocated
 tools and an installed CMake consumer. Publication is separate.
 
+Hosted CI runs these workflows on Linux x64 and ARM64, Windows x64, and macOS
+ARM64 and Intel. The platform jobs select the matching DockPipe archive from
+the same checksum lock. Source debugging on the physical Windows and M6 hosts
+has separate qualification receipts.
+
 The build workflow includes the direct object compiler and the supported host's
 application runtime in the SDK by default. The release workflow packages the
 selected build and records both files in its manifest. Set

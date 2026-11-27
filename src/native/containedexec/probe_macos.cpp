@@ -29,20 +29,30 @@ void workload(const std::string& mode, const fs::path& marker) {
     if (mode == "nonzero")
         std::exit(17);
     if (mode == "memory") {
-        // Sampled residency can stay below the stop when macOS compresses
-        // repeated bytes. Touch the same bounded allocation with varied data.
+        // Keep the bounded working set active while the runner samples it.
+        // A slowly allocated, idle prefix can be reclaimed by the host.
         constexpr std::size_t wordsPerMebibyte = (1U << 20) / sizeof(std::uint64_t);
+        constexpr std::size_t wordsPer4KiB = (4U << 10) / sizeof(std::uint64_t);
         std::vector<std::vector<std::uint64_t>> blocks;
         std::uint64_t state = 0x9e3779b97f4a7c15ULL;
         for (int index = 0; index < 950; ++index) {
             auto& block = blocks.emplace_back(wordsPerMebibyte);
-            for (auto& word : block) {
+            volatile std::uint64_t* words = block.data();
+            for (std::size_t word = 0; word < block.size(); ++word) {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                word = state;
+                words[word] = state;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < deadline) {
+            for (auto& block : blocks) {
+                volatile std::uint64_t* words = block.data();
+                for (std::size_t word = 0; word < block.size(); word += wordsPer4KiB)
+                    words[word] = words[word] ^ 1;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         throw std::runtime_error("sampled memory stop did not fire");
     }

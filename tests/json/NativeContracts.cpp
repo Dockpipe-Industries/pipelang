@@ -79,7 +79,10 @@ void allocationAndCleanup() {
 void cancellationAndFragments() {
     using namespace pipelang::json;
     Reader reader;
-    const auto document = reader.begin({});
+    ReadLimits limits;
+    limits.inputBytes = 1048576 + 4;
+    limits.retainedBytes = 4096;
+    const auto document = reader.begin(limits);
     append(reader, document, "[0,1,2,3]");
     int checkpoints = 0;
     refusal("json.cancelled", [&] {
@@ -88,7 +91,7 @@ void cancellationAndFragments() {
     require(checkpoints == 4, "parser cancellation checkpoint was skipped");
     reader.close(document);
 
-    const auto captured = reader.begin({});
+    const auto captured = reader.begin(limits);
     std::string input(1048576, ' ');
     append(reader, captured, input);
     append(reader, captured, "null");
@@ -114,10 +117,13 @@ void allHardCeilings() {
         *values[field] = -1;
         refusal("json.limits", [&] { reader.begin(limits); });
     }
+    ReadLimits documentLimits;
+    documentLimits.inputBytes = 64;
+    documentLimits.retainedBytes = 4096;
     std::vector<std::int64_t> documents;
     for (int index = 0; index < 8; ++index)
-        documents.push_back(reader.begin({}));
-    refusal("json.document_limit", [&] { reader.begin({}); });
+        documents.push_back(reader.begin(documentLimits));
+    refusal("json.document_limit", [&] { reader.begin(documentLimits); });
     for (auto document : documents)
         reader.close(document);
     require(reader.liveDocuments() == 0, "live-document cap cleanup changed");

@@ -73,6 +73,9 @@ jobs:
     name: ${{ matrix.check }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 150
+    # The hosted image defaults to Xcode 16.4, where std::jthread is experimental.
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +95,7 @@ jobs:
           EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
+          xcodebuild -version
           xcrun --find clang++
           cmake --version
       - name: Install checksum-locked DockPipe

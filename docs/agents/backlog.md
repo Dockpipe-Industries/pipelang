@@ -116,6 +116,15 @@ tests, stable registration and source-owned lifecycle assertions. The
 and host-journey qualification and remaining work. F31/C7 are incomplete: property generators,
 shrinkers, seeds, effect/schedule replay, debugging and full platform qualification remain open.
 
+## Build artifact disk budgets
+
+Track peak and retained disk use for compiler, SDK, and installed-consumer
+builds across clean, incremental, branch-switch, and interrupted runs. Use
+DockPipe to report profile-specific budgets in CI and provide dry-run cleanup
+for build-owned outputs. Preserve retained evidence and release artifacts.
+Track the shared compiler and SDK work in [PipeLang #73](https://github.com/Dockpipe-Industries/pipelang/issues/73)
+and consumer coverage in [PNP #23](https://github.com/Dockpipe-Industries/pnp/issues/23).
+
 ## Deferred: compiler-enforced real-time-safe execution
 
 The [real-time execution feature request](tasks/realtime-safe-execution.md) is

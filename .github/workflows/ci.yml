@@ -9,14 +9,31 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    name: ${{ matrix.check }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            check: test
+            architecture: x86_64
+            cxx_resource_profile: system
+          - runner: ubuntu-24.04-arm
+            check: test-linux-arm64
+            architecture: aarch64
+            cxx_resource_profile: gnu-conservative-gc
+    # The declared workflows enforce their own job and unit deadlines.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Prepare native containment
+        env:
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
+          test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends cmake g++ strace
           test -x /usr/bin/cmake
@@ -28,14 +45,16 @@ jobs:
       - name: Install checksum-locked DockPipe
         run: cmake -DOUTPUT_DIRECTORY="$RUNNER_TEMP/dockpipe" -P tooling/bootstrap-dockpipe.cmake
       - name: Build, check, test and package through DockPipe
+        env:
+          CXX_RESOURCE_PROFILE: ${{ matrix.cxx_resource_profile }}
         run: |
           "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml
           "$DOCKPIPE_BIN" --workflow-file workflows/check/config.yml
-          "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml
+          PIPELANG_CXX_RESOURCE_PROFILE="$CXX_RESOURCE_PROFILE" "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml
           "$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml
   test-windows:
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -54,3 +73,39 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $env:DOCKPIPE_BIN --workflow-file workflows/release/config.yml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  test-macos:
+    name: ${{ matrix.check }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Floating-point std::from_chars requires macOS 26's libc++ runtime.
+          - runner: macos-26
+            check: test-macos-arm64
+            architecture: arm64
+          - runner: macos-26-intel
+            check: test-macos-x64
+            architecture: x86_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Verify the native macOS toolchain
+        env:
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
+          sw_vers -productVersion
+          xcodebuild -version
+          xcrun --find clang++
+          cmake --version
+      - name: Install checksum-locked DockPipe
+        run: cmake -DOUTPUT_DIRECTORY="$RUNNER_TEMP/dockpipe" -P tooling/bootstrap-dockpipe.cmake
+      - name: Build, check, test and package through DockPipe
+        run: |
+          "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/check/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml

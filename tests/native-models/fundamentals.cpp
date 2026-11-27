@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <source_location>
 #include <string>
 
 using namespace pipelang_models;
@@ -301,13 +302,14 @@ void binary32Semantics() {
 }
 
 template<class Float>
-void expectSameNumeric(Float actual, Float expected) {
-    if (std::isnan(expected)) {
-        assert(std::isnan(actual));
-    } else {
-        assert(actual == expected);
-        if (expected == Float(0))
-            assert(std::signbit(actual) == std::signbit(expected));
+void expectSameNumeric(Float actual, Float expected,
+                       std::source_location location = std::source_location::current()) {
+    const bool sameValue = std::isnan(expected) ? std::isnan(actual) : actual == expected;
+    const bool sameZeroSign = expected != Float(0) || std::signbit(actual) == std::signbit(expected);
+    if (!sameValue || !sameZeroSign) {
+        std::cerr << location.file_name() << ':' << location.line() << ": numeric mismatch, got "
+                  << std::hexfloat << actual << ", expected " << expected << '\n';
+        assert(sameValue && sameZeroSign);
     }
 }
 
@@ -347,8 +349,11 @@ void typedMathSemantics(Model& model) {
     }
     // fmod truncates its quotient; IEEE remainder chooses the nearest/even one.
     assert(model.Hypot3(Float(0), Float(0), Float(7)) == Float(7));
-    expectSameNumeric(model.Hypot3(maximum / Float(2), maximum / Float(2), maximum / Float(2)),
-                      std::hypot(maximum / Float(2), maximum / Float(2), maximum / Float(2)));
+    // Compare against the runtime math library rather than a compiler-folded hypot.
+    volatile Float materializedHalfMaximum = maximum / Float(2);
+    const Float halfMaximum = materializedHalfMaximum;
+    expectSameNumeric(model.Hypot3(halfMaximum, halfMaximum, halfMaximum),
+                      std::hypot(halfMaximum, halfMaximum, halfMaximum));
     assert(model.Fmod(Float(3), Float(2)) == Float(1));
 
     assert(model.Remainder(Float(3), Float(2)) == Float(-1));

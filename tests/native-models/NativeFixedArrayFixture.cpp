@@ -1,7 +1,6 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "NativeFixedArrayFixture.hpp"
 #include "../../src/native/sdk-tools/SourceProject.hpp"
-#include <chrono>
 #include <set>
 #include <utility>
 #include <vector>
@@ -9,10 +8,9 @@
 namespace {
 using namespace pipelang::tools;
 
-void invoke(const std::vector<std::string>& command,
-            std::chrono::seconds timeout = std::chrono::seconds(90))
+void invoke(const std::vector<std::string>& command)
 {
-    const auto result = process(command, {}, timeout, 4U << 20);
+    const auto result = process(command, {}, std::chrono::seconds(90), 4U << 20);
     require(result.exit == 0, "fixed array fixture failed (" + std::to_string(result.exit) + "): " + result.output + result.diagnostic);
 }
 }
@@ -35,6 +33,8 @@ public Record ElementDefaultLeaf { public Array<int> Items = Array<int>.Create(4
 public Record ElementDefaultContainer { public FixedArray<ElementDefaultLeaf,2> Values; }
 public Record ByteDefaultLeaf { public Array<string> Items = Array<string>.Create(64, "DEFAULT_TEXT_MARKER"); }
 public Record ByteDefaultContainer { public FixedArray<ByteDefaultLeaf,2> Values; }
+public Record ByteLimitLeaf { public string Text; }
+public Record ByteLimitValue { public ByteLimitLeaf Leaf; }
 public Record ThrowingDefault { public int Value = Array<int>.Create(0, 0).At(0); }
 public Record EmptyDefaultContainer { public FixedArray<ThrowingDefault,0> Values; }
 public model Class EmptyDefaultEffects {
@@ -45,6 +45,8 @@ public model Class Queries {
     public pure DefaultContainer Defaults() => new DefaultContainer { };
     public pure ElementDefaultContainer ImplicitElements() => new ElementDefaultContainer { };
     public pure ByteDefaultContainer ImplicitBytes() => new ByteDefaultContainer { };
+    public pure FixedArray<ByteLimitValue,256> ByteLimited(ByteLimitValue fill)
+        => FixedArray<ByteLimitValue,256>.Create(fill);
     public pure FixedArray<int,3> Integers(int fill) => FixedArray<int,3>.Create(fill);
     public pure FixedArray<float32,3> Singles(float32 fill) => FixedArray<float32,3>.Create(fill);
     public pure FixedArray<float,2> Wides(float fill) => FixedArray<float,2>.Create(fill);
@@ -130,21 +132,9 @@ public model Class Queries {
     public pure Array<int> Dynamic(Array<int> values) => values;
 }
 )pipe");
-    // Each wrapper contributes ordinary ownership overhead independently of
-    // the fixed array's physical extent and scalar leaf count.
-    std::string deepRecords;
-    for (int depth = 1; depth <= 31; ++depth) {
-        const auto previous = depth == 1 ? std::string("int") : "Deep" + std::to_string(depth - 1);
-        deepRecords += "public Record Deep" + std::to_string(depth) + " { public " + previous + " Value; }\n";
-    }
     auto fixtureSource = readFile(output / "src/Queries.pipe", 4U << 20);
     const std::string defaultTextMarker = "DEFAULT_TEXT_MARKER";
     fixtureSource.replace(fixtureSource.find(defaultTextMarker), defaultTextMarker.size(), std::string(8192, 'x'));
-    const std::string module = "module FixedValues;";
-    fixtureSource.insert(fixtureSource.find(module) + module.size(), "\n" + deepRecords);
-    const std::string queryDeclaration = "public model Class Queries {";
-    fixtureSource.insert(fixtureSource.find(queryDeclaration) + queryDeclaration.size(),
-        "\n    public pure FixedArray<Deep31,4096> ByteLimited(Deep31 fill) => FixedArray<Deep31,4096>.Create(fill);\n");
     atomicWrite(output / "src/Queries.pipe", fixtureSource);
     const auto manifest = prefix / "share/pipelang-model/sdk-manifest.json";
     const auto compiler = nativeExecutable(prefix / "bin/pipelang-modelc");
@@ -167,7 +157,7 @@ public model Class Queries {
     admitModel(model, "fixed_header");
     for (const std::string type : {"FixedArray<int,-1>", "FixedArray<int,4097>", "FixedArray<int,three>",
              "FixedArray<int>", "FixedArray<int,3,4>", "FixedArray<List<int>,3>", "Array<int>", "FixedArray<int,256>",
-             "FixedArray<FixedValues.Deep31,4096>", "FixedArray<FixedArray<int,64>,64>",
+             "FixedArray<FixedValues.ByteLimitValue,256>", "FixedArray<FixedArray<int,64>,64>",
              "FixedArray<FixedArray<int,0>,4096>"}) {
         auto invalid = model;
         for (auto& record : invalid["records"]) {
@@ -650,9 +640,12 @@ int main()
     }
     bool rejectedOwnedBytes = false;
     try {
-        (void)ordinary.ByteLimited(fixed_header::source::FixedValues::Deep31{});
-    } catch (const pipelang::model::ExecutionFailure&) {
-        rejectedOwnedBytes = true;
+        using namespace fixed_header::source::FixedValues;
+        // The extent and element count are admitted. The nested text alone
+        // drives the array over its owned byte budget.
+        (void)ordinary.ByteLimited(ByteLimitValue{ByteLimitLeaf{std::string(8192, 'x')}});
+    } catch (const pipelang::model::ExecutionFailure& error) {
+        rejectedOwnedBytes = std::string_view(error.what()) == "collection owned byte limit exceeded";
     }
     if (!rejectedOwnedBytes)
         return 3;
@@ -728,19 +721,14 @@ target_compile_options(fixed_arrays PRIVATE -frounding-math)
         "-G", "Ninja", "-DCMAKE_EXE_LINKER_FLAGS=-static",
 #endif
         "-DCMAKE_BUILD_TYPE=Release"});
-    const auto buildTarget = [&](const char* target, std::chrono::seconds timeout) {
+    for (const auto* target : {"fixed_compiled_implementation", "fixed_arrays", "fixed_array_headers"}) {
         try {
             invoke({nativeTool("cmake").string(), "--build", (output / "initial-normal").string(),
-                "--target", target, "--parallel", "1"}, timeout);
+                "--target", target, "--parallel", "1"});
         } catch (const std::exception& error) {
             throw std::runtime_error("fixed array build target " + std::string(target) + ": " + error.what());
         }
-    };
-    // A clean hosted Windows build compiles all generated units serially.
-    // Allow that library build more time within the enclosing 900-second unit.
-    buildTarget("fixed_compiled_implementation", std::chrono::minutes(4));
-    buildTarget("fixed_arrays", std::chrono::seconds(90));
-    buildTarget("fixed_array_headers", std::chrono::seconds(90));
+    }
     invoke({nativeExecutable(output / "initial-normal/fixed_arrays").string()});
     invoke({nativeExecutable(output / "initial-normal/fixed_array_headers").string()});
 #if defined(__SSE2__)

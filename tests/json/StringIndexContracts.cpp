@@ -10,6 +10,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -38,7 +39,7 @@ void refusal(const std::string& expected, Function&& function,
     throw std::runtime_error("missing string-index refusal at " + context + ": expected " + expected);
 }
 
-NodeHandle parse(Reader& reader, const std::string& input, ReadLimits limits = {}) {
+NodeHandle parse(Reader& reader, const std::string& input, ReadLimits limits) {
     const auto document = reader.begin(limits);
     for (std::size_t offset = 0; offset < input.size(); offset += 65536) {
         const auto count = std::min<std::size_t>(65536, input.size() - offset);
@@ -46,6 +47,15 @@ NodeHandle parse(Reader& reader, const std::string& input, ReadLimits limits = {
     }
 
     return reader.complete(document);
+}
+
+NodeHandle parse(Reader& reader, const std::string& input) {
+    ReadLimits limits;
+    limits.inputBytes = static_cast<std::int64_t>(input.size());
+    // Leave room for the parsed nodes as well as the decoded input without
+    // retaining a default-sized arena for every small document.
+    limits.retainedBytes = std::max<std::int64_t>(2 * 1024 * 1024, 4 * limits.inputBytes);
+    return parse(reader, input, limits);
 }
 
 std::string uniqueArray(std::size_t count) {
@@ -69,6 +79,7 @@ void equalityAndOwnership() {
     const auto foreign = parse(other, R"(["a"])");
     const auto second = parse(reader, R"(["a"])");
     const auto baseline = Reader::aggregateRetainedBytes();
+    const auto rootCapacity = reader.retainedCapacity(root.document);
     const auto index = reader.beginStringIndex(root.document, {7, 4096});
     require(Reader::aggregateRetainedBytes() == baseline + 4096, "index arena was not charged");
     refusal("json.string_index_limit", [&] { reader.beginStringIndex(root.document, {7, 4096}); });
@@ -96,7 +107,7 @@ void equalityAndOwnership() {
     refusal("json.string_index", [&] { reader.closeStringIndex(index); });
     require(reader.addString(replacement, reader.at(root, 0)), "reopened index retained entries");
     reader.close(root.document);
-    require(Reader::aggregateRetainedBytes() == baseline - 36 * 1024 * 1024,
+    require(Reader::aggregateRetainedBytes() == baseline - rootCapacity,
             "document close did not release its index and document");
     refusal("json.document", [&] { reader.closeStringIndex(replacement); });
 }
@@ -217,7 +228,10 @@ void limitsAndMemoryFailure() {
     require(!reader.addString(active, reader.at(root, 0)), "one-entry full duplicate refused");
     refusal("json.string_index_entry_limit", [&] { reader.addString(active, reader.at(root, 1)); });
     reader.closeStringIndex(active);
-    const auto incomplete = reader.begin({});
+    ReadLimits incompleteLimits;
+    incompleteLimits.inputBytes = 64;
+    incompleteLimits.retainedBytes = 4096;
+    const auto incomplete = reader.begin(incompleteLimits);
     refusal("json.not_complete", [&] { reader.beginStringIndex(incomplete, {1, 4096}); });
     reader.close(incomplete);
 
@@ -329,14 +343,20 @@ void lifetimeAndAggregate() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
-        equalityAndOwnership();
-        crossDocumentMembership();
-        cardinalityAndBalance();
-        limitsAndMemoryFailure();
-        longComparisonCancellation();
-        lifetimeAndAggregate();
+        const std::string_view selection = argc == 2 ? argv[1] : "all";
+        require(argc == 1 || (argc == 2 && (selection == "operations" || selection == "aggregate")),
+                "expected no argument, operations, or aggregate");
+        if (selection != "aggregate") {
+            equalityAndOwnership();
+            crossDocumentMembership();
+            cardinalityAndBalance();
+            limitsAndMemoryFailure();
+            longComparisonCancellation();
+        }
+        if (selection != "operations")
+            lifetimeAndAggregate();
         std::cout << "JSON decoded-string index contracts passed\n";
         return 0;
     } catch (const std::exception& error) {

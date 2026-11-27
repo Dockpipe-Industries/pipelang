@@ -74,6 +74,11 @@ set -- -S sdk/pipeview/model -B "$build" \
     -DPIPELANG_BUILD_SDK_TOOL_TESTS=ON -DPIPELANG_BUILD_CLASS_INHERITANCE_TESTS=ON \
     "-DPIPELANG_BUILD_NATIVE_OBJECT_PROOF=$native_objects"
 unit configure "$PIPELANG_CMAKE" "$@"
+if [ "$PIPELANG_NATIVE_PLATFORM" = macos ]; then
+    # Keep the slower hosted Intel compile within the per-unit deadline.
+    unit build-model-compiler "$PIPELANG_CMAKE" --build "$build" --parallel 1 --target pipelang_model_compiler
+    unit build-sdk-tool-tests "$PIPELANG_CMAKE" --build "$build" --parallel 1 --target pipelang-sdk-tool-tests
+fi
 unit build "$PIPELANG_CMAKE" --build "$build" --parallel 1
 unit install "$PIPELANG_CMAKE" --install "$build" --prefix "$proof/sdk"
 if [ "$PIPELANG_NATIVE_PLATFORM" = linux ] && [ -f "$PIPELANG_NATIVE_TOOLCHAIN_PROOF-bootstrap/build.exec" ]; then

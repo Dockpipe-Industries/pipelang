@@ -416,7 +416,14 @@ if ($fixtureSelection -ccontains 'all' -or $fixtureSelection -ccontains 'json_li
         foreach ($jsonTest in @(
             'json_contracts', 'json_native_contracts', 'json_maximum_input_contracts',
             'json_string_index_contracts', 'json_string_index_source_contracts')) {
-            Invoke-Unit "json-library-$jsonTest-$jsonMode-run" (Join-Path $jsonBuild "$jsonTest.exe") @()
+            $jsonExecutable = Join-Path $jsonBuild "$jsonTest.exe"
+            if ($jsonMode -eq 'sanitizer' -and $jsonTest -eq 'json_string_index_contracts') {
+                # Keep earlier allocations out of the aggregate ceiling witness's sanitizer process.
+                Invoke-Unit "json-library-$jsonTest-$jsonMode-run" $jsonExecutable @('operations')
+                Invoke-Unit "json-library-$jsonTest-aggregate-$jsonMode-run" $jsonExecutable @('aggregate')
+            } else {
+                Invoke-Unit "json-library-$jsonTest-$jsonMode-run" $jsonExecutable @()
+            }
         }
     }
 }

@@ -1,0 +1,133 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.Sequences;
+
+public Record Parcel {
+    public string label;
+    public ByteBuffer bytes;
+}
+
+public Record Pending {
+    public Queue<Parcel> items;
+}
+
+public Class App {
+    private static async Task<Result<int,string>> Check(Queue<Parcel> queue, Stack<bool> stack) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(15);
+        if (opened || queue.Count != 2 || queue.Peek().label != "first" || stack.Count != 2 || stack.Peek())
+            return Result<int,string>.Failure("sequence snapshot changed across suspension");
+        var taken = stack.TryPop();
+        if (!taken.HasValue || taken.Value || !stack.Peek())
+            return Result<int,string>.Failure("TryPop lost its Boolean payload");
+        return Result<int,string>.Success(42);
+    }
+
+    public static async Task<Result<int,string>> Run(int scenario) {
+        Queue<Parcel> queue = Queue<Parcel>.Empty();
+        Stack<bool> stack = Stack<bool>.Empty();
+        if (scenario == 1) {
+            Parcel missing = queue.Dequeue();
+            return Result<int,string>.Success(missing.bytes.Length);
+        }
+        if (scenario == 2) {
+            if (stack.Peek())
+                return Result<int,string>.Success(1);
+            return Result<int,string>.Success(0);
+        }
+        if (scenario == 3) {
+            Parcel missing = queue.Peek();
+            return Result<int,string>.Success(missing.bytes.Length);
+        }
+        if (queue.TryDequeue().HasValue || stack.TryPop().HasValue)
+            return Result<int,string>.Failure("empty sequence returned an element");
+
+        Parcel first = Parcel("first", ByteBuffer.FromUtf8("é"));
+        Parcel second = Parcel("second", ByteBuffer.FromUtf8("tail"));
+        queue.Enqueue(first);
+        queue.Enqueue(second);
+        Queue<Parcel> saved = queue;
+        Pending work = Pending(queue);
+        Parcel taken = work.items.Dequeue();
+        work.items.Enqueue(first);
+        if (taken != first || queue != saved || work.items == saved || work.items.Peek() != second)
+            return Result<int,string>.Failure("queue mutation changed a copy or its ordering");
+        var optional = queue.TryDequeue();
+        if (!optional.HasValue || optional.Value != first)
+            return Result<int,string>.Failure("TryDequeue did not return Some");
+
+        int visits = 0;
+        foreach (Parcel item in saved) {
+            if ((visits == 0 && item != first) || (visits == 1 && item != second))
+                return Result<int,string>.Failure("queue iteration changed order");
+            queue.Clear();
+            visits = visits + 1;
+        }
+        stack.Push(true);
+        stack.Push(false);
+        Stack<bool> savedStack = stack;
+        foreach (bool item in stack) {
+            if ((visits == 2 && item) || (visits == 3 && !item))
+                return Result<int,string>.Failure("stack iteration changed order");
+            stack.Pop();
+            visits = visits + 1;
+        }
+        if (visits != 4 || stack.Count != 0 || queue.Count != 0 || savedStack == stack)
+            return Result<int,string>.Failure("sequence snapshot did not remain independent");
+
+        Queue<int> rotating = Queue<int>.Empty();
+        var rotationGate = SemaphoreSlim.Create(0, 1);
+        for (int number = 0; number < 4200; number = number + 1) {
+            if (number % 128 == 0) {
+                bool turn = await rotationGate.WaitAsync(1);
+                if (turn)
+                    return Result<int,string>.Failure("unexpected queue test signal");
+            }
+            rotating.Enqueue(number);
+            if (number >= 3 && rotating.Dequeue() != number - 3)
+                return Result<int,string>.Failure("queue compaction changed its range");
+        }
+        if (rotating.Count != 3 || rotating.Peek() != 4197)
+            return Result<int,string>.Failure("queue retained items outside its active range");
+        var result = await App.Check(saved, savedStack);
+        return result;
+    }
+}
+
+public model Class ReferenceApp {
+    public ReferenceApp() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        var result = await App.Run(scenario);
+        return result;
+    }
+}
+
+public Record Transfer {
+    public Queue<int> queue;
+    public Stack<string> stack;
+}
+
+public Interface TransferPort {
+    Task<Result<Transfer,string>> Send(Transfer value, CancellationToken token);
+}
+
+public Class Session {
+    private TransferPort port;
+
+    public Session(TransferPort port) {
+        this.port = port;
+    }
+
+    public async Task<Result<Transfer,string>> Run(int scenario, CancellationToken token) {
+        var queue = Queue<int>.Empty();
+        queue.Enqueue(42);
+        queue.Enqueue(43);
+        var stack = Stack<string>.Empty();
+        stack.Push("bottom");
+        stack.Push("top");
+        Transfer returned = try await port.Send(Transfer(queue, stack), token);
+        if (returned.queue.Peek() != 17 || returned.stack.Peek() != "new top")
+            return Result<Transfer,string>.Failure("host response did not preserve sequence order");
+        return Result<Transfer,string>.Success(returned);
+    }
+}

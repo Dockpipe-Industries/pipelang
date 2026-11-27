@@ -308,6 +308,13 @@ Percentage(-1);                    // refinement failure; no invalid value escap
 
 ## C7 — Determinism, testing, replay and debugging
 
+Current implemented subset: the installed [testing library](../../sdk/libraries/testing/README.md)
+provides ordinary source-authored typed unit/table tests and synchronous/asynchronous lifecycle
+runners. [Local Linux qualification](../agents/tasks/source-testing-framework-20261114.md) covers
+registration, cancellation, cooperative deadlines and separate primary/cleanup failures. This is
+a partial C7 implementation; the requirements below remain unchanged. Property generation,
+shrinking, seeds, contract/path coverage, effect/schedule replay and complete debugging remain open.
+
 Pure value computation remains deterministic for pinned inputs, language/library/profile versions
 and logical budgets. Race-safe shared programs can still produce different legal results. Separate
 pure determinism, ordered effect replay, and schedule replay in metadata and documentation.

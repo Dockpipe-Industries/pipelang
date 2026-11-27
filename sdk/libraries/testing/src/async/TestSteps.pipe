@@ -1,0 +1,14 @@
+module PipeLang.Testing.Async;
+import PipeLang.Testing;
+
+public Class TestSteps {
+    public pure TestStepResult Passed() => TestStepResult(TestOutcome.Passed, null);
+
+    public pure TestStepResult From(Result<void,TestFailure> assertion) {
+        if (assertion.IsFailure)
+            return TestStepResult(TestOutcome.Failed, assertion.Error);
+        if (assertion.IsCancelled)
+            return TestStepResult(TestOutcome.Cancelled, assertion.Error);
+        return Passed();
+    }
+}

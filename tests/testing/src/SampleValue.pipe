@@ -1,0 +1,6 @@
+module PipeLang.Testing.SelfTests;
+
+public Record SampleValue {
+    public int number;
+    public string text;
+}

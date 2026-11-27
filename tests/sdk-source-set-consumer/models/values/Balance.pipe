@@ -1,0 +1,14 @@
+module ValueData;
+
+public Record Balance {
+    public int amount = 42;
+}
+
+public Class CourseDimensions {
+    private const float32 Pi = 3.14159265358979323846f;
+    public const int Gates = 18;
+    public const float32 Radius = 96.0f;
+    public const float32 Turn = Radius * Pi;
+    public const float32 Length = 624.0f * 2.0f + Turn * 2.0f;
+    public const float32 GateSpacing = Length / float32.FromInt(Gates);
+}

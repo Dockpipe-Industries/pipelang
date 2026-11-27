@@ -1,0 +1,24 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.TestingSdkCalls;
+import PipeLang.Testing;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var ready = await gate.WaitAsync(40);
+        var result = App.Check(scenario);
+        if (result.IsFailure) {
+            string expected = scenario == 1 ? "assert.true" : "assert.equal";
+            if (result.Error.code != expected)
+                return Result<int,string>.Failure(result.Error.code);
+            return Result<int,string>.Failure(result.Error.message);
+        }
+        return Result<int,string>.Success(result.Value);
+    }
+
+    public static pure Result<int,TestFailure> Check(int scenario) {
+        try Assert.True(scenario != 1, "testing assertion");
+        try Assert.Equal<int>(42, scenario == 2 ? 41 : 42, "testing equality");
+        return Result<int,TestFailure>.Success(42);
+    }
+}

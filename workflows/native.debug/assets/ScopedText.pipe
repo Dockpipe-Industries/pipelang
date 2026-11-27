@@ -1,0 +1,64 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ScopedText;
+
+public Record Names {
+    public string previous;
+    public string latest;
+    public ByteBuffer bytes;
+}
+
+public Record Observation {
+    public string label;
+    public Names aliases;
+    public ByteBuffer payload;
+}
+
+public Class Consumer {
+    private string label;
+    private Names aliases;
+    private ByteBuffer payload;
+
+    public Consumer(Names names) {
+        label = names.previous;
+        var previousLabel = label;
+        label = names.latest;
+        payload = names.bytes;
+        var earlierBytes = payload;
+        payload.Add(255u);
+        aliases = new Names {previous = previousLabel, latest = label, bytes = earlierBytes};
+    }
+
+    public pure Observation Read() => new Observation {label = label, aliases = aliases, payload = payload};
+
+    public void Update(Names names) {
+        label = names.latest;
+        aliases = names;
+        payload = names.bytes;
+    }
+}
+
+public model Class Root {
+    private SemaphoreSlim permits = SemaphoreSlim.Create(0, 1);
+
+    public pure Observation Read(Consumer consumer) => consumer.Read();
+
+    public void Update(Consumer consumer, Names names) {
+        consumer.Update(names);
+    }
+
+    public async Task<Result<Observation,string>> Hold(Consumer consumer, CancellationToken token) {
+        var prior = consumer.Read();
+        await permits.WaitAsync(token);
+        return Result<Observation,string>.Success(prior);
+    }
+
+    public void Release() {
+        permits.Release();
+    }
+}
+
+public composition Startup {
+    scoped input Names;
+    scoped Consumer = Consumer;
+    export Consumer;
+}

@@ -1,0 +1,45 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Enum ErrorKind { Missing, Conflict }
+
+public Record ErrorOrigin {
+    public string provider = "";
+    public int request = 0;
+}
+
+public Record DomainError {
+    public ErrorKind kind = ErrorKind.Missing;
+    public string message = "";
+    public ErrorOrigin origin;
+}
+
+public Interface TypedHost {
+    Result<int,DomainError> Read(int mode);
+    Result<void,DomainError> Touch(int mode);
+    Result<int,ErrorKind> ReadKind(int mode);
+}
+
+public Class TypedHostErrors {
+    private TypedHost host;
+    public int calls = 0;
+    public int cleanup = 0;
+
+    public TypedHostErrors(TypedHost input) {
+        host = input;
+    }
+
+    public Result<int,DomainError> Read(int mode) {
+        calls = calls + 1;
+        try {
+            return host.Read(mode);
+        } finally {
+            Result<void,DomainError> touched = host.Touch(0);
+            cleanup = cleanup + 1;
+        }
+    }
+
+    public Result<void,DomainError> Touch(int mode) => host.Touch(mode);
+    public Result<int,ErrorKind> ReadKind(int mode) => host.ReadKind(mode);
+    public pure Result<int,DomainError> Preserve(Result<int,DomainError> value) => value;
+    public pure int Calls() => calls;
+    public pure int Cleanups() => cleanup;
+}

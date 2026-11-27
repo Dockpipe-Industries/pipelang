@@ -76,7 +76,7 @@ implementation slices; completion and scope must be evidenced independently.
 | F28 | Typed actions | Missing: validated atomic state transitions, typed events and result application. Atomic multi-field transitions are distinct from atomic variables. |
 | F29 | Contracts and refinements | Missing: executable preconditions/postconditions/invariants, constrained values, static/runtime checks and compatibility rules. |
 | F30 | State machines | Missing: guarded transitions, legal/terminal states, traces and bounded verification. |
-| F31 | Language testing and replay | Partial: compiler conformance infrastructure exists; authored tests, contract-derived generators/shrinkers, effect replay and concurrency verification remain. |
+| F31 | Language testing and replay | Partial: compiler conformance infrastructure and an installed authored source library for typed synchronous/asynchronous unit and table tests are locally qualified on Linux; see the [testing task](../agents/tasks/source-testing-framework-20261114.md). Property tests, generators/shrinkers, seeds, contract/path coverage and effect/schedule replay remain open. |
 | F32 | Semantic tooling and debugging | Partial: source spans, diagnostics, semantic identities and projections exist; complete graphs, source stepping, stacks/watches and feature-complete debug metadata remain. |
 | F33 | Self-hosting library and bootstrap | Missing: complete compiler-required library, PipeLang compiler implementation and reproducible stage-0/1/2 proof. |
 | F34 | Target profiles | Planned: enforce full/constrained/MCU capability and resource contracts without silently weakening semantics. |

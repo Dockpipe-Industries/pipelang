@@ -1,0 +1,140 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.FixedArrayClaims;
+
+public Class ClaimSlots {
+    private FixedArray<int,16> owners = FixedArray<int,16>.Create(-1);
+
+    public void Claim(int position, int owner) {
+        owners.Set(position, owner);
+    }
+
+    public pure int Owner(int position) {
+        return owners.At(position);
+    }
+}
+
+public Record ClaimReport {
+    public FixedArray<string,3> labels;
+    public FixedArray<ByteBuffer,2> payload;
+    public FixedArray<int,2> slotIds;
+}
+
+public model Class Session {
+    public ClaimReport report;
+
+    private FixedArray<int,16> claims;
+    private FixedArray<int,2> guards = FixedArray<int,2>.Create(-1);
+
+    public Session(FixedArray<int,16> seed) {
+        claims = seed;
+        report.labels = FixedArray<string,3>.Create("initial");
+        string prefix = "bound";
+        report.payload = FixedArray<ByteBuffer,2>.Create(ByteBuffer.FromUtf8(prefix + " bytes"));
+        report.slotIds = FixedArray<int,2>.Create(7);
+    }
+
+    private string Repeated(int doublings) {
+        string text = "x";
+        for (int step = 0; step < doublings; step = step + 1) {
+            text = text + text;
+        }
+        return text;
+    }
+
+    private Result<void,string> ClaimMatrix() {
+        Dictionary<int,ClaimSlots> features = Dictionary<int,ClaimSlots>.Empty();
+        for (int feature = 0; feature < 600; feature = feature + 1)
+            features.Add(feature, new ClaimSlots());
+
+        for (int feature = 0; feature < features.Count; feature = feature + 1)
+            features.At(feature).Claim(15, feature + 1);
+
+        for (int feature = 0; feature < features.Count; feature = feature + 1) {
+            ClaimSlots slots = features.At(feature);
+            if (slots.Owner(15) != feature + 1 || slots.Owner(14) != -1)
+                return Result<void,string>.Failure("claim matrix lost receiver identity");
+        }
+        return Result<void,string>.Success();
+    }
+
+    public async Task<Result<FixedArray<int,16>,string>> Run(int input) {
+        FixedArray<int,16> before = claims;
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(2);
+        if (opened)
+            return Result<FixedArray<int,16>,string>.Failure("unexpected initial claim");
+
+        if (input == 100)
+            return Result<FixedArray<int,16>,string>.Success(claims);
+        if (input == 101) {
+            FixedArray<string,64> oversized = FixedArray<string,64>.Create(Repeated(14));
+            return Result<FixedArray<int,16>,string>.Failure(oversized.At(0));
+        }
+        if (input == 102) {
+            FixedArray<string,65> texts = FixedArray<string,65>.Create(Repeated(13));
+            bool rejected = false;
+            try {
+                texts.Set(0, Repeated(19));
+            } catch (Error error) {
+                rejected = error.Message == "collection owned byte limit exceeded";
+            }
+            if (!rejected || string.Utf8Length(texts.At(0)) != 8192)
+                return Result<FixedArray<int,16>,string>.Failure("failed replacement changed a fixed array");
+            return Result<FixedArray<int,16>,string>.Success(claims);
+        }
+        if (input == 103) {
+            FixedArray<bool,0> empty = FixedArray<bool,0>.Create(true);
+            FixedArray<bool,2> flags = FixedArray<bool,2>.Create(false);
+            FixedArray<FixedArray<bool,2>,2> groups = FixedArray<FixedArray<bool,2>,2>.Create(flags);
+            flags.Set(1, true);
+            groups.Set(0, flags);
+            int enabled = 0;
+            foreach (FixedArray<bool,2> group in groups) {
+                foreach (bool flag in group) {
+                    if (flag)
+                        enabled = enabled + 1;
+                }
+            }
+            if (enabled != 1 || empty.Length != 0 || groups.At(1) == flags || guards.At(1) != -1)
+                return Result<FixedArray<int,16>,string>.Failure("fixed array lost its checked shape");
+            return Result<FixedArray<int,16>,string>.Success(claims);
+        }
+        if (input == 104) {
+            try ClaimMatrix();
+            return Result<FixedArray<int,16>,string>.Success(claims);
+        }
+
+        if (input == 105) {
+            ClaimReport original = report;
+            ClaimReport replacement = report;
+            string label = "retained";
+            replacement.labels.Set(0, label + " name");
+            replacement.payload.Set(1, ByteBuffer.FromUtf8(label + " bytes"));
+            replacement.slotIds.Set(0, 42);
+            report = replacement;
+            if (original.labels.At(0) != "initial" || original.slotIds.At(0) != 7)
+                return Result<FixedArray<int,16>,string>.Failure("fixed array aliases changed");
+            return Result<FixedArray<int,16>,string>.Success(claims);
+        }
+        if (input == 106) {
+            report.labels.Set(0, "discarded name");
+            report.payload.Set(1, ByteBuffer.FromUtf8("discarded bytes"));
+            report.slotIds.Set(0, -1);
+            throw Error("fixture.fixed.rollback");
+        }
+        if (input == 107) {
+            if (report.labels.At(0) != "retained name" || report.payload.At(1).DecodeUtf8() != "retained bytes" ||
+                report.slotIds.At(0) != 42 || report.payload.At(0).DecodeUtf8() != "bound bytes" ||
+                report.labels.At(1) != "initial" || report.slotIds.At(1) != 7)
+                return Result<FixedArray<int,16>,string>.Failure("retained fixed arrays changed after rollback");
+            return Result<FixedArray<int,16>,string>.Success(claims);
+        }
+
+        int prior = before.At(7);
+        claims.Set(7, 42);
+        claims.Set(input, 42);
+        if (before.Length != 16 || before.At(7) != prior)
+            return Result<FixedArray<int,16>,string>.Failure("fixed array snapshot changed");
+        return Result<FixedArray<int,16>,string>.Success(claims);
+    }
+}

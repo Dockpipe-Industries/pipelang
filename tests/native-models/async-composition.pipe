@@ -1,0 +1,103 @@
+public Record AsyncPayload {
+    public int number;
+    public string text;
+}
+public Interface AsyncHost {
+    Task<Result<AsyncPayload,string>> Work(AsyncPayload value);
+    Task<Result<AsyncPayload,string>> WithToken(AsyncPayload value, CancellationToken token);
+}
+public Class AsyncComposition {
+    private AsyncHost service;
+    public AsyncPayload draft;
+    public AsyncPayload accepted;
+    public int stage = 0;
+    public int handled = 0;
+    public string detail;
+
+    public AsyncComposition(AsyncHost host, AsyncPayload initial) {
+        service = host;
+        draft = initial;
+    }
+    public void Edit(AsyncPayload value) {
+        draft = value;
+        stage = 50;
+    }
+    private async Task<Result<AsyncPayload,string>> Child(AsyncPayload captured, int mode) {
+        stage = stage + 1;
+        if (mode == 1)
+            return Result<AsyncPayload,string>.Failure("intentional child failure");
+        if (mode == 2)
+            return Result<AsyncPayload,string>.Cancelled("intentional child cancellation");
+        Result<AsyncPayload,string> outcome = await service.Work(captured);
+        stage = stage + 1;
+        if (mode == 3) {
+            int fault = 1 / 0;
+            return Result<AsyncPayload,string>.Success(AsyncPayload(fault, "unreachable"));
+        }
+        return outcome;
+    }
+    private async Task<Result<AsyncPayload,string>> Middle(AsyncPayload captured, int mode) {
+        Result<AsyncPayload,string> result = await Child(captured, mode);
+        return result;
+    }
+    public async Task<Result<AsyncPayload,string>> Root(int mode) {
+        stage = 10;
+        AsyncPayload captured = draft;
+        Result<AsyncPayload,string> result = await Middle(captured, mode);
+        handled = handled + 1;
+        detail = result.IsSuccess ? "success" : result.Error;
+        if (result.IsSuccess) {
+            accepted = result.Value;
+            return Result<AsyncPayload,string>.Success(AsyncPayload(result.Value.number, result.Value.text + " handled"));
+        }
+        return result;
+    }
+    private async Task<Result<AsyncPayload,string>> TokenChild(CancellationToken token) {
+        Result<AsyncPayload,string> result = await service.WithToken(draft, token);
+        return result;
+    }
+    public async Task<Result<AsyncPayload,string>> TokenRoot(CancellationToken token) {
+        Result<AsyncPayload,string> result = await TokenChild(token);
+        handled = handled + 1;
+        return result;
+    }
+    private async Task<Result<AsyncPayload,string>> TokenlessDescendant(CancellationToken token) {
+        if (token.IsCancellationRequested)
+            stage = 77;
+        Result<AsyncPayload,string> result = await service.Work(draft);
+        return result;
+    }
+    public async Task<Result<AsyncPayload,string>> ChildCancellation(CancellationToken token) {
+        Result<AsyncPayload,string> result = await TokenlessDescendant(token);
+        return result;
+    }
+    private async Task<Result<AsyncPayload,string>> ClosingChild(CancellationToken token) {
+        while (true) {
+            Result<AsyncPayload,string> ignored = await service.WithToken(draft, token);
+            stage = ignored.IsCancelled ? 81 : 82;
+        }
+        return Result<AsyncPayload,string>.Success(draft);
+    }
+    public async Task<Result<AsyncPayload,string>> ClosingRoot(CancellationToken token) {
+        Result<AsyncPayload,string> result = await ClosingChild(token);
+        return result;
+    }
+    private async Task<Result<int,string>> LocalWork() {
+        int index = 0;
+        while (index < 4000) {
+            index = index + 1;
+        }
+        return Result<int,string>.Success(index);
+    }
+    public async Task<Result<int,string>> SharedBudget() {
+        stage = 100;
+        Result<int,string> first = await LocalWork();
+        if (!first.IsSuccess)
+            return first;
+        Result<int,string> second = await LocalWork();
+        if (!second.IsSuccess)
+            return second;
+        Result<int,string> third = await LocalWork();
+        return third;
+    }
+}

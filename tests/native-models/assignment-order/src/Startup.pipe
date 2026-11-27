@@ -1,0 +1,7 @@
+module AssignmentOrder;
+
+public composition Startup {
+    singleton input AssignmentPort;
+    scoped Probe = Probe;
+    export Probe;
+}

@@ -14,8 +14,9 @@ a completion date, or authority to implement. Counts below replace the unvalidat
 
 ## Evidence key
 
-These are inspected source/contract anchors, supported by the admitted v0.112.0 terminal receipts.
-A type shape, parser branch or future design contract does not establish executable completion.
+E1–E8 retain the historical source/contract anchors and v0.112.0 evidence below; E9 also
+records the current native authored-testing subset. A type shape, parser branch or future
+design contract does not establish executable completion.
 
 | Key | Current evidence and its limit |
 | --- | --- |
@@ -27,7 +28,7 @@ A type shape, parser branch or future design contract does not establish executa
 | E6 | [Optional tests](../../src/lib/pipelang/optional_semantics_test.go), [list tests](../../src/lib/pipelang/record_list_test.go), [Result pipeline tests](../../src/lib/pipelang/hir_pipeline_test.go): bounded built-in carriers and collections, not general user unions/containers. |
 | E7 | [Semantic projection](../../src/lib/pipelang/semantic_projection.go), [identity](../../src/lib/pipelang/semantic_id.go), [HIR graph tests](../../src/lib/pipelang/hir_dependency_graph_test.go): identities/spans/projections, not complete LSP/DAP/runtime debugging. |
 | E8 | [Compiler contract](../agents/tasks/pipelang-reactive-application-language/compiler-contract.md#accepted-core-semantic-decisions) and [language surface](../agents/tasks/pipelang-reactive-application-language/language-surface.md): accepted design requirements/future examples; not executable effects, reactive state, tasks, contracts or bootstrap. |
-| E9 | [v0.112 completion](../agents/tasks/pipelang-reactive-application-language/arrow-selector-value-arms.md), [verification architecture](../runtime/pipelang-verification.md), [contained runner](../../tests/containedexec/README.md): passed subset and harness/replay-of-campaign evidence; not authored language tests or effect/schedule replay. |
+| E9 | Historical [v0.112 completion](../agents/tasks/pipelang-reactive-application-language/arrow-selector-value-arms.md) and [verification architecture](../runtime/pipelang-verification.md); current [contained runner](../../tests/containedexec/README.md), installed [testing library](../../sdk/libraries/testing/README.md) and [qualification record](../agents/tasks/source-testing-framework-20261114.md). Authored synchronous/asynchronous unit and table tests have local Linux normal/sanitizer proof; campaign repeatability is not effect/schedule replay. |
 
 ## F01–F34 disposition ledger
 
@@ -68,7 +69,7 @@ explicit later gate; it is not removal. P-numbers resolve to the dependency tabl
 | F28 | E8; missing | Required validated atomic state transitions, typed events, effect-result application and observer commit boundary. | P16/P25/P26 → P27 |
 | F29 | E8; design only | Required pre/post/invariants/refinements, old/result scopes, static discharge/runtime guards and public/override compatibility. | P04/P07/P09/P13 → P25 |
 | F30 | E8; missing | Required guarded/terminal transitions, legal path metadata, traces and bounded state/path coverage. | P01/P09/P25/P27 → P28 |
-| F31 | E9; compiler harness only | Retain + extend authored tests, generators/shrinkers, seeds, contract/path coverage, effect and concurrency replay with explicit exploration limits. | P09/P16/P18/P20–P28 → P29; early test API P32 |
+| F31 | E9; compiler harness plus reusable authored unit/table and async lifecycle library | Retain + extend the installed testing subset; property tests, generators/shrinkers, seeds, contract/path coverage, effect and concurrency replay with explicit exploration limits remain required. F31 is incomplete. | P09/P16/P18/P20–P28 → P29; early test API P32 |
 | F32 | E7; partial spans/identities | Required complete typed graph, LSP queries, source maps, Go-backed DAP stepping/stacks/watches, task state and sanitized evidence. Target-specific non-Go mappings remain downstream. | Every slice emits metadata; P13/P17/P25/P29 → P30 |
 | F33 | E8; design only | Required minimum compiler library at M-lib/M-app; compiler port and stage-0/1/2 bootstrap remain required at separate M-bootstrap. Explicit founder placement decision, no claim F33 is fully done at M-app. | P32; B01–B05 after M-lib |
 | F34 | E8; profile design only | Required full/constrained/MCU capability admission, resource contracts, memory-plan checks and reference conformance; physical MCU/backend certification separate under D6. | Feature summaries from all P slices → P31; P33 milestone |

@@ -1,0 +1,149 @@
+public source Interface IBase {
+    pure int Read();
+    void Set(int value);
+    Task<Result<int,string>> Later(SemaphoreSlim gate);
+}
+
+public source Interface ILeft : IBase {
+    void Set(int leftValue);
+    pure int Left();
+}
+
+public source Interface IRight : IBase {
+    void Set(int rightValue);
+    pure int Right();
+}
+
+public source Interface IOther {
+    pure int Other();
+}
+
+public source Interface IDerived : ILeft, IRight, IOther {
+    pure int Read();
+    void Set(int replacement);
+}
+
+public Class Multi : IDerived {
+    private int stored;
+
+    public Multi(int initial) {
+        stored = initial;
+    }
+
+    public pure int Read() {
+        return stored;
+    }
+
+    public void Set(int replacement) {
+        stored = replacement;
+    }
+
+    public pure int Left() {
+        return stored + 10;
+    }
+
+    public pure int Right() {
+        return stored + 20;
+    }
+
+    public pure int Other() {
+        return stored + 30;
+    }
+
+    public async Task<Result<int,string>> Later(SemaphoreSlim gate) {
+        await gate.WaitAsync();
+        return Result<int,string>.Success(stored);
+    }
+}
+
+public Class App {
+    private Multi first;
+    private Multi alias;
+    private SemaphoreSlim signal;
+    public int marker = 0;
+
+    public App() {
+        first = new Multi(3);
+        alias = first;
+    }
+
+    private pure int Choose(Multi value) {
+        return 100 + value.Read();
+    }
+
+    private pure int Choose(IBase value) {
+        return 200 + value.Read();
+    }
+
+    private pure int Choose(IDerived value) {
+        return 300 + value.Read();
+    }
+
+    private pure int OnlyBase(IBase value) {
+        return value.Read();
+    }
+
+    public bool Identities() {
+        IDerived derived = first;
+        ILeft left = derived;
+        IRight right = derived;
+        IBase direct = derived;
+        IBase diamond = left;
+        IOther other = derived;
+        return first == derived && derived == left && first == right
+            && direct == diamond && first == other && other == alias;
+    }
+
+    public int Values() {
+        IDerived derived = first;
+        return derived.Read() + derived.Left() + derived.Right() + derived.Other();
+    }
+
+    public int ExactChoice() {
+        return Choose(first);
+    }
+
+    public int DerivedChoice() {
+        IDerived derived = first;
+        return Choose(derived);
+    }
+
+    public int BaseChoice() {
+        IBase basic = first;
+        return Choose(basic);
+    }
+
+    public int TransitiveArguments() {
+        IDerived derived = first;
+        return OnlyBase(first) + OnlyBase(derived);
+    }
+
+    public int MutateThroughBase(int replacement) {
+        IDerived derived = first;
+        IBase basic = derived;
+        basic.Set(replacement);
+        return alias.Read();
+    }
+
+    public int Read() {
+        return first.Read();
+    }
+
+    public void FailInheritedMutation() {
+        IBase basic = first;
+        basic.Set(99);
+        marker = 99;
+        throw Error("inherited mutation fault");
+    }
+
+    public async Task<Result<int,string>> WaitThroughBase() {
+        IDerived derived = first;
+        IBase basic = derived;
+        Result<int,string> result = await basic.Later(signal);
+        return result;
+    }
+
+    public void ReleaseSignal() {
+        signal.Release();
+    }
+}

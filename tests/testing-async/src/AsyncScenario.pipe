@@ -1,0 +1,17 @@
+module PipeLang.Testing.AsyncSelfTests;
+import PipeLang.Testing;
+import PipeLang.Testing.Async;
+
+public Record AsyncScenario {
+    public string id;
+    public AsyncBehavior setup;
+    public AsyncBehavior body;
+    public AsyncBehavior cleanup;
+    public TestOutcome primaryOutcome;
+    public TestPhase primaryPhase;
+    public string primaryCode;
+    public TestOutcome cleanupOutcome;
+    public string cleanupCode;
+    public bool cleanupClockFailed;
+    public bool bodyRan;
+}

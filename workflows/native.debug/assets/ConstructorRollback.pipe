@@ -1,0 +1,122 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ConstructorRollback;
+
+public Class Value {
+    private int stored;
+    private string label = "";
+    private List<int> history = List<int>.Empty();
+
+    public Value(int initial) {
+        stored = initial;
+    }
+
+    public void Set(int replacement) {
+        stored = replacement;
+        label = string.FromInt(replacement);
+        history.Add(replacement);
+    }
+
+    public pure int Read() {
+        return stored;
+    }
+
+    public pure bool Snapshot(int value, int count) {
+        return stored == value && label == string.FromInt(value) && history.Count == count &&
+            history.At(count - 1) == value;
+    }
+}
+
+public Class Apply {
+    public Apply(Value target, int value) {
+        target.Set(value);
+    }
+}
+
+public Class FailingBase {
+    protected FailingBase(Value target) {
+        Apply nested = new Apply(target, 99);
+        throw Error("base initializer failed");
+    }
+}
+
+public Class FailingChild : FailingBase {
+    public FailingChild(Value target) : base(target) {}
+}
+
+public Class RetryBase {
+    private int seed;
+
+    protected RetryBase(int input) {
+        seed = input;
+    }
+}
+
+public Class RetryChild : RetryBase {
+    private int marker;
+
+    public RetryChild(int input) : base(input) {
+        Bump();
+        throw Error("retry initializer failed");
+    }
+
+    private void Bump() {
+        marker = marker + 1;
+    }
+}
+
+public model Class Session {
+    private Value stored;
+
+    public Session() {
+        stored = new Value(41);
+    }
+
+    private Result<void,string> Attempt() {
+        try {
+            FailingChild failed = new FailingChild(stored);
+            return Result<void,string>.Failure("constructor succeeded unexpectedly");
+        } catch (Error error) {
+            if (error.Message != "base initializer failed")
+                return Result<void,string>.Failure(error.Message);
+        }
+        return Result<void,string>.Success();
+    }
+
+    public Result<int,string> Run(int scenario) {
+        if (scenario == 0) {
+            stored.Set(42);
+            try Attempt();
+            if (!stored.Snapshot(42, 1))
+                return Result<int,string>.Failure("failed inner construction changed receiver state");
+        } else if (scenario == 1) {
+            Apply committed = new Apply(stored, 77);
+            if (!stored.Snapshot(77, 2))
+                return Result<int,string>.Failure("successful construction lost receiver state");
+        } else if (scenario == 2) {
+            for (int attempt = 0; attempt < 4200; attempt = attempt + 1) {
+                try {
+                    RetryChild failed = new RetryChild(attempt);
+                    return Result<int,string>.Failure("retry constructor succeeded unexpectedly");
+                } catch (Error error) {
+                    if (error.Message != "retry initializer failed")
+                        return Result<int,string>.Failure(error.Message);
+                }
+            }
+        } else if (scenario == 3) {
+            stored.Set(88);
+            try Attempt();
+            try {
+                RetryChild failed = new RetryChild(0);
+            } catch (Error error) {
+                if (error.Message != "retry initializer failed")
+                    return Result<int,string>.Failure(error.Message);
+            }
+            if (!stored.Snapshot(88, 3))
+                return Result<int,string>.Failure("failed constructor erased an earlier segment write");
+            throw Error("outer invocation failed");
+        } else if (!stored.Snapshot(77, 2)) {
+            return Result<int,string>.Failure("outer rollback lost the committed receiver snapshot");
+        }
+        return Result<int,string>.Success(stored.Read());
+    }
+}

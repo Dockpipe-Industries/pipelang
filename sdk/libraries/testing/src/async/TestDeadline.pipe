@@ -1,0 +1,6 @@
+module PipeLang.Testing.Async;
+import PipeLang.Testing;
+
+public Record TestDeadline {
+    public int expiresAtMilliseconds;
+}

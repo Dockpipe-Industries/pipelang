@@ -1,0 +1,32 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedInstance;
+
+public model Class Session {
+    private int value = 3;
+
+    public Session(int initial) {
+        this.value = initial;
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken bodyToken, CancellationToken cleanupToken) {
+        if (bodyToken.IsCancellationRequested)
+            return Result<int,string>.Cancelled("body token already cancelled");
+        if (cleanupToken.IsCancellationRequested)
+            return Result<int,string>.Failure("cleanup token already cancelled");
+
+        int before = Current();
+        this.value = before + 1;
+        var gate = SemaphoreSlim.Create(0, 1);
+        var finished = await gate.WaitAsync(30);
+        this.value = before + 2;
+        if (scenario == 1)
+            throw Error("receiver rollback");
+        if (scenario == 2)
+            return Result<int,string>.Failure("returned failure");
+        return Result<int,string>.Success(Current());
+    }
+
+    private pure int Current() {
+        return this.value;
+    }
+}

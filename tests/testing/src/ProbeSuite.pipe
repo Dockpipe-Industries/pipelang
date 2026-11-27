@@ -1,0 +1,40 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+public model Class ProbeSuite {
+    private ProbeCancellationControl control;
+
+    public ProbeSuite(ProbeCancellationControl control) {
+        this.control = control;
+    }
+
+    // Each mutable token is an independent actual native cancellation scope.
+    // No case, record, list or closure captures any token between invocations.
+    public ProbeReport Run(CancellationToken token, CancellationToken first,
+                            CancellationToken second, CancellationToken third,
+                            CancellationToken fourth) {
+        TestRunner runner = new TestRunner();
+        List<TestResult> results = List<TestResult>.Empty();
+        results.Add(runner.RunProbe(new ProbeContractCase(control, 0, "cancelled_probe_and_normal_precancel"), token, first));
+        results.Add(runner.RunProbe(new ProbeContractCase(control, 1, "normal_cancel_success"), token, second));
+        results.Add(runner.RunProbe(new ProbeContractCase(control, 2, "normal_cancel_authored_failure"), token, third));
+        results.Add(runner.RunProbe(new ProbeContractCase(control, 3, "normal_cancel_authored_cancellation"), token, fourth));
+
+        List<IProbeTestCase> cases = List<IProbeTestCase>.Empty();
+        cases.Add(new ProbeContractCase(control, 4, "setup_cleanup_dual_failure"));
+        cases.Add(new ProbeContractCase(control, 5, "exception_cleanup"));
+        cases.Add(new ProbeContractCase(control, 6, "registration"));
+        cases.Add(new ProbeContractCase(control, 7, "ordinary_compatibility"));
+        cases.Add(new ProbeContractCase(control, 8, "run_all_probes_order"));
+        List<TestResult> remaining = runner.RunAllProbes(cases, token, first);
+        foreach (TestResult result in remaining)
+            results.Add(result);
+
+        bool allPassed = results.Count == 9;
+        foreach (TestResult result in results) {
+            if (result.outcome != TestOutcome.Passed || !result.bodyRan || !result.cleanupRan)
+                allPassed = false;
+        }
+        return ProbeReport(allPassed, results);
+    }
+}

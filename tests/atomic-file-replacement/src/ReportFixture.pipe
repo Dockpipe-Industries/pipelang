@@ -1,0 +1,10 @@
+module PipeLang.IO.ReportTests;
+
+public Interface ReportFixture {
+    Result<void,string> Prepare(string target, string staged, bool existing, string fault);
+    Result<void,string> ChangeStage();
+    Result<ByteBuffer,string> OldHandleBytes();
+    Result<ByteBuffer,string> Block(int count);
+    Result<int,string> Renames();
+    Result<void,string> Close();
+}

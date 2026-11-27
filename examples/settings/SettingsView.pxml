@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<View name="SettingsView" model="SettingsModel"
+      profile="pipelang.native-model-view.v1" style="SettingsTheme">
+    <Style name="SettingsTheme">
+        <Token name="inset" type="length" value="16px"/>
+        <Token name="ink" type="color" value="#EAF1F8FF"/>
+        <Property name="padding" value="inset"/>
+        <Property name="gap" value="10px"/>
+        <Property name="controlHeight" value="42px"/>
+        <Property name="text" value="ink"/>
+        <Property name="background" value="#142434FF"/>
+        <Property name="focus" value="#66CCFFFF"/>
+    </Style>
+    <Column id="root">
+        <Label id="title" text="Settings"/>
+        <Label id="name-label" text="Player name"/>
+        <TextField id="name-field" value="{bind model.draft.playerName}"
+                   changed="{model.Rename}" enabled="{bind model.CanEdit()}" sensitive="true"/>
+        <Toggle id="vsync-toggle" label="VSync" value="{bind model.draft.vsync}"
+                changed="{model.ChangeVSync}" enabled="{bind model.CanEdit()}" sensitive="true"/>
+        <PercentStepper id="volume-stepper" label="Volume" value="{bind model.draft.volume}"
+                        changed="{model.ChangeVolume}" enabled="{bind model.CanEdit()}" sensitive="true"/>
+        <Label id="save-status" value="{bind model.StatusText()}"/>
+        <Label id="save-error" value="{bind model.error}"/>
+        <Row id="actions">
+            <Button id="save-button" label="Save" enabled="{bind model.CanSave()}" clicked="{model.Save}"/>
+            <Button id="revert-button" label="Revert" enabled="{bind model.CanEdit()}" clicked="{model.Revert}"/>
+        </Row>
+    </Column>
+</View>

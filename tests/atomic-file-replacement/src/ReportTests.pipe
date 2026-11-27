@@ -1,0 +1,44 @@
+module PipeLang.IO.ReportTests;
+import PipeLang.IO;
+import PipeLang.Testing;
+
+public Record ReportResults {
+    public bool allPassed = false;
+    public List<TestResult> results;
+}
+
+public model Class ReportSuite {
+    private ExclusiveFileOutput writer;
+    private AtomicFileReplacement replace;
+    private FileStreams reader;
+    private ReportFixture fixture;
+
+    public ReportSuite(ExclusiveFileOutput writer, AtomicFileReplacement replace,
+                       FileStreams reader, ReportFixture fixture) {
+        this.writer = writer;
+        this.replace = replace;
+        this.reader = reader;
+        this.fixture = fixture;
+    }
+
+    public ReportResults Run(CancellationToken token, CancellationToken preCancelled,
+                             CancellationToken postRename) {
+        TestRunner runner = new TestRunner();
+        List<TestResult> results = List<TestResult>.Empty();
+        for (int scenario = 0; scenario < 8; scenario = scenario + 1) {
+            ReportCase selected = new ReportCase(writer, replace, reader, fixture, scenario);
+            if (scenario == 4)
+                results.Add(runner.RunProbe(selected, token, postRename));
+            else
+                results.Add(runner.RunProbe(selected, token, preCancelled));
+        }
+
+        bool allPassed = results.Count == 8;
+        foreach (TestResult result in results) {
+            if (result.outcome != TestOutcome.Passed || !result.bodyRan || !result.cleanupRan)
+                allPassed = false;
+        }
+
+        return ReportResults(allPassed, results);
+    }
+}

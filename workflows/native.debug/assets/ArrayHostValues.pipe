@@ -1,0 +1,29 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ArrayHostValues;
+
+public Interface Port {
+    Result<Array<string>,string> Read(int mode);
+    Result<void,string> Check(Array<string> values);
+}
+
+public Class Session {
+    private Port port;
+
+    public Session(Port port) {
+        this.port = port;
+    }
+
+    public async Task<Result<Array<string>,string>> Run(int mode) {
+        Array<string> values = try port.Read(mode);
+        Array<string> before = values;
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(2);
+        if (opened || values.Length != 257 || values.At(256) != "entry-256")
+            return Result<Array<string>,string>.Failure("host transferred the wrong array");
+        values.Set(128, "changed");
+        if (before.At(128) != "entry-128")
+            return Result<Array<string>,string>.Failure("host array copy changed");
+        try port.Check(values);
+        return Result<Array<string>,string>.Success(values);
+    }
+}

@@ -1,0 +1,108 @@
+public Interface BindingHost {
+    pure int Read();
+    Task<Result<int,string>> Step(int value);
+}
+
+public Record Point {
+    public int count;
+}
+
+public Class BindingName {
+    public const int count = 97;
+}
+
+public Class Item {
+    public int value = 7;
+    private int initialized = value;
+    private int fromArgument = argument;
+    private const int Choice = 4;
+
+    public Item(int value, int argument) {
+        this.value = value;
+    }
+
+    public pure int Initial() => initialized;
+    public pure int Input() => fromArgument;
+    public pure int Parameter(int value) => value + this.value;
+    public pure int ConstantParameter(int Choice) => Choice;
+}
+
+public Class Base {
+    protected int value = 5;
+
+    public Base(int value) {
+        this.value = value + 1;
+    }
+
+    public pure int Read() => value;
+}
+
+public Class Derived : Base {
+    private int initialized = value;
+
+    public Derived(int value) : base(value) {
+    }
+
+    public pure int Initial() => initialized;
+    public pure int Parameter(int value) => value + this.value;
+}
+
+public Class App {
+    public int value = 11;
+    public int initialized = value;
+    public int fromArgument = argument;
+    public Point point;
+    private const int Choice = 6;
+    private BindingHost host;
+    private Item item;
+    private Derived inherited;
+    private List<int> values = List<int>.Empty();
+
+    public App(BindingHost host, int value, int argument) {
+        this.host = host;
+        this.value = value;
+        item = new Item(value, argument + 1);
+        inherited = new Derived(value);
+    }
+
+    public pure int ItemInitial() => item.Initial();
+    public pure int ItemInput() => item.Input();
+    public pure int ItemParameter(int value) => item.Parameter(value);
+    public pure int InheritedInitial() => inherited.Initial();
+    public pure int InheritedParameter(int value) => inherited.Parameter(value);
+    public pure int Parameter(int value) => value + this.value;
+    public pure int ConstantParameter(int Choice) => Choice + item.ConstantParameter(Choice);
+    public pure int NamedTypeParameter(Point BindingName) => BindingName.count;
+    public pure int ReadHost() => this.host.Read();
+
+    public void Set(int value) {
+        this.value = value;
+        this.point.count = value;
+        this.values.Add(value);
+    }
+
+    public pure int First() => this.values.At(0);
+    private pure int Increment(int value) => value + 1;
+    public pure int ExplicitCall(int value) => this.Increment(value);
+    private pure T Echo<T>(T value) => value;
+    public pure int GenericCall(int value) => this.Echo<int>(value);
+
+    private pure int Worker(int value) => value * 2;
+    public int Workers(List<int> inputs) {
+        Atomic<int> total = Atomic<int>.Create(0);
+        parallel foreach (int input in inputs) {
+            total.Add(Worker(input));
+        }
+        return total.Load();
+    }
+
+    private async Task<Result<int,string>> Child(int value) {
+        Result<int,string> result = await this.host.Step(value);
+        return result;
+    }
+
+    public async Task<Result<int,string>> Forward(int value) {
+        Result<int,string> result = await this.Child(value);
+        return result;
+    }
+}

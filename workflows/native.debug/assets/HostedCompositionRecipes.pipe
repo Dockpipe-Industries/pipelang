@@ -1,0 +1,89 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ScopedPorts;
+
+public Interface Port {
+    pure int Identity();
+    Task<Result<int,string>> Pause(CancellationToken token);
+}
+
+public Interface Offset {
+    pure int Read();
+}
+
+public Record Stamp {
+    public int delta;
+}
+
+public Class Consumer {
+    private Port port;
+    private Offset offset;
+    private Stamp stamp;
+    private int count = 0;
+
+    public Consumer(Port port, Offset offset, Stamp stamp) {
+        if (port.Identity() < 0)
+            throw Error("scope port rejected by authored constructor");
+        this.port = port;
+        this.offset = offset;
+        this.stamp = stamp;
+    }
+
+    public pure int Identity() => port.Identity() + offset.Read() + stamp.delta;
+
+    public int Next() {
+        count = count + 1;
+        return count;
+    }
+
+    public async Task<Result<int,string>> Hold(CancellationToken token) {
+        var result = await port.Pause(token);
+        return result;
+    }
+}
+
+public Class Dependent {
+    private Consumer consumer;
+
+    public Dependent(Consumer consumer) {
+        var revision = consumer.Next();
+        if (revision < 0 || consumer.Identity() < 0)
+            throw Error("invalid dependency revision");
+        this.consumer = consumer;
+    }
+
+    public int Next() => consumer.Next();
+}
+
+public model Class Root {
+    private SemaphoreSlim permits = SemaphoreSlim.Create(0, 1);
+
+    public async Task<Result<int,string>> ReadLater(Consumer consumer, CancellationToken token) {
+        await permits.WaitAsync(token);
+        return Result<int,string>.Success(consumer.Identity());
+    }
+
+    public async Task<Result<int,string>> Hold(Consumer consumer, CancellationToken token) {
+        var result = await consumer.Hold(token);
+        return result;
+    }
+
+    public void Release() {
+        permits.Release();
+    }
+
+    public pure int Read(Consumer consumer) => consumer.Identity();
+
+    public int Next(Dependent dependent) => dependent.Next();
+
+    public pure int Canary() => 42;
+}
+
+public composition Startup {
+    scoped input Port;
+    scoped input Offset;
+    scoped input Stamp;
+    scoped Consumer = Consumer;
+    scoped Dependent = Dependent;
+    export Consumer;
+    export Dependent;
+}

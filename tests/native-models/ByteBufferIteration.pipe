@@ -1,0 +1,72 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class ByteBufferIteration {
+    public ByteBuffer stored = ByteBuffer.Empty();
+    public int reads = 0;
+
+    private pure int Classify(uint32 value) => int.FromUInt32(value) + 1;
+    private pure int Classify(int value) => value + 2;
+
+    public pure int Sum(ByteBuffer value) {
+        int total = 0;
+        foreach (uint32 item in value)
+            total = total + int.FromUInt32(item);
+        return total;
+    }
+
+    public pure int Typed(ByteBuffer value) {
+        foreach (uint32 item in value)
+            return Classify(item);
+        return 0;
+    }
+
+    public pure uint32 Complement(ByteBuffer value) {
+        foreach (uint32 item in value)
+            return ~item;
+        return 0u;
+    }
+
+    public pure int Control(ByteBuffer value) {
+        int total = 0;
+        foreach (uint32 item in value) {
+            if (item == 0u)
+                continue;
+            if (item == 255u)
+                break;
+            total = total + int.FromUInt32(item);
+        }
+        return total;
+    }
+
+    public int Snapshot(ByteBuffer value) {
+        stored = value;
+        int total = 0;
+        foreach (uint32 item in stored) {
+            stored.Add(9u);
+            total = total + int.FromUInt32(item);
+            item = 0u;
+        }
+        return total;
+    }
+
+    private ByteBuffer ReadOnce() {
+        reads = reads + 1;
+        return stored;
+    }
+
+    public int ReceiverOnce() {
+        reads = 0;
+        int total = 0;
+        foreach (uint32 item in ReadOnce())
+            total = total + int.FromUInt32(item);
+        return total;
+    }
+
+    public pure int Nested(ByteBuffer first, ByteBuffer second) {
+        int total = 0;
+        foreach (uint32 outer in first) {
+            foreach (uint32 inner in second)
+                total = total + int.FromUInt32(outer) + int.FromUInt32(inner);
+        }
+        return total;
+    }
+}

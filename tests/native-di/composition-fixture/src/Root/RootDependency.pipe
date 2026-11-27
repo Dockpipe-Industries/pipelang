@@ -1,0 +1,16 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Root;
+import DiFixture.Contracts;
+
+public Class RootDependency {
+    private int identity;
+
+    public RootDependency(ConstructionPolicy policy, IIdentitySequence identities) {
+        identity = identities.Next();
+        Result<int,string> admitted = policy.Read("root-dependency", 0);
+        if (!admitted.IsSuccess)
+            throw Error(admitted.Error);
+    }
+
+    public pure int Identity() => identity;
+}

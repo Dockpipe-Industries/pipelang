@@ -1,0 +1,69 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.SelfEscape;
+
+public Class Cell {
+    private int value;
+
+    public Cell(int initial) {
+        value = initial;
+    }
+
+    public pure Cell Alias() {
+        return this;
+    }
+
+    public pure Cell Relay() {
+        return Alias();
+    }
+
+    public pure Cell Recurse(int depth) {
+        if (depth == 0)
+            return this;
+        return Recurse(depth - 1);
+    }
+
+    public async Task<Result<Cell,string>> Later() {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(2);
+        if (acquired)
+            return Result<Cell,string>.Failure("unexpected gate");
+        return Result<Cell,string>.Success(this);
+    }
+
+    public void Replace(int updated) {
+        value = updated;
+    }
+
+    public pure int Read() {
+        return value;
+    }
+}
+
+public model Class Session {
+    public Session() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        List<Cell> retained = List<Cell>.Empty();
+        for (int index = 0; index < 3; index = index + 1) {
+            Cell owner = new Cell(index);
+            Cell? alias = null;
+            if (scenario == 0) {
+                alias = owner.Relay();
+            } else if (scenario == 1) {
+                alias = owner.Recurse(3);
+            } else {
+                Result<Cell,string> outcome = await owner.Later();
+                alias = try outcome;
+            }
+            owner.Replace(index + 20);
+            retained.Add(alias.Value);
+            if (retained.At(index) != alias.Value)
+                return Result<int,string>.Failure("a retained alias lost its identity");
+        }
+        if (retained.At(0) == retained.At(1) || retained.At(1) == retained.At(2))
+            return Result<int,string>.Failure("distinct owners lost their identity");
+        if (retained.At(0).Read() != 20 || retained.At(1).Read() != 21 || retained.At(2).Read() != 22)
+            return Result<int,string>.Failure("escaped self alias did not keep the receiver");
+        return Result<int,string>.Success(42);
+    }
+}

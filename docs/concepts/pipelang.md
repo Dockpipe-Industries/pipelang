@@ -1,5 +1,10 @@
 # PipeLang (v0.0.0.1)
 
+Ordinary-model authoring uses [nullable values](pipelang-nullable-values.md) and
+`T?`. The versioned bounded-profile examples below retain their historical
+syntax as reference evidence; their Optional spelling is not an accepted alias
+in the current ordinary-model compiler.
+
 PipeLang is an optional typed authoring layer for Dockpipe.
 
 It does not replace YAML workflows. YAML remains first-class.

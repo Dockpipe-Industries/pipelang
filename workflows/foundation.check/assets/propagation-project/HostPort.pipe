@@ -1,0 +1,18 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class TargetBox {
+    public int value = 0;
+    public List<int> items = List<int>.Empty();
+    public TargetBox() {}
+}
+
+public Interface HostPort {
+    Result<int,FailureData> Send(int first, int second);
+}
+
+public Class PortClient {
+    private HostPort port;
+    public PortClient(HostPort input) { port = input; }
+    public Result<int,FailureData> Send(Result<int,FailureData> input) {
+        return Result<int,FailureData>.Success(try port.Send(1, try input));
+    }
+}

@@ -1,0 +1,7 @@
+file(READ "${FOUNDATION_NATIVE_JOB}" receipt)
+string(JSON outcome GET "${receipt}" outcome)
+string(JSON exit_status GET "${receipt}" exit)
+string(JSON removed GET "${receipt}" tree_removed)
+if(NOT outcome STREQUAL "completed" OR NOT exit_status EQUAL 0 OR NOT removed)
+    message(FATAL_ERROR "A completed, reaped native foundation proof is required")
+endif()

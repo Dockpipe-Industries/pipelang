@@ -1,0 +1,8 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ActiveNarrowing;
+
+public Class Session {
+    public Session() {}
+
+    public pure float32 Run(float value) => float32.FromFloat(value);
+}

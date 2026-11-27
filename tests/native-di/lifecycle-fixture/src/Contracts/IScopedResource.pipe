@@ -1,0 +1,9 @@
+module DiLifecycle.Contracts;
+
+public source Interface IScopedResource {
+    pure int Identity();
+    pure int RootIdentity();
+    Task<Result<int,string>> Work(CancellationToken token);
+    Task<Result<int,string>> LocalWork();
+    void ReleaseLocal();
+}

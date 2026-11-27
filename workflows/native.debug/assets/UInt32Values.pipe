@@ -1,0 +1,96 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.UInt32Values;
+
+public Record WordBox {
+    public uint32 value;
+}
+
+public Class App {
+    private static uint32 Mix(uint32 word) {
+        word = word ^ (word << 13);
+        word = word ^ (word >> 17);
+        return word ^ (word << 5);
+    }
+
+    private static uint32 Calculate(int scenario, uint32 high) {
+        if (scenario == 1)
+            return high + 1u;
+        if (scenario == 2)
+            return 0u - 1u;
+        if (scenario == 3)
+            return high * 2u;
+        if (scenario == 4)
+            return high / 0u;
+        if (scenario == 5)
+            return high % 0u;
+        if (scenario == 6)
+            return high >> 32;
+        if (scenario == 7)
+            return high << -1;
+        if (scenario == 8)
+            return uint32.FromInt(4294967296);
+        if (scenario == 9)
+            return uint32.FromInt(-1);
+        return Mix(1u);
+    }
+
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var high = 0XFFFFFFFFu;
+        var gate = SemaphoreSlim.Create(0, 1);
+        var delayed = await gate.WaitAsync(15);
+        var result = Calculate(scenario, high);
+        if (delayed || result != 270369u || high < 0x80000000u ||
+            uint32.WrappingAdd(high, 1u) != 0u ||
+            uint32.WrappingSubtract(0u, 1u) != high ||
+            uint32.WrappingMultiply(high, high) != 1u ||
+            (~1u & high) != 4294967294u ||
+            (1u | (1u << 31)) != 2147483649u ||
+            high >> 31 != 1u || high / 2u != 2147483647u || high % 2u != 1u ||
+            uint32.FromInt(int.FromUInt32(high)) != high)
+            return Result<int,string>.Failure("uint32 arithmetic changed");
+
+        List<WordBox> list = List<WordBox>.Empty();
+        list.Add(WordBox(high));
+        HashSet<uint32> words = HashSet<uint32>.Empty();
+        words.Add(list.At(0).value);
+        words.Add(0x80000000u);
+        var saved = words;
+        words.Remove(high);
+        uint32? highest = saved.ToList().At(0);
+        if (words.Contains(high) || !saved.Contains(high) || !highest.HasValue || highest.Value != high)
+            return Result<int,string>.Failure("uint32 was lost in owned storage");
+        return Result<int,string>.Success(int.FromUInt32(highest.Value));
+    }
+}
+
+public model Class ReferenceApp {
+    public ReferenceApp() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        var result = await App.Run(scenario);
+        return result;
+    }
+}
+
+public Interface WordPort {
+    Result<uint32,string> Echo(uint32 value);
+}
+
+public Class Session {
+    private uint32 initial;
+    private WordPort port;
+
+    public Session(uint32 initial, WordPort port) {
+        this.initial = initial;
+        this.port = port;
+    }
+
+    public async Task<Result<WordBox,string>> Run(int scenario) {
+        if (scenario == 1) {
+            initial = 1u;
+            initial = initial + 4294967295u;
+        }
+        uint32 echoed = try port.Echo(initial);
+        return Result<WordBox,string>.Success(WordBox(echoed));
+    }
+}

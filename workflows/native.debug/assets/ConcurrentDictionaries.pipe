@@ -1,0 +1,89 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ConcurrentDictionaries;
+
+public Enum Slot { First, Second }
+
+public Record RecordValue {
+    public string name;
+    public int count;
+}
+
+public Class Inventory {
+    private ConcurrentDictionary<string,RecordValue> entries;
+
+    public Inventory() {}
+
+    public bool Check() {
+        RecordValue original = new RecordValue {name = "original", count = 17};
+        entries.Set("one", original);
+        return entries.Count == 1 && entries.At("one").count == 17;
+    }
+}
+
+public model Class Session {
+    public Session() {}
+
+    private bool CheckKeys() {
+        var numbers = ConcurrentDictionary<int,int>.Empty();
+        var flags = ConcurrentDictionary<bool,int>.Empty();
+        var slots = ConcurrentDictionary<Slot,int>.Empty();
+        numbers.Set(-4, 5);
+        flags.Set(true, 7);
+        slots.Set(Slot.Second, 11);
+        return numbers.At(-4) == 5 && flags.At(true) == 7 && slots.At(Slot.Second) == 11;
+    }
+
+    private async Task<Result<int,string>> Finish(ConcurrentDictionary<string,RecordValue> values,
+                                                  int expected, CancellationToken token) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(4, token);
+        if (acquired || values.At("final").count != expected)
+            return Result<int,string>.Failure("the forwarded dictionary lost its state");
+        return Result<int,string>.Success(expected);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        Inventory inventory = new Inventory();
+        if (!inventory.Check() || !CheckKeys())
+            return Result<int,string>.Failure("default dictionary field or checked key lookup failed");
+
+        ConcurrentDictionary<string,RecordValue> values = ConcurrentDictionary<string,RecordValue>.Empty();
+        ConcurrentDictionary<string,RecordValue> alias = values;
+        RecordValue original = new RecordValue {name = "original", count = 41};
+        RecordValue updated = new RecordValue {name = "updated", count = 42};
+        if (!values.TryAdd("key", original) || alias.TryAdd("key", updated) ||
+            values.GetOrAdd("key", updated).name != "original")
+            return Result<int,string>.Failure("compound insertion lost the existing item");
+        if (alias.TryUpdate("key", updated, updated) || !values.TryUpdate("key", updated, original) ||
+            alias.TryGet("key").Value.name != "updated" || alias.TryGet("missing").HasValue)
+            return Result<int,string>.Failure("conditional update changed the wrong item");
+        if (!values.ContainsKey("key") || !alias.TryRemove("key").HasValue ||
+            values.TryRemove("key").HasValue || values.Count != 0)
+            return Result<int,string>.Failure("compound removal lost shared state");
+
+        List<int> work = List<int>.Empty();
+        work.Add(0);
+        work.Add(1);
+        work.Add(2);
+        parallel foreach (int index in work) {
+            RecordValue value = new RecordValue {name = "worker", count = index + 13};
+            alias.TryAdd(string.FromInt(index), value);
+        }
+
+        List<string> keys = values.Keys;
+        List<RecordValue> all = values.Values;
+        List<KeyValuePair<string,RecordValue>> pairs = values.Entries;
+        int total = 0;
+        foreach (KeyValuePair<string,RecordValue> pair in values) {
+            total = total + pair.Value.count;
+            alias.Clear();
+        }
+        if (total != 42 || keys.Count != 3 || all.Count != 3 || pairs.Count != 3 || alias.Count != 0)
+            return Result<int,string>.Failure("dictionary projections did not retain independent snapshots");
+
+        RecordValue final = new RecordValue {name = "final", count = total};
+        values.GetOrAdd("final", final);
+        Result<int,string> completed = await Finish(alias, total, token);
+        return completed;
+    }
+}

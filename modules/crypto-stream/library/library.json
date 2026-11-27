@@ -1,0 +1,20 @@
+{
+  "protocol": "pipelang.source-library.v1",
+  "name": "PipeLang.Crypto",
+  "version": "0.1.0",
+  "source_root": "src",
+  "sources": [
+    {
+      "path": "CryptoFailure.pipe",
+      "sha256": "d29cf07add02075e8ccfcc49f90fd8dd3b24dc441ba7e680d484e9a6fc5fb3f2"
+    },
+    {
+      "path": "Sha256Digest.pipe",
+      "sha256": "9e0d227c52f624659ba13b7a3d699547443eea08f2aa61d9b36771f20cb41e37"
+    },
+    {
+      "path": "Sha256Streams.pipe",
+      "sha256": "e14dc23cef3ded4c041e2f816b53756d621eaa97b9cc4068b7f1cb2d3fd977f7"
+    }
+  ]
+}

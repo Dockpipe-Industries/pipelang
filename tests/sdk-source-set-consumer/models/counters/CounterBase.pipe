@@ -1,0 +1,15 @@
+module Foundation;
+
+public Class CounterBase {
+    protected int value;
+
+    public CounterBase(int initial) {
+        value = initial;
+    }
+
+    public virtual pure int Read() => value;
+
+    public void Increment() {
+        value = value + 1;
+    }
+}

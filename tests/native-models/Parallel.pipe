@@ -1,0 +1,133 @@
+public Class ParallelModel {
+    private Atomic<int> total;
+    private Atomic<int> cleaned;
+    private Atomic<bool> flag = Atomic<bool>.Create(false);
+    private Atomic<float> real = Atomic<float>.Create(0.0);
+    public int marker = 0;
+
+    private pure int Double(int value) {
+        return value * 2;
+    }
+
+    private void Accumulate(Atomic<int> destination, int value) {
+        destination.Add(Double(value));
+    }
+
+    private void AccumulateViaHelper(int value) {
+        Accumulate(total, value);
+    }
+
+    public int Sum(List<int> values) {
+        total.Store(0);
+        parallel foreach (int item in values) {
+            AccumulateViaHelper(item);
+        }
+        marker = total.Load();
+        return marker;
+    }
+
+    public int ReadAtomic() {
+        return total.Load();
+    }
+
+    public int ReadCleanup() {
+        return cleaned.Load();
+    }
+
+    public bool CompareBool() {
+        flag.Store(false);
+        bool old = flag.CompareExchange(true, false);
+        return !old && flag.Load();
+    }
+
+    public float CompareFloat(float comparand, float replacement) {
+        real.Store(comparand);
+        return real.CompareExchange(replacement, comparand);
+    }
+
+    public float ReadFloat() {
+        return real.Load();
+    }
+
+    public int LocalAtomic(List<int> values) {
+        Atomic<int> local = Atomic<int>.Create(0);
+        parallel foreach (int item in values) {
+            local.Increment();
+        }
+        return local.Load();
+    }
+
+    public int BorrowSnapshot(List<int> values, int factor) {
+        total.Store(0);
+        marker = factor;
+        parallel foreach (int item in values) {
+            total.Add(item * factor + marker);
+        }
+        return total.Load();
+    }
+
+    public void Fail(List<int> values) {
+        total.Store(0);
+        cleaned.Store(0);
+        marker = 999;
+        parallel foreach (int item in values) {
+            try {
+                total.Increment();
+                if (item == 0)
+                    throw Error("lowest source fault");
+                if (item == 2)
+                    throw Error("higher source fault");
+            } finally {
+                cleaned.Increment();
+            }
+        }
+    }
+
+    public int LocalControl(List<int> values) {
+        total.Store(0);
+        cleaned.Store(0);
+        parallel foreach (int item in values) {
+            int index = 0;
+            while (index < 3) {
+                index = index + 1;
+                if (index == 2)
+                    break;
+                total.Increment();
+            }
+            try {
+                if (item == 1)
+                    throw Error("caught locally");
+            } catch (Error error) {
+                total.Increment();
+            } finally {
+                cleaned.Increment();
+            }
+        }
+        return total.Load();
+    }
+
+    public void RunCancelled(List<int> values, CancellationToken token) {
+        try {
+            parallel foreach (int item in values) {
+                total.Increment();
+            }
+        } catch (Error error) {
+            total.Store(999);
+        } finally {
+            cleaned.Increment();
+        }
+    }
+
+    public async Task<Result<int,string>> RunAsync(List<int> values, CancellationToken token) {
+        try {
+            parallel foreach (int item in values) {
+                total.Add(item);
+            }
+        } catch (Error error) {
+            total.Store(999);
+        } finally {
+            cleaned.Increment();
+        }
+        return Result<int,string>.Success(total.Load());
+    }
+}

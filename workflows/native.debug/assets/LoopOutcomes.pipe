@@ -1,0 +1,93 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.LoopOutcomes;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int input) {
+        var outcome = await App.Execute(input);
+        return outcome;
+    }
+
+    private static async Task<Result<int,string>> Execute(int input) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(100);
+        if (input == 4) {
+            var maximum = 9223372036854775807;
+            return Result<int,string>.Success(maximum + input);
+        }
+        if (input == 5) {
+            return Result<int,string>.Success(input / (input - 5));
+        }
+        if (input == 6) {
+            while (true) {
+                continue;
+            }
+        }
+        if (input < 0) {
+            return Result<int,string>.Success(input % -1);
+        }
+
+        var values = List<int>.Empty();
+        values.Add(1);
+        values.Add(2);
+        values.Add(3);
+        var total = 0;
+        foreach (var item in values) {
+            if (item == 1) {
+                values.Add(99);
+                continue;
+            }
+            for (int index = 0; index < 3; index = index + 1) {
+                if (index == 1) {
+                    continue;
+                }
+                total = total + item;
+            }
+            if (input == 7 && item == 2) {
+                break;
+            }
+        }
+        if (input == 7) {
+            if (total != 4) {
+                return Result<int,string>.Failure("foreach break advanced the snapshot");
+            }
+            total = 10;
+        }
+        if (total != 10 || values.Count != 4) {
+            return Result<int,string>.Failure("list snapshot or loop transfer changed");
+        }
+
+        var array = Array<int>.Create(2, 2);
+        foreach (var item in array) {
+            array.Set(1, 9);
+            total = total + item;
+        }
+        if (total != 14) {
+            return Result<int,string>.Failure("array snapshot changed");
+        }
+
+        var flags = List<bool>.Empty();
+        flags.Add(true);
+        flags.Add(false);
+        flags.Add(true);
+        for (int outer = 0; outer < 2; outer = outer + 1) {
+            foreach (var flag in flags) {
+                if (flag) {
+                    total = total + 1;
+                }
+            }
+        }
+        if (total != 18) {
+            return Result<int,string>.Failure("nested snapshot changed");
+        }
+        while (total < 43) {
+            total = total + 1;
+            if (total < 20) {
+                continue;
+            }
+            if (total == 42) {
+                break;
+            }
+        }
+        return Result<int,string>.Success(total);
+    }
+}

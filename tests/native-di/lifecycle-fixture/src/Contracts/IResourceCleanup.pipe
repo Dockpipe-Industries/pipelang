@@ -1,0 +1,5 @@
+module DiLifecycle.Contracts;
+
+public source Interface IResourceCleanup {
+    Result<void,string> Close(CancellationToken token);
+}

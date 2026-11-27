@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.22)
+project(PipeLangFoundationWasm LANGUAGES CXX)
+find_package(PipeLangModel 0.1.0 EXACT CONFIG REQUIRED)
+if(NOT PipeLangModel_MANIFEST_SHA256 STREQUAL FOUNDATION_RUNTIME_SHA256)
+    message(FATAL_ERROR "Foundation WASM runtime manifest changed")
+endif()
+if(NOT EXISTS "${FOUNDATION_GENERATED}/ByteBufferIteration.hpp")
+    message(FATAL_ERROR "Qualified native compiler output is required")
+endif()
+add_executable(byte-iteration-wasm "${FOUNDATION_FIXTURE}")
+target_include_directories(byte-iteration-wasm PRIVATE "${FOUNDATION_GENERATED}")
+target_link_libraries(byte-iteration-wasm PRIVATE PipeLang::ModelRuntime)
+target_compile_features(byte-iteration-wasm PRIVATE cxx_std_20)
+target_compile_options(byte-iteration-wasm PRIVATE -O1 -fexceptions)
+target_link_options(byte-iteration-wasm PRIVATE -O1 -fexceptions
+    "-sDISABLE_EXCEPTION_CATCHING=0" "-sALLOW_MEMORY_GROWTH=1"
+    "-sEXIT_RUNTIME=1" "-sENVIRONMENT=node")

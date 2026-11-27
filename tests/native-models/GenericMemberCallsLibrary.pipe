@@ -1,0 +1,39 @@
+module GenericMemberLibrary;
+
+public Record Point {
+    public int x;
+    public int y;
+}
+
+public Class Assertions {
+    private int calls = 0;
+
+    public pure bool Equal<T>(T expected, T actual, string message) {
+        return expected == actual;
+    }
+
+    public T Remember<T>(T value) {
+        calls = calls + 1;
+        return value;
+    }
+
+    public pure int Count() => calls;
+
+    public pure T Identity<T>(T value) => value;
+    public pure T Identity<T>(T value, int ignored) => value;
+
+    // A body that cannot close for int stays dormant when another generic family
+    // is selected. Demand discovery must never instantiate unrelated templates.
+    public pure T Dormant<T>(T value) => value.missing;
+}
+
+public Class DerivedAssertions : Assertions {
+}
+
+public Class Holder {
+    public Assertions value;
+
+    public Holder(Assertions incoming) {
+        value = incoming;
+    }
+}

@@ -1,0 +1,10 @@
+name: pipelang-context-check
+description: Qualify context ownership, stale publication and Qt receiver lifetimes in an immutable candidate SDK.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: context
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/context.check/assets/scripts/run.sh

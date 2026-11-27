@@ -1,0 +1,52 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedGraphAsync;
+
+public Class Worker {
+    private Atomic<int> total = Atomic<int>.Create(38);
+    private Lock gate = Lock.Create();
+    private SemaphoreSlim permits = SemaphoreSlim.Create(0, 1);
+    private ConcurrentQueue<int> queued = ConcurrentQueue<int>.Empty();
+
+    public Worker() {}
+
+    public void Add() {
+        Atomic<int> count = total;
+        Lock guard = gate;
+        ConcurrentQueue<int> queue = queued;
+        List<int> values = List<int>.Empty();
+        values.Add(1);
+        values.Add(3);
+        parallel foreach (int value in values) {
+            lock (guard) {
+                count.Add(value);
+                queue.Enqueue(value);
+            }
+        }
+    }
+
+    public async Task<Result<int,string>> Wait(CancellationToken token) {
+        bool acquired = await permits.WaitAsync(25, token);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected permits");
+        if (queued.Count != (total.Load() - 38) / 2)
+            return Result<int,string>.Failure("shared queue or counter lost its state");
+        return Result<int,string>.Success(total.Load());
+    }
+}
+
+public model Class Session {
+    private Worker? worker;
+
+    public Session() {}
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        if (!worker.HasValue)
+            worker = new Worker();
+
+        Worker current = worker.Value;
+        if (scenario != 2)
+            current.Add();
+        Result<int,string> result = await current.Wait(token);
+        return result;
+    }
+}

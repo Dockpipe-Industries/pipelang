@@ -1,0 +1,50 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+public Class LifecycleContractCase : ITestCase {
+    public pure string Id() => "testing.lifecycle";
+    public pure string Name() => "Setup, cancellation, faults and cleanup preserve their outcomes";
+    public Result<void,TestFailure> Setup(CancellationToken token) => Result<void,TestFailure>.Success();
+    public Result<void,TestFailure> Cleanup() => Result<void,TestFailure>.Success();
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        TestRunner runner = new TestRunner();
+        ScriptedCase failedSetup = new ScriptedCase("failed-setup", TestBehavior.Failure,
+                                                    TestBehavior.Success, TestBehavior.Success);
+        TestResult setup = runner.Run(failedSetup, token);
+        try Assert.Equal<TestOutcome>(TestOutcome.Failed, setup.outcome, "setup failure fails the case");
+        try Assert.False(setup.bodyRan, "body is skipped after setup failure");
+        try Assert.True(setup.cleanupRan, "cleanup runs after partial setup");
+        try Assert.Equal<string>("setupcleanup", failedSetup.trace, "setup cleanup order");
+
+        ScriptedCase multiple = new ScriptedCase("multiple-failures", TestBehavior.Success,
+                                                 TestBehavior.Cancelled, TestBehavior.Failure);
+        TestResult both = runner.Run(multiple, token);
+        try Assert.Equal<TestOutcome>(TestOutcome.Failed, both.outcome, "cleanup failure prevents success");
+        try Assert.Equal<TestOutcome>(TestOutcome.Cancelled, both.primaryOutcome,
+                                          "primary cancellation is not overwritten");
+        try Assert.Equal<string>("body", both.primaryFailure.Value.message, "primary error retained");
+        try Assert.Equal<string>("cleanup", both.cleanupFailure.Value.message, "cleanup error retained");
+
+        ScriptedCase unexpected = new ScriptedCase("unexpected", TestBehavior.Success,
+                                                  TestBehavior.Throw, TestBehavior.Throw);
+        TestResult fault = runner.Run(unexpected, token);
+        try Assert.Equal<string>("test.unexpected_error", fault.primaryFailure.Value.code,
+                                      "unexpected body error is structured");
+        try Assert.Equal<string>("body", fault.primaryFailure.Value.message, "body fault retained");
+        try Assert.Equal<string>("cleanup", fault.cleanupFailure.Value.message, "cleanup fault retained");
+        try Assert.Equal<string>("setupbodycleanup", unexpected.trace, "fault cleanup order");
+        ScriptedCase cleanupOnly = new ScriptedCase("cleanup-only", TestBehavior.Success,
+                                                     TestBehavior.Success, TestBehavior.Failure);
+        TestResult cleanupFailure = runner.Run(cleanupOnly, token);
+        try Assert.Equal<TestOutcome>(TestOutcome.Failed, cleanupFailure.outcome,
+                                          "cleanup failure fails the final outcome");
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, cleanupFailure.primaryOutcome,
+                                          "successful setup and body remain successful");
+        try Assert.False(cleanupFailure.primaryFailure.HasValue,
+                              "cleanup failure does not become a primary failure");
+        try Assert.Equal<string>("cleanup", cleanupFailure.cleanupFailure.Value.message,
+                                      "cleanup-only failure is retained separately");
+        return Result<void,TestFailure>.Success();
+    }
+}

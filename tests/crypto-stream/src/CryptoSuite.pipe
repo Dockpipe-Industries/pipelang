@@ -1,0 +1,50 @@
+module PipeLang.Crypto.Tests;
+import PipeLang.Crypto;
+import PipeLang.Testing;
+
+public model Class CryptoSuite {
+    private Sha256Streams streams;
+    private Sha256Streams peer;
+    private CryptoInputs inputs;
+
+    public CryptoSuite(Sha256Streams streams, Sha256Streams peer, CryptoInputs inputs) {
+        this.streams = streams;
+        this.peer = peer;
+        this.inputs = inputs;
+    }
+
+    public CryptoReport Run(CancellationToken token, CancellationToken beforeUpdate,
+                              CancellationToken afterUpdate, CancellationToken beforeFinish,
+                              CancellationToken afterFinish) {
+        List<VectorData> vectors = List<VectorData>.Empty();
+        // Published SHA256 vectors, plus the explicit 0..255 binary known answer.
+        vectors.Add(VectorData(0, 0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+        vectors.Add(VectorData(1, 3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+        vectors.Add(VectorData(2, 56, "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"));
+        vectors.Add(VectorData(3, 1000000, "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"));
+        vectors.Add(VectorData(4, 256, "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880"));
+        vectors.Add(VectorData(5, 112, "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1"));
+        List<ITestCase> vectorCases = List<ITestCase>.Empty();
+        foreach (VectorData vector in vectors)
+            vectorCases.Add(new VectorCase(streams, inputs, vector));
+
+        TestRunner runner = new TestRunner();
+        List<TestResult> results = runner.RunAll(vectorCases, token);
+        for (int scenario = 0; scenario <= 4; scenario = scenario + 1)
+            results.Add(runner.RunProbe(new CryptoCase(streams, peer, inputs, scenario), token, beforeUpdate));
+
+        results.Add(runner.RunProbe(new CryptoCase(streams, peer, inputs, 5), token, beforeUpdate));
+        results.Add(runner.RunProbe(new CryptoCase(streams, peer, inputs, 6), token, afterUpdate));
+        results.Add(runner.RunProbe(new CryptoCase(streams, peer, inputs, 7), token, beforeFinish));
+        results.Add(runner.RunProbe(new CryptoCase(streams, peer, inputs, 8), token, afterFinish));
+        results.Add(runner.RunProbe(new CryptoCase(streams, peer, inputs, 9), token, beforeUpdate));
+
+        bool allPassed = results.Count == 16;
+        foreach (TestResult result in results) {
+            if (result.outcome != TestOutcome.Passed || !result.bodyRan || !result.cleanupRan)
+                allPassed = false;
+        }
+
+        return CryptoReport(allPassed, results);
+    }
+}

@@ -1,0 +1,76 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+public Class ProbeScriptedCase : IProbeTestCase {
+    private string id;
+    private TestBehavior setupBehavior;
+    private TestBehavior bodyBehavior;
+    private TestBehavior cleanupBehavior;
+    private ProbeCancellationControl control;
+    private int cancellationScope;
+    public bool cancelDuringBody = false;
+    public bool requireCancelledProbe = false;
+    public string trace = "";
+    public int setupCalls = 0;
+    public int bodyCalls = 0;
+    public int probeCalls = 0;
+    public int cleanupCalls = 0;
+
+    public ProbeScriptedCase(string id, TestBehavior setupBehavior, TestBehavior bodyBehavior,
+                              TestBehavior cleanupBehavior, ProbeCancellationControl control,
+                              int cancellationScope) {
+        this.id = id;
+        this.setupBehavior = setupBehavior;
+        this.bodyBehavior = bodyBehavior;
+        this.cleanupBehavior = cleanupBehavior;
+        this.control = control;
+        this.cancellationScope = cancellationScope;
+    }
+
+    public pure string Id() => id;
+    public pure string Name() => "Probe fixture " + id;
+
+    private Result<void,TestFailure> Outcome(string phase, TestBehavior behavior) {
+        if (behavior == TestBehavior.Throw)
+            throw Error(phase);
+        if (behavior == TestBehavior.Failure)
+            return Result<void,TestFailure>.Failure(TestFailure("probe.authored", phase));
+        if (behavior == TestBehavior.Cancelled)
+            return Result<void,TestFailure>.Cancelled(TestFailure("probe.authored_cancel", phase));
+
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Setup(CancellationToken token) {
+        setupCalls = setupCalls + 1;
+        trace = trace + "setup";
+        return Outcome("setup", setupBehavior);
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        bodyCalls = bodyCalls + 1;
+        trace = trace + "body";
+        return Outcome("body", bodyBehavior);
+    }
+
+    public Result<void,TestFailure> BodyWithProbe(CancellationToken token, CancellationToken probeToken) {
+        probeCalls = probeCalls + 1;
+        trace = trace + "probe";
+        if (requireCancelledProbe)
+            try Assert.True(probeToken.IsCancellationRequested, "Probe is genuinely cancelled");
+
+        if (cancelDuringBody) {
+            try Assert.False(token.IsCancellationRequested, "Normal token starts live inside actual body");
+            Result<void,string> stopped = control.RequestCancellation(cancellationScope);
+            try Assert.True(stopped.IsSuccess, "Actual cancellation effect succeeds");
+            try Assert.True(token.IsCancellationRequested, "Effect cancels the method-scoped normal token");
+        }
+        return Outcome("body", bodyBehavior);
+    }
+
+    public Result<void,TestFailure> Cleanup() {
+        cleanupCalls = cleanupCalls + 1;
+        trace = trace + "cleanup";
+        return Outcome("cleanup", cleanupBehavior);
+    }
+}

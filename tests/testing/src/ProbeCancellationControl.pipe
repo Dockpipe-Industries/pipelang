@@ -1,0 +1,7 @@
+module PipeLang.Testing.SelfTests;
+
+// Native supplies real cancellation effects only. Source owns which actual
+// method-scoped token is exercised and every expected result.
+public Interface ProbeCancellationControl {
+    Result<void,string> RequestCancellation(int scope);
+}

@@ -1,0 +1,7 @@
+module PipeLang.Json;
+
+public Enum JsonRenderLayout {
+    Compact,
+    Spaced,
+    Indented
+}

@@ -1,0 +1,7 @@
+module PipeLang.Testing.SelfTests;
+
+public Record NumberCaseData {
+    public string id;
+    public int input;
+    public int expected;
+}

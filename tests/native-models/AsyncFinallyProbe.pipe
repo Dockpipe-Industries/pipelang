@@ -1,0 +1,24 @@
+module AsyncCleanupProbe;
+
+public Interface PauseHost {
+    Task<Result<void,string>> Pause(CancellationToken token);
+}
+
+public model Class Probe {
+    private PauseHost host;
+
+    public Probe(PauseHost service) {
+        host = service;
+    }
+
+    public async Task<Result<int,string>> Run(CancellationToken token) {
+        try {
+            Result<void,string> body = await host.Pause(token);
+            if (!body.IsSuccess)
+                return Result<int,string>.Failure(body.Error);
+            return Result<int,string>.Success(7);
+        } finally {
+            Result<void,string> cleanup = await host.Pause(CancellationToken.None);
+        }
+    }
+}

@@ -1,0 +1,13 @@
+module AsyncTesting;
+import TestingBase;
+
+public source Interface IAsyncTestCase {
+    Task<Result<int,string>> Body();
+}
+
+public Class AsyncTestRunner {
+    public async Task<Result<int,string>> Run(IAsyncTestCase item) {
+        Result<int,string> result = await item.Body();
+        return result;
+    }
+}

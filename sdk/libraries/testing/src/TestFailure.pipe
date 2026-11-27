@@ -1,0 +1,6 @@
+module PipeLang.Testing;
+
+public Record TestFailure {
+    public string code;
+    public string message;
+}

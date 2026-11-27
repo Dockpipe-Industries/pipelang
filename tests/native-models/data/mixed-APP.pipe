@@ -1,0 +1,43 @@
+
+module App;
+import Data;
+
+public Class Mixed {
+    private Atomic<int> total;
+
+    private void Accumulate<T>(Atomic<int> destination, T value) {
+        destination.Add(value);
+    }
+
+    public int Run() {
+        Array<Work<int>> jobs = Array<Work<int>>.Create(4, new Work<int> { Value = 3 });
+        total.Store(0);
+        parallel foreach (Work<int> item in jobs) {
+            Accumulate<int>(total, item.Value);
+        }
+        return total.Load();
+    }
+
+    public int RunQueue() {
+        Queue<Work<int>> jobs = Queue<Work<int>>.Empty();
+        jobs.Enqueue(new Work<int> { Value = 4 });
+        jobs.Enqueue(new Work<int> { Value = 5 });
+        total.Store(0);
+        parallel foreach (Work<int> item in jobs) {
+            Accumulate<int>(total, item.Value);
+        }
+        return total.Load();
+    }
+
+    public int RunDictionary() {
+        Dictionary<string,Work<int>> jobs = Dictionary<string,Work<int>>.Empty();
+        jobs.Add("first", new Work<int> { Value = 3 });
+        jobs.Add("second", new Work<int> { Value = 8 });
+        total.Store(0);
+        parallel foreach (KeyValuePair<string,Work<int>> item in jobs) {
+            Accumulate<int>(total, item.Value.Value);
+        }
+        return total.Load();
+    }
+}
+

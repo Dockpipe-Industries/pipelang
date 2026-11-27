@@ -1,0 +1,7 @@
+module PipeLang.Crypto.Tests;
+import PipeLang.Testing;
+
+public Record CryptoReport {
+    public bool allPassed;
+    public List<TestResult> results;
+}

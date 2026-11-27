@@ -1,0 +1,59 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.CompositionFactories;
+
+public Record Stamp {
+    public int value;
+}
+
+public source Interface IValue {
+    pure int Read();
+}
+
+public Class Value : IValue {
+    private int value;
+
+    public Value(Stamp stamp) {
+        value = stamp.value;
+    }
+
+    public pure int Read() => value;
+}
+
+public Interface Checkpoint {
+    pure int Reach();
+}
+
+public Class Maker {
+    private Checkpoint checkpoint;
+
+    public Maker(Checkpoint checkpoint) {
+        this.checkpoint = checkpoint;
+    }
+
+    public Result<Value,string> Create(Value previous, CancellationToken cancellation, Stamp stamp) {
+        if (stamp.value == 43 && checkpoint.Reach() < 0)
+            return Result<Value,string>.Failure("host checkpoint rejected input");
+        if (cancellation.IsCancellationRequested)
+            return Result<Value,string>.Cancelled("factory observed cancellation");
+        if (stamp.value == -1)
+            return Result<Value,string>.Failure("factory rejected input");
+        if (stamp.value == -2)
+            return Result<Value,string>.Cancelled("factory cancelled");
+        if (stamp.value == -3)
+            return Result<Value,string>.Success(previous);
+        return Result<Value,string>.Success(new Value(stamp));
+    }
+}
+
+public model Class Root {
+    public pure int Run() => 42;
+}
+
+public composition Startup {
+    scoped input Stamp;
+    singleton input Checkpoint;
+    singleton Maker = Maker;
+    scoped Value = Value;
+    scoped IValue = factory Maker.Create;
+    export IValue;
+}

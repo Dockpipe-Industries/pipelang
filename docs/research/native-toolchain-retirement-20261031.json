@@ -1,0 +1,2409 @@
+{
+  "schema": 1,
+  "decision": "Owner directed removal of unused Go/Python implementations rather than porting all 116 historical profiles.",
+  "source_snapshot_sha256": "9264194a6b5cf1ad88788e2fd43b7441e6b2d3a9672f3719e791088662a745be",
+  "retired_count": 478,
+  "retired_files": [
+    {
+      "path": "examples/pipeview-forgepipe/main.go",
+      "sha256": "50ff698d6b52c10beb3560e576668b5886abe45a6504f1dcdd307a461a693adb",
+      "bytes": 2507
+    },
+    {
+      "path": "examples/settings/generate_bindings.py",
+      "sha256": "1860770412c8f6bbe414a965590316d399cbd389f23ae0856307c068352e4f5a",
+      "bytes": 8775
+    },
+    {
+      "path": "examples/settings/test_bindings.py",
+      "sha256": "ce085b861be4d78ebddf38019725bb0f0dcf242417c1549d2649d5e9c537c61b",
+      "bytes": 6902
+    },
+    {
+      "path": "examples/settings/test_inspection.py",
+      "sha256": "f7a1f088eb29c96959ef163d2d90be912dcdd1ce2354ef9a7965d64974760f61",
+      "bytes": 4615
+    },
+    {
+      "path": "examples/settings/test_model_inspection.py",
+      "sha256": "de3ebcc314b833851b985d79346b18a78fcb825eb971c7d89b0cdefb29a8315b",
+      "bytes": 2630
+    },
+    {
+      "path": "examples/settings/test_style_inspection.py",
+      "sha256": "45c4125e92e9b0a795fab71410f3d60f8d0b9eed5868ae3893cf7ecceb51c523",
+      "bytes": 1451
+    },
+    {
+      "path": "go.mod",
+      "sha256": "23b4b2efbaf7cbfacc966263636f1f5331941e03fce350a46610732c5bd52e74",
+      "bytes": 123
+    },
+    {
+      "path": "go.sum",
+      "sha256": "cf08abfa4dac0914f560042f7d689ee4dacb12ba22d78a0d48e1d73dfa84202f",
+      "bytes": 513
+    },
+    {
+      "path": "sdk/materialize/materialize.go",
+      "sha256": "c502095d3ac3bdd0d62d0c7956b009f9bcc71aa3510de7604ab076f5610e8ef0",
+      "bytes": 7974
+    },
+    {
+      "path": "sdk/materialize/materialize_test.go",
+      "sha256": "9947729c1c7700eafd6c39fc59dde0d890da97d0206e6b3970017ea0e7bc89d1",
+      "bytes": 1582
+    },
+    {
+      "path": "sdk/pipeview/document.go",
+      "sha256": "5bad3c4bfbfa112b6642774c81eecb2d02517818d59ed05ec25a525505f3ee09",
+      "bytes": 5223
+    },
+    {
+      "path": "sdk/pipeview/document_test.go",
+      "sha256": "e610f14b59ec262536cf40456fc2e81f03f86f6874881eae4beb1094be2ff09a",
+      "bytes": 7178
+    },
+    {
+      "path": "sdk/pipeview/forgepipe/document.go",
+      "sha256": "bbb827753b2be52be2b75a7c3504c439c4f83849eee4d43d45f7767ba8fdc449",
+      "bytes": 3799
+    },
+    {
+      "path": "sdk/pipeview/forgepipe/document_test.go",
+      "sha256": "7b2a0c3e8439f3245abb4de431e76e441fec7fd150a1678fbbb7afdb02ad0682",
+      "bytes": 6268
+    },
+    {
+      "path": "sdk/pipeview/inspect/inspect.go",
+      "sha256": "cf1665a74d06b097a8b94a154f6d3b922a8484eb57e630b0106fbea5315aa315",
+      "bytes": 7697
+    },
+    {
+      "path": "sdk/pipeview/inspect/inspect_test.go",
+      "sha256": "bb172ffed2cba143a3280976898a5c6351553b664e7b83b579f930c355f686d1",
+      "bytes": 15840
+    },
+    {
+      "path": "sdk/pipeview/markup/admission.go",
+      "sha256": "ba41ae91c06a237d7f6aa9745179ad6ffedfadad323850ac0561d7a7e108aa42",
+      "bytes": 1445
+    },
+    {
+      "path": "sdk/pipeview/markup/admission_internal_test.go",
+      "sha256": "f35e30bf686e902b77be6d0f493335d5ccbadb7a4f8202911c9f93710d58c95e",
+      "bytes": 1789
+    },
+    {
+      "path": "sdk/pipeview/markup/admission_test.go",
+      "sha256": "447e211749a9925a2d27fa4816c90aabebbcc957f66c4ec1db5597ea7dafcc28",
+      "bytes": 4303
+    },
+    {
+      "path": "sdk/pipeview/markup/diagnostics.go",
+      "sha256": "893bacb4898787ec77eccc060f5ebd0e8a7f73c66990d8cab284c9010bcb2407",
+      "bytes": 7432
+    },
+    {
+      "path": "sdk/pipeview/markup/diagnostics_internal_test.go",
+      "sha256": "aa3c954fa8772079e8d4a8ed57a7f0a7773d7d92ce9931598150abcab21c5f77",
+      "bytes": 5011
+    },
+    {
+      "path": "sdk/pipeview/markup/diagnostics_test.go",
+      "sha256": "4e20da7cacb43ba0d0ef28e0ea32392d4c2bd52ac6324e511544f296b1189889",
+      "bytes": 8500
+    },
+    {
+      "path": "sdk/pipeview/markup/encode.go",
+      "sha256": "464e8bab2505820aac67a23930c0dab140fe835d02be59838fe7b1733b7007a1",
+      "bytes": 4884
+    },
+    {
+      "path": "sdk/pipeview/markup/markup.go",
+      "sha256": "2b839fa5758f7f13693a36b5080a12cfe0d3253f1ef47a17ef208c011334cb55",
+      "bytes": 4385
+    },
+    {
+      "path": "sdk/pipeview/markup/markup_test.go",
+      "sha256": "5edb5d82156d3c5d228fc683c76f98f58c73f801be0a7be78b414d8c61304c7d",
+      "bytes": 20379
+    },
+    {
+      "path": "sdk/pipeview/markup/parse.go",
+      "sha256": "10538b429ef5c94ffa8cec72947710bf81fbde8b6f74eacc9fc64ae1668280c4",
+      "bytes": 11865
+    },
+    {
+      "path": "sdk/pipeview/model/tooling/generate_bindings.py",
+      "sha256": "93755e079409f874dea368645bbb8fa82cf76d3887f4dcb1ddb617c6418211b3",
+      "bytes": 23529
+    },
+    {
+      "path": "sdk/pipeview/model/tooling/sdk_manifest.py",
+      "sha256": "73c54803c150d1ab69593c25ebeba548e03ee1ecae38d2f58461bba9a561dfb3",
+      "bytes": 5760
+    },
+    {
+      "path": "sdk/pipeview/model/tooling/test_generate_bindings.py",
+      "sha256": "3bb0b5eba4a9789a493d94c14643b459a84329dadc77ef8597ae275d79cf0cb9",
+      "bytes": 18820
+    },
+    {
+      "path": "sdk/pipeview/node.go",
+      "sha256": "c8f841154ac6b736bd4f88fe41fc779e654a270e5bc357e4b256abb2e8ba01e5",
+      "bytes": 2468
+    },
+    {
+      "path": "sdk/pipeview/source/actions.go",
+      "sha256": "7eabe64d64c1efa19d7281dfd2e04af25f98051712ba352c15862aad4813eb28",
+      "bytes": 6757
+    },
+    {
+      "path": "sdk/pipeview/source/actions_test.go",
+      "sha256": "5d786abd1ede4574c0add67d468eeee8345792e9292fc54c033104bf9b2b0137",
+      "bytes": 8968
+    },
+    {
+      "path": "sdk/pipeview/source/native_actions_test.go",
+      "sha256": "84cd53154b0598317211ddc7a34ed53ec47b7c745a49914f50b1c19660da115c",
+      "bytes": 3008
+    },
+    {
+      "path": "sdk/pipeview/source/native_test.go",
+      "sha256": "a556c40ad954115a26f1ffa2e6875eb0d333e4c1b7caed3f60dabc3ccd6af2ec",
+      "bytes": 3267
+    },
+    {
+      "path": "sdk/pipeview/source/parser_test.go",
+      "sha256": "cab1d9e034e792ff649d31ef8208ae959fd852b1a8d4bcdad163e80f76878330",
+      "bytes": 4189
+    },
+    {
+      "path": "sdk/pipeview/source/percent_parser_test.go",
+      "sha256": "ba3fcf6c7d7cd1daab1cbbbca900b76c3f8134cd631e025d7fa69b7cd364acf8",
+      "bytes": 2506
+    },
+    {
+      "path": "sdk/pipeview/source/source.go",
+      "sha256": "c94bf45dbd3dc37acad14dd57aa4715d92586a3142082f60178bce19fe7ebc44",
+      "bytes": 9940
+    },
+    {
+      "path": "sdk/pipeview/source/source_test.go",
+      "sha256": "2415bc72994732bd12fc1c0b3a0014f78504506712b457940edcb1686299bec4",
+      "bytes": 10494
+    },
+    {
+      "path": "sdk/pipeview/state/model.go",
+      "sha256": "33ca28f837f53083b84ecec343725a8ee6a9927b2daeee566af784ef213564d2",
+      "bytes": 8394
+    },
+    {
+      "path": "sdk/pipeview/state/model_test.go",
+      "sha256": "1c0ef8a610978fa4d65e11f3d7a247f590fbcf1e83e8803e334c9d5b6185dd80",
+      "bytes": 17775
+    },
+    {
+      "path": "sdk/pipeview/state/native.go",
+      "sha256": "619103b239038e954f4357a5cbf3c3c388b9f6bf102fec526689759768626421",
+      "bytes": 408
+    },
+    {
+      "path": "sdk/pipeview/state/native_test.go",
+      "sha256": "86a6a28c5050acbbb5dda6762dbf932ad81e42010e0c3f2ed12e80c85272f482",
+      "bytes": 6711
+    },
+    {
+      "path": "sdk/pipeview/state/percent_native_test.go",
+      "sha256": "638db561a40be1b23ae6fe0ae3d435e9453e131ef64ad1fbd583b85dfc5c0d72",
+      "bytes": 5253
+    },
+    {
+      "path": "sdk/pipeview/state/save_validation_test.go",
+      "sha256": "1666f54b3dd087a9b8be60e9c83ee300d789d006658bc958d04caf3ea4b72a44",
+      "bytes": 1141
+    },
+    {
+      "path": "sdk/pipeview/testing/host.go",
+      "sha256": "86ce15a36802a858c870f862be2f4042f9358cfa29996d8155c7625d5207b04e",
+      "bytes": 7018
+    },
+    {
+      "path": "sdk/pipeview/testing/host_test.go",
+      "sha256": "ceb40f8b3bcb9170b1ceb21ce6224b4785de82e3234706f4a1c344a53118c62e",
+      "bytes": 14404
+    },
+    {
+      "path": "sdk/pipeview/testing/native_test.go",
+      "sha256": "10c7e0fe5a19439df4859b19feb9db18cdb74da3a30aafcbf0a24b9d00dfb698",
+      "bytes": 3763
+    },
+    {
+      "path": "sdk/pipeview/testing/percent_test.go",
+      "sha256": "74be03b16037ce1cbba78f5cdebb731fa7c1521cba828a56741d9c078c2c9b23",
+      "bytes": 6563
+    },
+    {
+      "path": "sdk/pipeview/value.go",
+      "sha256": "c8f71f495c9f6bab09b3473a8df0533aa4bf48a45ddcece18218389959e93086",
+      "bytes": 1855
+    },
+    {
+      "path": "src/cmd/pipelang/main.go",
+      "sha256": "07cc0299e8e6a0fa224057aedb49bbe6935446c2723ae047498f6c517fc3f563",
+      "bytes": 407
+    },
+    {
+      "path": "src/cmd/pipelang-native-cpp/float64_calls_test.go",
+      "sha256": "5b5d6c3c2ddd30f2459049005c9c320da8015ab08e9380fe99eb943e528ac82e",
+      "bytes": 6628
+    },
+    {
+      "path": "src/cmd/pipelang-native-cpp/float64_conditional_test.go",
+      "sha256": "0b1b83e9d816fe16f29f5fa6f4deea55974798222759af0284d84530c8f37d5e",
+      "bytes": 15085
+    },
+    {
+      "path": "src/cmd/pipelang-native-cpp/float64_test.go",
+      "sha256": "78a8a616e61f926cce59d4c60a55f40107776068d600aaa2f50a8148b4e284e6",
+      "bytes": 24203
+    },
+    {
+      "path": "src/cmd/pipelang-native-cpp/main.go",
+      "sha256": "6327bc152ead6013cdae57e277027fc00740435a7e97569e30057d6237dfe87f",
+      "bytes": 11692
+    },
+    {
+      "path": "src/cmd/pipelang-native-cpp/main_test.go",
+      "sha256": "a35c872af443a01ef8097a5f9087dd676e60018b979f797f880f45be7c747ed8",
+      "bytes": 1786
+    },
+    {
+      "path": "src/cmd/pipelang-streamc/main.go",
+      "sha256": "68553dd9c340f77fa16a403a288a52735fc4ac8cfab61604acd2c8756c4a489c",
+      "bytes": 4526
+    },
+    {
+      "path": "src/cmd/pipelang-streamc/main_test.go",
+      "sha256": "fc128562eaf13e55264ea2442196df9bf3db2fce9816ee2565aa33a395fd825e",
+      "bytes": 3972
+    },
+    {
+      "path": "src/cmd/pipelang-viewc/actions_test.go",
+      "sha256": "f4284bd688e690a1c923bd1a82ff07b8ef604c0f25d9b3836838ead95214addc",
+      "bytes": 7580
+    },
+    {
+      "path": "src/cmd/pipelang-viewc/diagnostics_json_test.go",
+      "sha256": "4720df82e23537bdaa7e35433d8dee59445462da45deb9bd1904be16d8c30cf7",
+      "bytes": 11824
+    },
+    {
+      "path": "src/cmd/pipelang-viewc/main.go",
+      "sha256": "589de43968f312c82abad386a0d6a0b26c19c859efbf8658dbe6a3e329b4c3eb",
+      "bytes": 13404
+    },
+    {
+      "path": "src/cmd/pipelang-viewc/main_test.go",
+      "sha256": "0f7da0e2fc09c44c188c3358c25d3ce69f615edc504607135d95be80246de566",
+      "bytes": 8853
+    },
+    {
+      "path": "src/cmd/pipelang-viewc/markup_cli_test.go",
+      "sha256": "6ad912ff3ed87164de8ef4fdfcbf3068e9be16df8927bb05bf3bc9a9bad02967",
+      "bytes": 10360
+    },
+    {
+      "path": "src/cmd/pipelang-viewc/markup_diagnostics_test.go",
+      "sha256": "4b987f7bbb9d12a45af2754fd6cda87c21210333e70d8fe93050d163f9d4587a",
+      "bytes": 1750
+    },
+    {
+      "path": "src/cmd/pipelang-viewc/model_header.go",
+      "sha256": "d8dd3e3f4475d01e2ddc1d99cf51ba71b5f3f303ec5fa1a4aae4fb1db0fff58a",
+      "bytes": 3038
+    },
+    {
+      "path": "src/cmd/pipelang-viewc/parser_test.go",
+      "sha256": "642382de79931b8aa8caaa5e8a95b88c04eddfd43563a0c1bee51153bba21e64",
+      "bytes": 3711
+    },
+    {
+      "path": "src/lib/application/capture_test.go",
+      "sha256": "281062735c51f2d1d62cde3eee3265b45c311ba127a1e2f3899350b23a76c0b8",
+      "bytes": 782
+    },
+    {
+      "path": "src/lib/application/internal/operation/operation.go",
+      "sha256": "3bce7cb5255ceda5ee52deb86c2a6620378180be7fce755a2aff497062548c8a",
+      "bytes": 2365
+    },
+    {
+      "path": "src/lib/application/internal/sourceconfig/config.go",
+      "sha256": "b227891ccc333c2029ba900dffafe35e5974eed1a6d0a1a225c354cce359e965",
+      "bytes": 1066
+    },
+    {
+      "path": "src/lib/application/pipelang_cmd.go",
+      "sha256": "18c545a1900d8e31340898bcc528b760c91bd70a7569364cac180dd5a572b98d",
+      "bytes": 12347
+    },
+    {
+      "path": "src/lib/application/pipelang_cmd_test.go",
+      "sha256": "04a7f461960957e2e56566f9e0f6351e36841336f46ba20f97d72b6447757bc2",
+      "bytes": 10269
+    },
+    {
+      "path": "src/lib/application/pipelang_materialize.go",
+      "sha256": "7a24fa1eca06aad29106756974172f9f096b517a0f8c9b655d6016892106f578",
+      "bytes": 644
+    },
+    {
+      "path": "src/lib/application/pipelang_materialize_test.go",
+      "sha256": "3abd1452ae90805f0226891445e4576ddf22838625ce9f3ef3db4c7f1dfa8075",
+      "bytes": 4553
+    },
+    {
+      "path": "src/lib/applicationir/adversarial_review_test.go",
+      "sha256": "ecf019cea7722887ed874e09d1c4daac9a1c07dca9d2c828a97f9ae40e20bcaf",
+      "bytes": 8228
+    },
+    {
+      "path": "src/lib/applicationir/application.go",
+      "sha256": "59fb8161ffac7d194043f4f73966e215c31c3b10c14cb195f938e1176d938aca",
+      "bytes": 22758
+    },
+    {
+      "path": "src/lib/applicationir/application_test.go",
+      "sha256": "6fa2b937cb00d8830f2514ad38ee52b7f7aaf02c118532d11df5fa6aad21f77c",
+      "bytes": 34678
+    },
+    {
+      "path": "src/lib/applicationir/assignment_test.go",
+      "sha256": "29c1556e8e27a587da479e4d9f5048eb2c5cfdd617d56e337f8034cb5a62aba1",
+      "bytes": 4378
+    },
+    {
+      "path": "src/lib/applicationir/blocks_test.go",
+      "sha256": "707494a914ae81c3550fb13bbad2b9f68a94c8549fc4abd5dc6498f3f5e58486",
+      "bytes": 4276
+    },
+    {
+      "path": "src/lib/applicationir/checked_chain_inheritance_test.go",
+      "sha256": "f141d84abeb53024ec1db561602f69c5f409ce2bef8eeb1b224e0aeaa4a6003b",
+      "bytes": 7966
+    },
+    {
+      "path": "src/lib/applicationir/checked_propagation_inheritance_test.go",
+      "sha256": "2fd1e328b73f42489cf5fcb4281ee80ae69298cdaa2ac08feb06434a183bc48b",
+      "bytes": 5162
+    },
+    {
+      "path": "src/lib/applicationir/conditional_local_tree_test.go",
+      "sha256": "126deeaa81301b16ab5f1d8d948b8db8f3d7af849d04f59bd87116d87cac43cf",
+      "bytes": 4635
+    },
+    {
+      "path": "src/lib/applicationir/enums_test.go",
+      "sha256": "f37a053b7e875082062fa3fddb079e7b787dc01fc90b815b9161e177237d653c",
+      "bytes": 4321
+    },
+    {
+      "path": "src/lib/applicationir/numeric_comparison_test.go",
+      "sha256": "3832151f5a7924d10fe2d8ea62d7d38e9b9c72dc8d805e26ceac83bb5ac27921",
+      "bytes": 4456
+    },
+    {
+      "path": "src/lib/applicationir/terminal_tree_test.go",
+      "sha256": "aadd27489980005c6ca03f7a5866cfe1d876c08ffed0a5b72016b2245e9dc042",
+      "bytes": 4343
+    },
+    {
+      "path": "src/lib/applicationir/two_conditional_locals_test.go",
+      "sha256": "688cc9f1f0f7b15a60bccf51bb69dfa47096e5d56eac1a5d5682a48bda8d352c",
+      "bytes": 35257
+    },
+    {
+      "path": "src/lib/pipelang/adversarial_review_test.go",
+      "sha256": "3943cb263407aa653c2b275dd36bc654831ef0789dce158322c33ed101422594",
+      "bytes": 13429
+    },
+    {
+      "path": "src/lib/pipelang/analysis.go",
+      "sha256": "9f340446bce338ea0e37c73e0fb8cfbbe06c2e7c19616c43cacbade5904fc702",
+      "bytes": 2853
+    },
+    {
+      "path": "src/lib/pipelang/argument_frame_test.go",
+      "sha256": "ca860eee08261ac8197cb8090103a62fdae02f56a93d9ee8e4fc6e891c5f7ed1",
+      "bytes": 1909
+    },
+    {
+      "path": "src/lib/pipelang/argument_validation_test.go",
+      "sha256": "aca3b4cebad3e0efd806dedc6949898988a61173f8e85b63814f9f049ab99228",
+      "bytes": 14079
+    },
+    {
+      "path": "src/lib/pipelang/arrow_boolean_selectors_memory_test.go",
+      "sha256": "90398862111cb3044256c6565bfe098f03045e6ad5e706aa476a43d64e856674",
+      "bytes": 6432
+    },
+    {
+      "path": "src/lib/pipelang/arrow_boolean_selectors_test.go",
+      "sha256": "7e90f586cb4bb68fe74cc5ec1c5f861b75c7ba8b942ef28b09430061cc94bec7",
+      "bytes": 22942
+    },
+    {
+      "path": "src/lib/pipelang/arrow_selector_value_arms_memory_test.go",
+      "sha256": "a0ce24ba12dfaf969613d7759f0110f0f6125002353d61d0e5626d96cd9eab8a",
+      "bytes": 6882
+    },
+    {
+      "path": "src/lib/pipelang/arrow_selector_value_arms_test.go",
+      "sha256": "3fb8af570c607edf0a5e1543a229d13ba60fdfcab6b11324670f0bfcbffc8b0f",
+      "bytes": 27912
+    },
+    {
+      "path": "src/lib/pipelang/assignment.go",
+      "sha256": "58349b58f0976d7a70cdb3625cd7c7a3612d3c94ab91bb4c790e4d5c6bb76c11",
+      "bytes": 5204
+    },
+    {
+      "path": "src/lib/pipelang/assignment_composition_test.go",
+      "sha256": "f4f9be7632f3b22553087eb4313c6b440fc81150adfbe695814cca9a646c152e",
+      "bytes": 6786
+    },
+    {
+      "path": "src/lib/pipelang/assignment_memory_test.go",
+      "sha256": "adaa6bd2dc43c3c7bbcb7b8bc150fc46d40000d24da1d7ca82118f6b1a232a73",
+      "bytes": 4669
+    },
+    {
+      "path": "src/lib/pipelang/assignment_test.go",
+      "sha256": "5f9f1cb3044b53d1c3c68440fede06e459f4a6560639bf030a8c42f7473a5134",
+      "bytes": 7040
+    },
+    {
+      "path": "src/lib/pipelang/ast.go",
+      "sha256": "29ebe92ffc3cf3e898947cff26885e4f3a9a29f956d8c7f434effde3d80a4601",
+      "bytes": 76653
+    },
+    {
+      "path": "src/lib/pipelang/block_propagation_test.go",
+      "sha256": "51be7eaecc3dfc32cf59d70455acc60776a4595d9bac6566b9100bb94a361b59",
+      "bytes": 13574
+    },
+    {
+      "path": "src/lib/pipelang/blocks.go",
+      "sha256": "2fdc4e02550164bde84d32d7f28c01b797719056f023146a6135ef0d9b28886a",
+      "bytes": 7279
+    },
+    {
+      "path": "src/lib/pipelang/blocks_lowering.go",
+      "sha256": "f04a1ae0caaae2ef466a3f6da45a5aaa18b9427c8ee9d2d3e7752f7deae8f84f",
+      "bytes": 4094
+    },
+    {
+      "path": "src/lib/pipelang/blocks_memory_test.go",
+      "sha256": "ff670ee5170d967a442ffbc71b5c09995bd091254cdced339f87021f5bb6f1f0",
+      "bytes": 4404
+    },
+    {
+      "path": "src/lib/pipelang/blocks_test.go",
+      "sha256": "166fe5e55bd72db87b82870b41b6c9933ee59bffc007c205c4902bf7909009f1",
+      "bytes": 10224
+    },
+    {
+      "path": "src/lib/pipelang/bounded_depth_three_terminal_test.go",
+      "sha256": "e22fa2cd369c385a5699a23ea93f738e232ff93e8b95184a70729d96b5f38d33",
+      "bytes": 16328
+    },
+    {
+      "path": "src/lib/pipelang/bounded_propagation_test.go",
+      "sha256": "7c9d8dc4e63f7e5ea27e3c66f66c834ef0e4b75caf57c328fc8e122bd851b82c",
+      "bytes": 5277
+    },
+    {
+      "path": "src/lib/pipelang/bounded_two_carrier_matches_test.go",
+      "sha256": "c279200bb732dec2b381a83e90cba8137d37a912114e28b86437d7c658440fb7",
+      "bytes": 20924
+    },
+    {
+      "path": "src/lib/pipelang/checked_arithmetic_helper_match_local_test.go",
+      "sha256": "df958c5bf00fbcce1311857ab56c745754aa313f2237666fe43f927ed906d81b",
+      "bytes": 13637
+    },
+    {
+      "path": "src/lib/pipelang/checked_arithmetic_helper_propagation_test.go",
+      "sha256": "d9842b944d52289e496e74f2da0ddbaa82788b81b6a6b885978afc09aa1adc39",
+      "bytes": 20311
+    },
+    {
+      "path": "src/lib/pipelang/checked_chain_inheritance_test.go",
+      "sha256": "e953f201ba6110abbffd5e22682611c3dcf34386f656fd8b52960dd0d4ee947a",
+      "bytes": 18575
+    },
+    {
+      "path": "src/lib/pipelang/checked_propagation_chain_test.go",
+      "sha256": "8efbccc6a2f1ea82862687b8c25350f72f0e96bc161bfbe9d45f4e1de1db7aaf",
+      "bytes": 18827
+    },
+    {
+      "path": "src/lib/pipelang/checked_propagation_inheritance_test.go",
+      "sha256": "f7e9c46d8fb356227a18b5e099a50aeaada8e8e674fa250221b9382251e6e4c7",
+      "bytes": 13312
+    },
+    {
+      "path": "src/lib/pipelang/compile.go",
+      "sha256": "ceba4a8dc7f998f5482ee8a695aabe945b21218e32d55e0602ff8ed247b1d681",
+      "bytes": 10504
+    },
+    {
+      "path": "src/lib/pipelang/compiler_golden_test.go",
+      "sha256": "859628d925e1a033a5a5242f4e42bd3c05c84035864875e66ca056b6ce922d8d",
+      "bytes": 2373
+    },
+    {
+      "path": "src/lib/pipelang/compiler_memory_test.go",
+      "sha256": "4228ce03fe3fe9e6f0e19019e3c770e97d6a69a396174924362052f2a64a39a4",
+      "bytes": 16286
+    },
+    {
+      "path": "src/lib/pipelang/conditional_boolean_selectors_memory_test.go",
+      "sha256": "d3cc80aadd5cebe1fdf7f8564d6434aeea768728c2c683a555688eed406d5fc7",
+      "bytes": 6296
+    },
+    {
+      "path": "src/lib/pipelang/conditional_boolean_selectors_test.go",
+      "sha256": "49f8cdd227aa1b388918301ca5444beb1effc21b4a5945acfa36d4afea458ec4",
+      "bytes": 20093
+    },
+    {
+      "path": "src/lib/pipelang/conditional_expression_test.go",
+      "sha256": "0b9b6cc5c91eb5aeda299193fde8589c0225644a32a8b1018739c7a7746833bc",
+      "bytes": 9261
+    },
+    {
+      "path": "src/lib/pipelang/conditional_local_tree_test.go",
+      "sha256": "fde63eedba0c142a5d22f84cc5caad957bf685db867e8f4c8a231ddd2e3de030",
+      "bytes": 22745
+    },
+    {
+      "path": "src/lib/pipelang/conditional_return_composition_test.go",
+      "sha256": "5941334b2bb3ea8fb86652352900ec4eb9a7ed1a6d030b56795f52a904820f6b",
+      "bytes": 11466
+    },
+    {
+      "path": "src/lib/pipelang/conformance_performance_test.go",
+      "sha256": "d471d032c1ab0524c92cbb6a0704c2f82ca68ada52d7533563baf9df189b858b",
+      "bytes": 3768
+    },
+    {
+      "path": "src/lib/pipelang/contextual_cross_payload_result_propagation_test.go",
+      "sha256": "74adf916da72b163d769c2bf0bf4708d49c0d0881155128a2ab2f5e9c28fc791",
+      "bytes": 20299
+    },
+    {
+      "path": "src/lib/pipelang/core_admission_test.go",
+      "sha256": "d66301ac5b00c6686b01b316a7e4d65dee35f7049ea22c0fc7c92e4b3e13a8f4",
+      "bytes": 9033
+    },
+    {
+      "path": "src/lib/pipelang/core_type_validation_test.go",
+      "sha256": "3cb9f497fb75c54f357d660acd83f3473854e5eaabbcb77b31930ecf69bfa743",
+      "bytes": 12780
+    },
+    {
+      "path": "src/lib/pipelang/coreeval/arguments.go",
+      "sha256": "a5bd8ca22d75a7c17b56877f712aed07536ca86f739cb9f671be0ee426c1d6e3",
+      "bytes": 780
+    },
+    {
+      "path": "src/lib/pipelang/coreeval/arguments_test.go",
+      "sha256": "1a879c5c8c905406c132f44446a8f4ffa2ce5b1fc19d8deaf11403f2e4b66a8a",
+      "bytes": 1989
+    },
+    {
+      "path": "src/lib/pipelang/coreeval/blocks.go",
+      "sha256": "c7e2c67cf472b490d10d6d3a656d27aa2e0d72e92385e4352ccbf839b58297e9",
+      "bytes": 1852
+    },
+    {
+      "path": "src/lib/pipelang/coreeval/evaluate.go",
+      "sha256": "9c7eea7579cfed8765c74a308db99a0be3e93638e294e02bd2e84e3ca78e1359",
+      "bytes": 46849
+    },
+    {
+      "path": "src/lib/pipelang/coreeval/prepared.go",
+      "sha256": "f68e6af622fd6fb197389913b1c6249ee0132241c901871f6cd0827309ba043f",
+      "bytes": 4176
+    },
+    {
+      "path": "src/lib/pipelang/coreeval/prepared_test.go",
+      "sha256": "cb6ae816bffc317bcdb7a18878221d943889da9efea9127f9e64557d3351939e",
+      "bytes": 1209
+    },
+    {
+      "path": "src/lib/pipelang/coreir/admission.go",
+      "sha256": "90b2c8dfb906e74e38498a2829167e0f4567cd38443d7f7a07b05ff08590d7ed",
+      "bytes": 8078
+    },
+    {
+      "path": "src/lib/pipelang/coreir/blocks.go",
+      "sha256": "9fbbcea509742fba8a53e99198e5e54695ea256065231e16338a23c3ec41e485",
+      "bytes": 8071
+    },
+    {
+      "path": "src/lib/pipelang/coreir/casefold.go",
+      "sha256": "57e77571e53836c61f6f630a2243efcc8cdb7045e9a3d135946deaf962a5d59d",
+      "bytes": 5323
+    },
+    {
+      "path": "src/lib/pipelang/coreir/core.go",
+      "sha256": "78bb691319dcf48f12af25c5c15432c4f8700cf6c3d826a30605a5626e6484f9",
+      "bytes": 20305
+    },
+    {
+      "path": "src/lib/pipelang/coreir/enums.go",
+      "sha256": "52640c1dc7a8e188a4c7dbab3d4cb84d9246f8b949fa4874e893a2b2935b9410",
+      "bytes": 6735
+    },
+    {
+      "path": "src/lib/pipelang/coreir/semantics.go",
+      "sha256": "5e242f4fd1e7329e5cc61a6b695e492325f83f6351a97ff02af12d3af23ea87f",
+      "bytes": 309797
+    },
+    {
+      "path": "src/lib/pipelang/coreir/semantics_test.go",
+      "sha256": "e2d2a25667c2acf3ef899c2c8c62c8338476a8bfbbb5a9126f03e3002ad503ee",
+      "bytes": 1957
+    },
+    {
+      "path": "src/lib/pipelang/coreir/trim.go",
+      "sha256": "0ad77508ee1b9019fd50ab6fb50638d5d604c3ed7f9093179e3763f9eb3e2288",
+      "bytes": 1810
+    },
+    {
+      "path": "src/lib/pipelang/cpp_pilot_test.go",
+      "sha256": "2a94565d9d5d5cf3cce6df259ce0164d28addf00616d1e5c688cefad0491b19f",
+      "bytes": 26107
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_calls.go",
+      "sha256": "436190281feed0733d3a96759e9598075d6bb58ebf55ee3e0050c23eda05260f",
+      "bytes": 3150
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_calls_boundary_test.go",
+      "sha256": "e33bdd9da5c2b4c832e3ac40073eb76a42b9d13dbf726d2627ce1affe0c3de53",
+      "bytes": 8487
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_calls_test.go",
+      "sha256": "472af6fd158612897bb583ac3e521a8b28b4e49a5baf993de61b21d0c3a39d0a",
+      "bytes": 7452
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_conditional_native_test.go",
+      "sha256": "e55ac625a0a4826629c67f54981d3e04b7e7a1e5fdb4d114e140ceb21dc77bd7",
+      "bytes": 9681
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_conditional_test.go",
+      "sha256": "729980ef2702ceb9d0a6ddbca9b9d9d9c68bcef5da2a0d2fe7c13c12a334a043",
+      "bytes": 9360
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_generate.go",
+      "sha256": "7243778784eadf88f9bc724a58ce6e00b9058f735cf86d8e18fd56052b0645e4",
+      "bytes": 4781
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_native_test.go",
+      "sha256": "701d23bcffc2abf4ea1e86a167711b5294ca4a1093fd7203af18e3069d947318",
+      "bytes": 11217
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_projection.go",
+      "sha256": "fdc7b2f69aeeb22d0b57b02c4d3ccbec1234fb3f70110a16339d8ec7570371db",
+      "bytes": 12846
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_protocol.go",
+      "sha256": "3b7271649324acf44ecb3864d58c18576d62767c00258986f9cea53c9959b5e8",
+      "bytes": 6470
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/float64_test.go",
+      "sha256": "989178089b0acf4ae61931e3cacc6c85fdaa260544445bb64afede16775a74fb",
+      "bytes": 7392
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/generate.go",
+      "sha256": "67d0fb35d043a3778bd643e8854e5a9b409fd4a44456c4e6f4f092b109a7b914",
+      "bytes": 17014
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/native.go",
+      "sha256": "83732673ed634039f54cf1988928e12d354e182376948a187c0339d21d372645",
+      "bytes": 3605
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/native_test.go",
+      "sha256": "c24529f6d5caaa16225163e6192015c6a0a1ced0c40c3919d485ca2fca540e6a",
+      "bytes": 536
+    },
+    {
+      "path": "src/lib/pipelang/cppbackend/profile.go",
+      "sha256": "f325267b8aa9f09b60df5086d54ef5c95c939a582742fb37ea6add490416be4c",
+      "bytes": 2610
+    },
+    {
+      "path": "src/lib/pipelang/cross_payload_result_propagation_test.go",
+      "sha256": "d8f4f98a2e6eea24f01e2336183cb198fd8bf12ce21c1a3a19a0c5196d20ac6b",
+      "bytes": 13226
+    },
+    {
+      "path": "src/lib/pipelang/cumulative_fan_in_chain_test.go",
+      "sha256": "08fe8cbe3db034dc50380b7509e38e57245057ec35b14eae4ec7256d1259d40c",
+      "bytes": 10032
+    },
+    {
+      "path": "src/lib/pipelang/dependent_carrier_chain_test.go",
+      "sha256": "58cf0d1a2ee7c8f212f22751bd40ff3dc2c2aafd334795578368d64b333d29df",
+      "bytes": 12841
+    },
+    {
+      "path": "src/lib/pipelang/dependent_second_carrier_match_test.go",
+      "sha256": "4424420fdf3d71c0bdbec6e100dd74741990d3f1ca4600a00dd88f966758bf37",
+      "bytes": 20319
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_arrow_memory_test.go",
+      "sha256": "d12ed8201a09682c2311b7ceb58987701a551e8cafb86ae0f4bc1fdde9671c65",
+      "bytes": 6381
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_arrow_methods_test.go",
+      "sha256": "8747a92f26afd99cbb2fc3c628e6ff3807af016320aac2467f25e40aa893797e",
+      "bytes": 14832
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_initializers_memory_test.go",
+      "sha256": "ffb2473c75177d7dcbc7d901584ce173bb65e0ed08efe0e7946c1d425150f687",
+      "bytes": 6090
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_returns_memory_test.go",
+      "sha256": "4a3b2285b172f1974f1cdb343204b4f177cfae2a9350da30fdca7e7990bc53bd",
+      "bytes": 6270
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_straight_line_initializers_test.go",
+      "sha256": "8ef694a02f374077831d061209e9abad652be0ce87b73d9759d6191a8a129e26",
+      "bytes": 18775
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_straight_line_returns_test.go",
+      "sha256": "df5b60295000177e3ea7f24920b1c9c48632a2a6a14561b08826f09fca2df793",
+      "bytes": 17689
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_terminal_conditional_tests_memory_test.go",
+      "sha256": "a010210709dd0603b81b7e691f38c988df5cd6a1df48e21acdaa194827792b31",
+      "bytes": 7630
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_terminal_conditional_tests_test.go",
+      "sha256": "1d91a1ac75220e921b22e5a2b68e605939e2b9167d182326160c329d5e70c493",
+      "bytes": 36699
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_terminal_initializers_memory_test.go",
+      "sha256": "a0c36a87c6f6df8e7ebad9d207b0d90853f036df9b56d7abfb078f9f0a2b6656",
+      "bytes": 7520
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_terminal_initializers_test.go",
+      "sha256": "7f61e4cabab4341752c4ec92650870d268e9d49ba02471a94a851f6b7c0fbab9",
+      "bytes": 30090
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_terminal_leaf_memory_test.go",
+      "sha256": "023ee67a3ab08f56aa09dab7217093e8fa9d0a40803978b09a3082dca8755484",
+      "bytes": 6825
+    },
+    {
+      "path": "src/lib/pipelang/depth_three_terminal_leaf_returns_test.go",
+      "sha256": "a60c565bd10dfba26c525ceb516b84414fd2a82ebd539993ea0290e127809a95",
+      "bytes": 28206
+    },
+    {
+      "path": "src/lib/pipelang/diagnostic.go",
+      "sha256": "56816847794538f9c467fafd02b2a2440ef09d16512379091ae46126b827d1ed",
+      "bytes": 8751
+    },
+    {
+      "path": "src/lib/pipelang/diagnostic_test.go",
+      "sha256": "2bde1d1caa6bedd2fc2d3421207910d12a08c62806216e343b2b603c3d4a3be9",
+      "bytes": 4916
+    },
+    {
+      "path": "src/lib/pipelang/direct_checked_arithmetic_propagation_test.go",
+      "sha256": "0b0038f66cf9b2e0b235a61ccd268166f341cb6498bb285cd618c0d03a6c2e62",
+      "bytes": 16726
+    },
+    {
+      "path": "src/lib/pipelang/enums.go",
+      "sha256": "2528862ea39e5af36bcbdd9207ecbc86cb1ec8d7f9af02171012e2bbfaed1850",
+      "bytes": 12194
+    },
+    {
+      "path": "src/lib/pipelang/enums_memory_test.go",
+      "sha256": "d7260237ecdf77e5c6e9cb60f75bf3868f58c9c73996af75a3b4968968d85ca0",
+      "bytes": 6036
+    },
+    {
+      "path": "src/lib/pipelang/enums_test.go",
+      "sha256": "b860236cb617dddcfccec57ed728e50fa4b395f66779e38a78af520030debb53",
+      "bytes": 23525
+    },
+    {
+      "path": "src/lib/pipelang/eval.go",
+      "sha256": "d13ac2b6a2723d5322ec0207d052e2d69cb6448ffd2a821b0bf02ceafa96b1c9",
+      "bytes": 4525
+    },
+    {
+      "path": "src/lib/pipelang/exhaustive_match_test.go",
+      "sha256": "823df0b09316a6cfabed9f9f715f80fa74a2d6e3840c988252fc671162ff2fdc",
+      "bytes": 4917
+    },
+    {
+      "path": "src/lib/pipelang/finite_binary_oracle_test.go",
+      "sha256": "b7275b6c1e209ee40d576a94f8da94186599c4e68b056918e08552699ad7af59",
+      "bytes": 803
+    },
+    {
+      "path": "src/lib/pipelang/finite_conditional_locals_test.go",
+      "sha256": "3af1225d0a23d21f4bdbad4b5b2bf6bc23e7843fdee4f3191a047814aac02dfe",
+      "bytes": 24128
+    },
+    {
+      "path": "src/lib/pipelang/finite_shared_oracle_test.go",
+      "sha256": "9b595ac79a8f9ee955165c82ad774933226b029e25f728ed21c484001ab89d60",
+      "bytes": 3545
+    },
+    {
+      "path": "src/lib/pipelang/general_helper_carrier_match_test.go",
+      "sha256": "222dd7cf90afb4380ab3d8316bffd37b120d7515dc432ff35cfcb658b981ca78",
+      "bytes": 14347
+    },
+    {
+      "path": "src/lib/pipelang/generalized_contextual_bounded_result_propagation_test.go",
+      "sha256": "a4da1d6bb99ab753b8f045af9a76d2ebbb60347ca41e4129b78a774631caa4ed",
+      "bytes": 14513
+    },
+    {
+      "path": "src/lib/pipelang/generalized_cross_payload_result_propagation_test.go",
+      "sha256": "3f7f14856137d83dd4e707b7512241322db949118d5685d7bf5baffaf7866aba",
+      "bytes": 18462
+    },
+    {
+      "path": "src/lib/pipelang/generalized_one_stage_shared_context_result_propagation_test.go",
+      "sha256": "a3bc911b375c20a723a284dec3f0c949531225041104fd0710a44ef9f218c0f7",
+      "bytes": 12840
+    },
+    {
+      "path": "src/lib/pipelang/generalized_shared_context_result_propagation_test.go",
+      "sha256": "78791381f76adb4221c9702f3bc77d2a619b01395943a0ba98b72491aaac343b",
+      "bytes": 13678
+    },
+    {
+      "path": "src/lib/pipelang/generated_artifact_test.go",
+      "sha256": "40a773ea522f5624d483079f5e27e7c6aeb2d7efce6f8b2b82f8ea8776ab7d96",
+      "bytes": 6953
+    },
+    {
+      "path": "src/lib/pipelang/generated_batch_test.go",
+      "sha256": "e202aec0342f8fd327682ff855792d10506154d9498b0fa1599b98b35f6c31a6",
+      "bytes": 14386
+    },
+    {
+      "path": "src/lib/pipelang/generated_budget_test.go",
+      "sha256": "33c86547c21091dbba7bdb5e5480f5300bb2a0b844d5d218358db0daa002ff48",
+      "bytes": 1654
+    },
+    {
+      "path": "src/lib/pipelang/generated_bundle_test.go",
+      "sha256": "057a0005dab9e65f1e5f5bad9ca83477ec64f991ec71fc9e26b157a8719b7a96",
+      "bytes": 7800
+    },
+    {
+      "path": "src/lib/pipelang/generated_cache_test.go",
+      "sha256": "7365b28f55351880f02fb3468462cfe0f942fb0bc5db9e2c3678264e3eaa346e",
+      "bytes": 9023
+    },
+    {
+      "path": "src/lib/pipelang/generated_lock_linux_test.go",
+      "sha256": "0ee632850999f060937f26620449f0f189072944fa4e97b6ddbe48e987c25835",
+      "bytes": 1136
+    },
+    {
+      "path": "src/lib/pipelang/generated_lock_other_test.go",
+      "sha256": "f171f8679f5510d307050fa44b8d0b834e65703566783d9a6319f00217bce5b8",
+      "bytes": 212
+    },
+    {
+      "path": "src/lib/pipelang/generated_preparation_test.go",
+      "sha256": "cbd921f94188c076888e8141a8a8afdb88a5e023855a64c315027c373ffb43d8",
+      "bytes": 5067
+    },
+    {
+      "path": "src/lib/pipelang/generated_seal_linux_test.go",
+      "sha256": "707fe4dc7254f41c549444800087b98d7a6f096801964b59017a37712daf53fc",
+      "bytes": 1926
+    },
+    {
+      "path": "src/lib/pipelang/generated_seal_other_test.go",
+      "sha256": "c08fde4cd6b3d40383a32bc0beda14293b7b4596266e184083eb72e539188e77",
+      "bytes": 221
+    },
+    {
+      "path": "src/lib/pipelang/generated_shared_experiment_test.go",
+      "sha256": "e02f8545fa3351c3e6dab3c00c371c46a1d23e77e0458e1d7e7479cdccd3361b",
+      "bytes": 1741
+    },
+    {
+      "path": "src/lib/pipelang/generated_timing_test.go",
+      "sha256": "96b983188b4cf99eca93240affdafdc310bd4168abfdbdfd33aefb8741d51d0d",
+      "bytes": 1202
+    },
+    {
+      "path": "src/lib/pipelang/generated_transport_linux_test.go",
+      "sha256": "e05c1b10749ab1ac99128190c4390ffc9ab4822d9a12185954d5d1dffa0508f3",
+      "bytes": 5380
+    },
+    {
+      "path": "src/lib/pipelang/generated_transport_other_test.go",
+      "sha256": "172d1334016afe9b0b781cc830fba45aa41432d293ac581ca3118d57ab8ec6b4",
+      "bytes": 142
+    },
+    {
+      "path": "src/lib/pipelang/go_namespace_test.go",
+      "sha256": "fe0755ccff8e0b8e3bb34cb49c3c47698b2c59ef5da782ec48a497f1127f35bc",
+      "bytes": 8246
+    },
+    {
+      "path": "src/lib/pipelang/gobackend/blocks.go",
+      "sha256": "e7797764821c13d78ddcf03de58ac3a122c782fb4043e2ff8d7ae815ed848bde",
+      "bytes": 1560
+    },
+    {
+      "path": "src/lib/pipelang/gobackend/enums.go",
+      "sha256": "e9c107c97b285755063ff161450fbf2790d9751f168655e7ef7316627f921d6b",
+      "bytes": 1619
+    },
+    {
+      "path": "src/lib/pipelang/gobackend/generate.go",
+      "sha256": "4e87028c153af0d20375f5e3d814a6d067e694ca49cbd1d496aaba4dbbef378a",
+      "bytes": 107274
+    },
+    {
+      "path": "src/lib/pipelang/gobackend/names.go",
+      "sha256": "cb84fb04c20e34bd7cd6bff0637bfcd9798f4b8c5349853c4bb59b5ab46e3779",
+      "bytes": 6173
+    },
+    {
+      "path": "src/lib/pipelang/gobackend/names_test.go",
+      "sha256": "0eda1e882996160f44a81b4532b6881e547c8ef10b2dde16369947117dc3fe7c",
+      "bytes": 1164
+    },
+    {
+      "path": "src/lib/pipelang/helper_carrier_match_local_test.go",
+      "sha256": "3e2fc8e99ab21142b07fb48d6d699a07825dd28088db1855a19f6797aaaac222",
+      "bytes": 16084
+    },
+    {
+      "path": "src/lib/pipelang/helper_result_match_test.go",
+      "sha256": "56d12fcd64ccb5c483e23b48cb1b2916c38927303a39f11faba8868e983d288a",
+      "bytes": 9717
+    },
+    {
+      "path": "src/lib/pipelang/hir/blocks.go",
+      "sha256": "442041896ef759125b60269bd1bf297e04edaebe9caabdc7a75e305c4ef497aa",
+      "bytes": 585
+    },
+    {
+      "path": "src/lib/pipelang/hir/hir.go",
+      "sha256": "5e323f4161ea3871dc1b470952fb4efd91376f571c10764072319530f0aad9cc",
+      "bytes": 17151
+    },
+    {
+      "path": "src/lib/pipelang/hir_dependency_graph_test.go",
+      "sha256": "900db49e97d1e52a0e7fa607cda41fabae72cba6652e264a51482423834cdd09",
+      "bytes": 7099
+    },
+    {
+      "path": "src/lib/pipelang/hir_lowering.go",
+      "sha256": "79b4b163ea0f0684aa621108109115f328063e67f7bef59661a311e1241e09b3",
+      "bytes": 147085
+    },
+    {
+      "path": "src/lib/pipelang/hir_pipeline_test.go",
+      "sha256": "6e6f51883004f24218756362f4131fbf3525eb2a0ffd5d1642279accbdb64910",
+      "bytes": 83317
+    },
+    {
+      "path": "src/lib/pipelang/immutable_local_test.go",
+      "sha256": "fc0c6e8263854004b5e5fdec46b3e36630c5c4f48ed994bdd73c18b3f16ceedb",
+      "bytes": 19018
+    },
+    {
+      "path": "src/lib/pipelang/internal/nativeprocess/process.go",
+      "sha256": "3a466a6d2a3755517d79573b67cef8f9007fac9ce7dfdd8b77be01fb5cc3fa9b",
+      "bytes": 3431
+    },
+    {
+      "path": "src/lib/pipelang/internal/nativeprocess/process_test.go",
+      "sha256": "02089d39c4024deea37a0f77860b867e4f1fe06d4c7a5bc28104f69ea33055f1",
+      "bytes": 437
+    },
+    {
+      "path": "src/lib/pipelang/later_local_helper_match_test.go",
+      "sha256": "171b2e1218d6cdfbe5c6cf7dc6de817199d5160406a3fc88ee2bfa5bdd919133",
+      "bytes": 14454
+    },
+    {
+      "path": "src/lib/pipelang/lexer.go",
+      "sha256": "11ba662feef0b8e24f5d5d6e37da742f681fd5e1f99d3b8a20349684d909125b",
+      "bytes": 6927
+    },
+    {
+      "path": "src/lib/pipelang/lexical_source.go",
+      "sha256": "8c3f9157fd6121884b848701fa8e64582aff2f3b60131c0312afac9cdae60eb8",
+      "bytes": 5562
+    },
+    {
+      "path": "src/lib/pipelang/lexical_source_test.go",
+      "sha256": "5d36be7d9ff53bfed8e1cfebbc20a59a1bacffb02a98b1c0da2861ab5c075da8",
+      "bytes": 4274
+    },
+    {
+      "path": "src/lib/pipelang/module.go",
+      "sha256": "b39ae592d0d91251c2f7ba63aff1c11b4938af7a52f73304e54f010eda68004a",
+      "bytes": 83062
+    },
+    {
+      "path": "src/lib/pipelang/module_test.go",
+      "sha256": "4c632eb463d2171355c46846fc0212eed027bf18df6b8c5e819c35df998d210a",
+      "bytes": 9590
+    },
+    {
+      "path": "src/lib/pipelang/multi_parameter_direct_checked_propagation_test.go",
+      "sha256": "487aeaa502de103ddd09d3d0437b101849004b3813dd922a82b74317ef13af54",
+      "bytes": 17014
+    },
+    {
+      "path": "src/lib/pipelang/multi_parameter_helper_propagation_test.go",
+      "sha256": "1e9ebe29e14f78ebcf06cb3aa41d977f39cc86ca45c1f09f59c70483bc83d87f",
+      "bytes": 15244
+    },
+    {
+      "path": "src/lib/pipelang/native_stream.go",
+      "sha256": "c4d037285a5d3ce6202de0590483d44af4a539a03cce323534fb23b82a051b93",
+      "bytes": 7361
+    },
+    {
+      "path": "src/lib/pipelang/native_stream_composition.go",
+      "sha256": "6409d5c5f23d7d23455b70fb97f94a9e42484c1ef663e6eba68ad996df15b4d9",
+      "bytes": 9914
+    },
+    {
+      "path": "src/lib/pipelang/native_stream_composition_test.go",
+      "sha256": "50693056937ede552326ee8a0933558611a1133ae967aac59e3e0fccd34e1821",
+      "bytes": 15783
+    },
+    {
+      "path": "src/lib/pipelang/native_stream_incremental_test.go",
+      "sha256": "90c507dda944b344d9de67c271af09ac8f269976123d26df187a788bc2d56533",
+      "bytes": 10674
+    },
+    {
+      "path": "src/lib/pipelang/native_stream_runtime_test.go",
+      "sha256": "5c6c51d628f02cd7875442b7045f00bfe76d978ea41ebb5ee6066f110d8287d5",
+      "bytes": 2877
+    },
+    {
+      "path": "src/lib/pipelang/native_stream_test.go",
+      "sha256": "03c91112da9006bde5673a4395f9e5a5c26411ce676cca4aedf3c20591d9bf28",
+      "bytes": 6519
+    },
+    {
+      "path": "src/lib/pipelang/nativelexer/lexer.go",
+      "sha256": "2bfb29feb50270106c7fcde850903bcf68cac8901642c7ab1247479244e55604",
+      "bytes": 2147
+    },
+    {
+      "path": "src/lib/pipelang/nativelexer/lexer_test.go",
+      "sha256": "43cb0cd5142c188df7882608d5839e30beb85b24a2af2f18bff6f8c7a00af173",
+      "bytes": 10577
+    },
+    {
+      "path": "src/lib/pipelang/nativelexer/pipeline_test.go",
+      "sha256": "4e8aa8397df8963dfffdc3d116d14280853d04b6f2642609d9201dbf40006eb3",
+      "bytes": 12084
+    },
+    {
+      "path": "src/lib/pipelang/nativelexer/response.go",
+      "sha256": "30fe5978be7a4c2d36dc1c637186fa56310423cd6a44816e8d0b9fabe09ee574",
+      "bytes": 5438
+    },
+    {
+      "path": "src/lib/pipelang/nativelexer/response_test.go",
+      "sha256": "27346316093a24cd278dfa5f861af1e7112a2291e4dd9be931e356a3c11668d8",
+      "bytes": 2409
+    },
+    {
+      "path": "src/lib/pipelang/nativeviewparser/parser.go",
+      "sha256": "8b348c71d152044c5702df088998ce66bbb5d8b6408cf0345d2cad5ee0c4858d",
+      "bytes": 2443
+    },
+    {
+      "path": "src/lib/pipelang/nativeviewparser/parser_test.go",
+      "sha256": "73caef41cb5d2952efe98ec837530f664b176f7db65f8db65d6f31275af2b2d8",
+      "bytes": 5806
+    },
+    {
+      "path": "src/lib/pipelang/nativeviewparser/pipeline_test.go",
+      "sha256": "a2107a790812d553be8f074571d1b7bde9751bc493f04a5eedbb22b194b329b7",
+      "bytes": 1575
+    },
+    {
+      "path": "src/lib/pipelang/nativeviewparser/protocol_test.go",
+      "sha256": "8eb8abf1e250af00fd8ec7ba4042bbbf104d11e036591c5a1d38a670c9a10a26",
+      "bytes": 3916
+    },
+    {
+      "path": "src/lib/pipelang/nativeviewparser/response.go",
+      "sha256": "a629e47a2531e9422ccc87be971b03c3cc95076cd8e5ef4c5ec4003b3feb1891",
+      "bytes": 5586
+    },
+    {
+      "path": "src/lib/pipelang/nativeviewparser/response_test.go",
+      "sha256": "0d6198309d27054792d747cb270c54a65492ce74b4d38d90c4408d25d68cbd0d",
+      "bytes": 3869
+    },
+    {
+      "path": "src/lib/pipelang/nested_arrow_memory_test.go",
+      "sha256": "555b8ff914f74d2c840a7f77a69b7a00a9283cac96cb8de5c89fa0858b0990ea",
+      "bytes": 6297
+    },
+    {
+      "path": "src/lib/pipelang/nested_arrow_methods_test.go",
+      "sha256": "a87e5667aaf5eeb3d4f87e565f7e49f762cb33ae42d6616fa153ef02094d2454",
+      "bytes": 15260
+    },
+    {
+      "path": "src/lib/pipelang/nested_straight_line_initializers_test.go",
+      "sha256": "92c0ce62467f1bc251f14a40b55daff81dea867896e805002c32423b41ff2eb0",
+      "bytes": 26902
+    },
+    {
+      "path": "src/lib/pipelang/nested_straight_line_returns_test.go",
+      "sha256": "48e479539ab7f066e76f800fd333d0db29d3860710294bd43f3945ff3551acd6",
+      "bytes": 21712
+    },
+    {
+      "path": "src/lib/pipelang/nested_terminal_conditional_tests_memory_test.go",
+      "sha256": "543ffa67a3c4316cf5f5d48a6dab9a36c35fee5d3b319d82793199226a4ab7ff",
+      "bytes": 7488
+    },
+    {
+      "path": "src/lib/pipelang/nested_terminal_conditional_tests_test.go",
+      "sha256": "5db17098b19c303783b2e314c77c50d0d1a32982d68ae616e6bbdbadd3aba572",
+      "bytes": 30501
+    },
+    {
+      "path": "src/lib/pipelang/nested_terminal_if_test.go",
+      "sha256": "b61a465b4fd2a83bcdf8fbafe810103037e98b2c49508fd0e8c59c37e40d9946",
+      "bytes": 10482
+    },
+    {
+      "path": "src/lib/pipelang/nested_terminal_initializers_test.go",
+      "sha256": "2d8d9cd01172ab285c03b5f334ea9556b20852501a312aac1a30b265fb5fc8d8",
+      "bytes": 28235
+    },
+    {
+      "path": "src/lib/pipelang/nested_terminal_inner_local_test.go",
+      "sha256": "46e555aee75a5c275b6262ba22cd018d9d379701473c9981fa33213486e4087c",
+      "bytes": 11758
+    },
+    {
+      "path": "src/lib/pipelang/nested_terminal_leaf_returns_test.go",
+      "sha256": "f19d9e0d43ab79a44224f37cbc886c223c8b61fe2b2986f9d16d6e5bf6aa8b1a",
+      "bytes": 21777
+    },
+    {
+      "path": "src/lib/pipelang/numeric_comparison_test.go",
+      "sha256": "d9d89a893452847fca9aee1a0e56ed71b732b42c6d2e5fcbffea1be631b330ad",
+      "bytes": 8341
+    },
+    {
+      "path": "src/lib/pipelang/optional_defaulting_test.go",
+      "sha256": "b4702eb276aad6ac27e3c847a44beecaec451100dff3a3e19d1c477ebce8da1b",
+      "bytes": 17451
+    },
+    {
+      "path": "src/lib/pipelang/optional_record_test.go",
+      "sha256": "08ee69aabf584f09ad371c9ed13829f2b33204b817874317dd2169fb930d182a",
+      "bytes": 14517
+    },
+    {
+      "path": "src/lib/pipelang/optional_semantics_test.go",
+      "sha256": "c31a8ae9dcd3897fd217768f7d74a3a9e503127f5fa586a24132a81f69dff186",
+      "bytes": 18425
+    },
+    {
+      "path": "src/lib/pipelang/parser.go",
+      "sha256": "9c75067506301e25e443269fb8a58772b99765adbc42c6801d2d5508bb272eb3",
+      "bytes": 97045
+    },
+    {
+      "path": "src/lib/pipelang/parser_test.go",
+      "sha256": "7a9fa3819d102eb6d18c8753845201ac40443add39a84585f094a05e275e923e",
+      "bytes": 3669
+    },
+    {
+      "path": "src/lib/pipelang/prepared_evaluation_test.go",
+      "sha256": "5ac94a6642c3a368c946899d91e2d3525a2aadfce8f0fee0b161615e431626de",
+      "bytes": 7478
+    },
+    {
+      "path": "src/lib/pipelang/prior_local_carrier_match_test.go",
+      "sha256": "ea1b1b1da3dc10b6bdda586f1eff08279cbc8ea9c574c7315b93b0a72d9d8e4c",
+      "bytes": 15648
+    },
+    {
+      "path": "src/lib/pipelang/prior_local_propagation_test.go",
+      "sha256": "803ecaea6cb1cd7780cbaa8ff08c09b694e06992e3129a3822c1783753c50386",
+      "bytes": 17301
+    },
+    {
+      "path": "src/lib/pipelang/pure_call_composition_test.go",
+      "sha256": "3b47b4b851d791dca7d84cf86dbda2857510895f112e8f2eccbea158b728b401",
+      "bytes": 11661
+    },
+    {
+      "path": "src/lib/pipelang/pure_call_test.go",
+      "sha256": "702524de9b87f975b2465005d72e9d436a03394a401bb30cb68a66e513e53646",
+      "bytes": 7199
+    },
+    {
+      "path": "src/lib/pipelang/record_construction_test.go",
+      "sha256": "77a04dc7cdca980786076eef2e647e64451914c3dd90fd500471829541d5a20d",
+      "bytes": 14080
+    },
+    {
+      "path": "src/lib/pipelang/record_equality_test.go",
+      "sha256": "8352082d57e07dfee9112fc6dbd048b9ba9ff901f9f00b6834ad480d92f138a8",
+      "bytes": 16322
+    },
+    {
+      "path": "src/lib/pipelang/record_list_append_test.go",
+      "sha256": "c8e1b96069ca6ff0ed75ddfac2fc94107d6c7b645d538ab69dc0f68e450bbe8c",
+      "bytes": 14767
+    },
+    {
+      "path": "src/lib/pipelang/record_list_at_test.go",
+      "sha256": "280ad1e11401c4adfa780742458e5c3ff3e7a3706ab2472cedf368da8fa11f28",
+      "bytes": 14089
+    },
+    {
+      "path": "src/lib/pipelang/record_list_count_test.go",
+      "sha256": "a0ef5ed7b1ebbb5314c947827f7c9ed6cf0bc07852eb4a12bf3e6ab8ab4525a9",
+      "bytes": 11018
+    },
+    {
+      "path": "src/lib/pipelang/record_list_filter_by_text_test.go",
+      "sha256": "6b78d25c57d5646110692eeb140a1c8f6fda6eb2be4f0acae59b2de32d3b06a0",
+      "bytes": 17218
+    },
+    {
+      "path": "src/lib/pipelang/record_list_filter_contains_casefolded_test.go",
+      "sha256": "f1e59f7bb424b1bea806d5ad6a1f583aec56c66b8a0bd3ce175c768eb7ce9392",
+      "bytes": 19613
+    },
+    {
+      "path": "src/lib/pipelang/record_list_filter_joined_contains_casefolded_test.go",
+      "sha256": "dfec207b438751e0607e4f0046a496b6d1ce87a6ec9785c33ad1964070141863",
+      "bytes": 13554
+    },
+    {
+      "path": "src/lib/pipelang/record_list_filter_joined_variable_contains_casefolded_test.go",
+      "sha256": "898fea7635b4681a5cf3ed67aa7b921c1e09f36689603a6344d85981f58357e0",
+      "bytes": 14155
+    },
+    {
+      "path": "src/lib/pipelang/record_list_filter_predicate_test.go",
+      "sha256": "bc1719aefe0f9ad72ccd15fb024becd2c344d9927df8f3ce1b2f91aabfec6966",
+      "bytes": 10956
+    },
+    {
+      "path": "src/lib/pipelang/record_list_find_by_text_test.go",
+      "sha256": "003ae3a0193712db909f662ae578ecc4fa9a2f207260a9df2b381791b73f428c",
+      "bytes": 19248
+    },
+    {
+      "path": "src/lib/pipelang/record_list_sort_by_directions_test.go",
+      "sha256": "4690e44b0fecd29355483560dba0a2b64cdb8899b45224c8578563152c74d45a",
+      "bytes": 7594
+    },
+    {
+      "path": "src/lib/pipelang/record_list_sort_by_ordinal_test.go",
+      "sha256": "e1c5d035c1a8e9f3b213b7542011d3559f0319ae044d085d44b8605f10f68094",
+      "bytes": 11169
+    },
+    {
+      "path": "src/lib/pipelang/record_list_sort_by_ordinals_test.go",
+      "sha256": "18cb37ad49f6f05a8814f049cc7aa40e4dd52b62e96027813181314bdc560fc6",
+      "bytes": 12736
+    },
+    {
+      "path": "src/lib/pipelang/record_list_test.go",
+      "sha256": "5470719823b3ef805873b4ff7393d4eb325f8bdfdc3035d9e3c22661e18d150f",
+      "bytes": 15110
+    },
+    {
+      "path": "src/lib/pipelang/record_semantics_test.go",
+      "sha256": "ebb05b389665f26044c7a81ad4b3089198a2385fc4b53295fccb9fee479db89f",
+      "bytes": 27753
+    },
+    {
+      "path": "src/lib/pipelang/record_zero_arity_test.go",
+      "sha256": "3990886ef05a594ed5254c6abb221402972de3872ac8a162ab34355e4b92a9c7",
+      "bytes": 4102
+    },
+    {
+      "path": "src/lib/pipelang/result_call_argument_test.go",
+      "sha256": "7d404d743779ddc4772ddd4fbc377bfa8e089df83c7469bca45c577706ece4b9",
+      "bytes": 5563
+    },
+    {
+      "path": "src/lib/pipelang/root_local_nested_terminal_test.go",
+      "sha256": "dda54f160c2d4bf477baabf798689db10a1728bfa202120ac20395fe89e8ce3c",
+      "bytes": 12654
+    },
+    {
+      "path": "src/lib/pipelang/rootless_symmetric_nested_terminal_test.go",
+      "sha256": "4757ad5d038e9ad8dbd55d07cfc575f172818d28bec3901b7dccf2c173409ed8",
+      "bytes": 16353
+    },
+    {
+      "path": "src/lib/pipelang/safe_general_indexing_test.go",
+      "sha256": "1b2c0475d87929f5a3a3adf796078300306e8b3db91d8fbfca18ee0563c81efc",
+      "bytes": 6235
+    },
+    {
+      "path": "src/lib/pipelang/semantic_id.go",
+      "sha256": "522783746777f77fd2d685b35acee12d9d9b65026aec587906e8c1f4a0c5415d",
+      "bytes": 35111
+    },
+    {
+      "path": "src/lib/pipelang/semantic_id_test.go",
+      "sha256": "ff9f823e35044e5a07b356913e8f2f98dbcbe0e69ced5d2ef4dcd25c59c895de",
+      "bytes": 17146
+    },
+    {
+      "path": "src/lib/pipelang/semantic_key_encoding_test.go",
+      "sha256": "e70cabef99396289a7fac596162b2721b1fab19bd2591f28e29e48a3fda1cb23",
+      "bytes": 2677
+    },
+    {
+      "path": "src/lib/pipelang/semantic_projection.go",
+      "sha256": "feebaacced184226b582629fa19c27c575b32fbabd29be0777357c25e9a65f70",
+      "bytes": 16818
+    },
+    {
+      "path": "src/lib/pipelang/semantic_projection_test.go",
+      "sha256": "157c6d6bf3a14afc48f389822209fa12f7d7f8536449bfab3076a14022d00177",
+      "bytes": 7048
+    },
+    {
+      "path": "src/lib/pipelang/single_stage_contextual_cross_payload_result_propagation_test.go",
+      "sha256": "afecfce1eeb1e9ff778310505584a3827a6dfef615a03aab7144469772879df9",
+      "bytes": 11540
+    },
+    {
+      "path": "src/lib/pipelang/single_stage_contextual_same_payload_result_propagation_test.go",
+      "sha256": "1d42cc1b8852038248a2ca8cd62ff04a7e028cf8cb2c0527a671db66f0a5b321",
+      "bytes": 13189
+    },
+    {
+      "path": "src/lib/pipelang/snapshot_result_test.go",
+      "sha256": "0344928f3ca7c2b0d169c455ae92a8f64229ede8386de3af3516392f5b27174d",
+      "bytes": 14068
+    },
+    {
+      "path": "src/lib/pipelang/source.go",
+      "sha256": "288470bdae58f8f0a4c9d58f52f088a0b64521d0b36fcf6ad9f28f9916c44ec1",
+      "bytes": 5052
+    },
+    {
+      "path": "src/lib/pipelang/straight_line_boolean_selector_initializers_memory_test.go",
+      "sha256": "f4dda6b7a32d7b1324dd314bdbaa3079610b3598f741ab2134ccbba436a92138",
+      "bytes": 6733
+    },
+    {
+      "path": "src/lib/pipelang/straight_line_boolean_selector_initializers_test.go",
+      "sha256": "3b22f5ea92406f9d06e19e9886f63817625fc8208fd159bf878af921233649b0",
+      "bytes": 23440
+    },
+    {
+      "path": "src/lib/pipelang/straight_line_conditional_locals_test.go",
+      "sha256": "275407d059bc234cc550e544d8f476bdf6f6e97ccb76a8507a1a6e84239bef9d",
+      "bytes": 7837
+    },
+    {
+      "path": "src/lib/pipelang/straight_line_selector_value_arms_memory_test.go",
+      "sha256": "b597aa45f931aaedd3674bd12e685262805dd1ff43448c0f4fceba6b108c561b",
+      "bytes": 6857
+    },
+    {
+      "path": "src/lib/pipelang/straight_line_selector_value_arms_test.go",
+      "sha256": "6bef2cbbd8c2a01625996b2ec41a4e923898c08b4a3d2b1d9d460f94a6d4825a",
+      "bytes": 24637
+    },
+    {
+      "path": "src/lib/pipelang/streamcpp/composition.go",
+      "sha256": "d2253da8a0fb393dcaec019ca5b534024e964a3194f1e2db19248ee25f00732b",
+      "bytes": 6190
+    },
+    {
+      "path": "src/lib/pipelang/streamcpp/generate.go",
+      "sha256": "dbd1ae4786775564a0c2bcdbe22331ab7372563580e2d21492f5ed653ee03d48",
+      "bytes": 2065
+    },
+    {
+      "path": "src/lib/pipelang/streameval/evaluate.go",
+      "sha256": "26ca513d21023817678475da3a940e5cadce970363463da303174a53af3c91eb",
+      "bytes": 6646
+    },
+    {
+      "path": "src/lib/pipelang/streameval/incremental.go",
+      "sha256": "a837f9d238ffcb27c614c010b15133c5e052ff98b4979727a3674f528787b6b0",
+      "bytes": 1122
+    },
+    {
+      "path": "src/lib/pipelang/streamir/composition.go",
+      "sha256": "19871ecdfaa2bf9c224baf2ffb3f1ad261af371ac5d752da8d466334a6beb7c1",
+      "bytes": 9089
+    },
+    {
+      "path": "src/lib/pipelang/streamir/incremental.go",
+      "sha256": "0b5cb38601ba28d4ed28594f76e60a6b2fb5865212ffa1563ef213bc8858ae80",
+      "bytes": 1127
+    },
+    {
+      "path": "src/lib/pipelang/streamir/stream.go",
+      "sha256": "fcd730d7fdd39bab63ef9aff05740053243291dcc48375baa1d91e11cc823790",
+      "bytes": 4651
+    },
+    {
+      "path": "src/lib/pipelang/symbol.go",
+      "sha256": "fd39f6c73ab69db144dc337009e01b8d8dec079c3ce7ad7c51e8a5aaabfbc3a7",
+      "bytes": 11557
+    },
+    {
+      "path": "src/lib/pipelang/symmetric_nested_terminal_test.go",
+      "sha256": "bdd559a491c6968487d262d7355bf13d4214c0dccd4f138a7c5d711805e30934",
+      "bytes": 12018
+    },
+    {
+      "path": "src/lib/pipelang/terminal_boolean_selector_initializers_memory_test.go",
+      "sha256": "52669c66eedf9513fb9b0a650589e6b4057cc74543831fd29f2deaf9b72081e6",
+      "bytes": 6519
+    },
+    {
+      "path": "src/lib/pipelang/terminal_boolean_selector_initializers_test.go",
+      "sha256": "62191842aa990722e8e433b3e763869a082f402a9e6f385bdbceaec3278feb37",
+      "bytes": 35515
+    },
+    {
+      "path": "src/lib/pipelang/terminal_boolean_selector_tests_memory_test.go",
+      "sha256": "f769114a95cc2dbd918716d0c9bfc031173dc8576232042cefd121cb3ebeb615",
+      "bytes": 7283
+    },
+    {
+      "path": "src/lib/pipelang/terminal_boolean_selector_tests_test.go",
+      "sha256": "c87c9ab97c8df9576678281e36582f5485bf62a5b2500b565395df1f9624f707",
+      "bytes": 31005
+    },
+    {
+      "path": "src/lib/pipelang/terminal_branch_local_general_sequence_test.go",
+      "sha256": "e7dcca53777bf9fbdfcb2ee713d552f3bb9c0be4b1215d0c32b94a5c4941de20",
+      "bytes": 10313
+    },
+    {
+      "path": "src/lib/pipelang/terminal_branch_local_sequence_test.go",
+      "sha256": "430402c9d9f84335f5d8a0f223c2110f58afbe73afc8998015be7c5a320fc1a1",
+      "bytes": 10317
+    },
+    {
+      "path": "src/lib/pipelang/terminal_branch_local_test.go",
+      "sha256": "ce856571e2309a6533573bfa30c4cded234e7dfb826ca13e85c6053514fd76ea",
+      "bytes": 12179
+    },
+    {
+      "path": "src/lib/pipelang/terminal_combined_selector_arms_memory_test.go",
+      "sha256": "ab284a0970b6d517c3a9e53086ac3de6dbcfab23c3c673da0317c1ebfb4921fc",
+      "bytes": 7787
+    },
+    {
+      "path": "src/lib/pipelang/terminal_combined_selector_arms_test.go",
+      "sha256": "cf523d64d325c51a2af52edac82a66777243317eb475fceac7ce0eb720c4c940",
+      "bytes": 36548
+    },
+    {
+      "path": "src/lib/pipelang/terminal_conditional_tests_memory_test.go",
+      "sha256": "01bb97de444a0bdf9d25c28c6f05bfa4ec9097656bd1cb706651236181afe753",
+      "bytes": 7196
+    },
+    {
+      "path": "src/lib/pipelang/terminal_conditional_tests_test.go",
+      "sha256": "657b9bcd3332a68c90d30f8207258ec75a7aa5221f848600e3f657a82468711d",
+      "bytes": 26089
+    },
+    {
+      "path": "src/lib/pipelang/terminal_if_statement_test.go",
+      "sha256": "8bf97aa39b4941308975064545c91ba4413b0a3295b87464875d8bab59fd589a",
+      "bytes": 9367
+    },
+    {
+      "path": "src/lib/pipelang/terminal_if_without_top_level_local_test.go",
+      "sha256": "d9c107ca49d7af73e9693511eae75304d5f8a33b836623cc4b5ae3886fff2d76",
+      "bytes": 11126
+    },
+    {
+      "path": "src/lib/pipelang/terminal_inner_selector_arms_memory_test.go",
+      "sha256": "6567b984d0ed0d7e3813139bf7e960977d0733410c0fd546e277c6229ee84057",
+      "bytes": 7537
+    },
+    {
+      "path": "src/lib/pipelang/terminal_inner_selector_arms_test.go",
+      "sha256": "aa6267a067bea60030402a2846c783f199e74196f7371b4b6cf1c54384272393",
+      "bytes": 33089
+    },
+    {
+      "path": "src/lib/pipelang/terminal_leaf_boolean_selectors_matrix_test.go",
+      "sha256": "37e5e42e20f0c8c4c52f3f204eb7e1d5ed805c09a0a46d2c71f8ed9aefa005ea",
+      "bytes": 9044
+    },
+    {
+      "path": "src/lib/pipelang/terminal_leaf_boolean_selectors_memory_test.go",
+      "sha256": "512fae2ebd2f4373fe2ccbe17746019e682db52be273c7376f5d2efa6d8197a5",
+      "bytes": 6823
+    },
+    {
+      "path": "src/lib/pipelang/terminal_leaf_boolean_selectors_test.go",
+      "sha256": "510ea5b7dc5d9e16fe5ea39cd5ba1eb6c4d4b055c1e662fcead6c642ea53dcf9",
+      "bytes": 22044
+    },
+    {
+      "path": "src/lib/pipelang/terminal_leaf_conditional_returns_test.go",
+      "sha256": "8e5d07cc806321d8f23c304da490b07612c1892e8751ed36bbf0a097ac81d175",
+      "bytes": 14813
+    },
+    {
+      "path": "src/lib/pipelang/terminal_leaf_selector_value_arms_matrix_test.go",
+      "sha256": "4acd9778e7d5240e855353b0f4bd268a4523f2ea1f3b20583bf692c24d9ec6c8",
+      "bytes": 13797
+    },
+    {
+      "path": "src/lib/pipelang/terminal_leaf_selector_value_arms_memory_test.go",
+      "sha256": "5834ad6e4312e92b06586b60014729cb22f28d6e7ed1bae8444c938f9f8b49c5",
+      "bytes": 7072
+    },
+    {
+      "path": "src/lib/pipelang/terminal_leaf_selector_value_arms_test.go",
+      "sha256": "b5e3081fc5f4facb52606029f7db9fec641a08d64efe9a3f702721d0ab30476a",
+      "bytes": 25334
+    },
+    {
+      "path": "src/lib/pipelang/terminal_selector_value_arms_memory_test.go",
+      "sha256": "0fe460ddabdc64224375230132736808a6a166d7479597eaeee13d0925a9dea1",
+      "bytes": 7532
+    },
+    {
+      "path": "src/lib/pipelang/terminal_selector_value_arms_test.go",
+      "sha256": "ee5fdbbec40a2114667cc6b85040183c22c620bf485998c0fd4a00505e1e538b",
+      "bytes": 32483
+    },
+    {
+      "path": "src/lib/pipelang/terminal_tree_test.go",
+      "sha256": "3deb092d4e02f39c6d3fee512ff30401b220694adfe91b8f9d82640ad6f510f8",
+      "bytes": 15738
+    },
+    {
+      "path": "src/lib/pipelang/testdata/checked-add.go",
+      "sha256": "2ca9362ab7a53a3d5ddca0f5d40f9cd2d5cd33aef3022ceace3b176e32c1724a",
+      "bytes": 2478
+    },
+    {
+      "path": "src/lib/pipelang/testdata/checked-divide.go",
+      "sha256": "31bb53fe04eb40cae4377c72e6a3b05398c421212eb1c6a7be6c272e934fa436",
+      "bytes": 2493
+    },
+    {
+      "path": "src/lib/pipelang/testdata/checked-multiply.go",
+      "sha256": "55b53c706f278cb52e5166b1fb1a1975683af440a5e359e7f5450e12a7e74794",
+      "bytes": 2488
+    },
+    {
+      "path": "src/lib/pipelang/testdata/checked-negate.go",
+      "sha256": "a2958ff7cc63e981a4b888fdc99cc271cb44bc512fd447d96c688a4b86d0d308",
+      "bytes": 2470
+    },
+    {
+      "path": "src/lib/pipelang/testdata/checked-subtract.go",
+      "sha256": "b31dc51b3c5e671407ad5a725655c678b044f9861252675cd28fd1c6c61c116a",
+      "bytes": 2488
+    },
+    {
+      "path": "src/lib/pipelang/testdata/optional-record.go",
+      "sha256": "73036d20de09f21f678addebb84749402fa10322a21ae7301adf2e7a07e2345b",
+      "bytes": 3924
+    },
+    {
+      "path": "src/lib/pipelang/testdata/optional-value-or.go",
+      "sha256": "1b72b638c9332c7271357fd07ef7e36a6d529140a592407a45354d7256d7d94f",
+      "bytes": 2458
+    },
+    {
+      "path": "src/lib/pipelang/testdata/optional-value.go",
+      "sha256": "9ffc7547b9bc6107ffa846ae323dd6d099ae9cb2a129931ac85facb125808445",
+      "bytes": 2371
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-construction.go",
+      "sha256": "e3366749b9555b2b29adeae4bccc2a38e0fbf3be429c821449df91f303706a9d",
+      "bytes": 1669
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-equality.go",
+      "sha256": "b3165d747bad42d1dbc23416171a0a695027b5d96c5a95bb9fa222e676beeeac",
+      "bytes": 1375
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-field-projection.go",
+      "sha256": "d4d9688e5ceff270682e211cb5cb499a3926b0714ead78f375f8273e72fcb0e0",
+      "bytes": 1240
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-append.go",
+      "sha256": "ce8e5b8a5f4f932ca860e0595320bbda869bf787f3d0b083e2824346b99ccf4e",
+      "bytes": 3219
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-at.go",
+      "sha256": "88175bc40ff4886f2616ce6752a7ea0a145f123647157964a786369eb4c28b7d",
+      "bytes": 4278
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-count.go",
+      "sha256": "66f99fc80353d821222e5e64195b16c732034d4ee344ef27e33f91c650612e2b",
+      "bytes": 2431
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-filter-by-text.go",
+      "sha256": "b298285c89426f4d4e5df191689969badaf597b210b3669ab5f1b46aaaeff562",
+      "bytes": 3060
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-filter-contains-casefolded.go",
+      "sha256": "ac18a7b70dcc9f6cab649cef641dbbb90e1aa3e14b0669244899d9a3d8bc7bb8",
+      "bytes": 30846
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-filter-joined-contains-casefolded.go",
+      "sha256": "73e1e28b249a668a5be1221f9f90c6b7209b36b4198ef0902dbcfddb1119b596",
+      "bytes": 32155
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-filter-joined-variable-contains-casefolded.go",
+      "sha256": "67a694f9ed96ced0367f6b17d9177f8556946935972abec391fc4f4285c96de4",
+      "bytes": 32006
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-find-by-text.go",
+      "sha256": "1c02c4692d6e54eef9b5b9e8bafd8d0d7e760cf93d7f98e3b7586079a83ffe15",
+      "bytes": 4388
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-sort-by-ordinal.go",
+      "sha256": "f7b27403f19a1494569d5eb8918ed65f5bf46d39c2fc75de7940d6e89a393267",
+      "bytes": 3056
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list-sort-by-ordinals.go",
+      "sha256": "0e57601761f955f927b26049ae313927b6d99bc7d3181cfa6024efc59d931dbe",
+      "bytes": 3320
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-list.go",
+      "sha256": "e1ff76c9dd8de87f3159829ba1abc3120f442ac61917e9d70af7404198307196",
+      "bytes": 2510
+    },
+    {
+      "path": "src/lib/pipelang/testdata/record-transport.go",
+      "sha256": "2396cfa42febb541797eeb3c08ed55587fd2afba896642d48bde1592be4cbf8e",
+      "bytes": 1312
+    },
+    {
+      "path": "src/lib/pipelang/testdata/result-transport.go",
+      "sha256": "291d59c688e30084c9cc7b8b4e1dd318cde0c72ef464e9b335da57174207d0b0",
+      "bytes": 2899
+    },
+    {
+      "path": "src/lib/pipelang/testdata/snapshot-result.go",
+      "sha256": "d5520b3853a69786972a957034962394d295cbfea451840608ea6752dfa7c705",
+      "bytes": 6892
+    },
+    {
+      "path": "src/lib/pipelang/testdata/text-contains-casefolded.go",
+      "sha256": "4c1ee62d86d0d29c002eb2097979d599f25acb0842228c97da2e75936153139c",
+      "bytes": 28834
+    },
+    {
+      "path": "src/lib/pipelang/testdata/text-order.go",
+      "sha256": "303b9913a6c1aed380a99c55e59135d3a1385b318faaef1e0508219f2b9db3d1",
+      "bytes": 1067
+    },
+    {
+      "path": "src/lib/pipelang/testdata/text-trim.go",
+      "sha256": "59cb4415b01e419ed6e1c1664f83042d6af67f8beca4f24604f4c4ced352188a",
+      "bytes": 1962
+    },
+    {
+      "path": "src/lib/pipelang/testdata/tiny-pure-function.go",
+      "sha256": "7733e21790d654625acb6ac16c34944c8b348620f00c52d6db016c9873debf4e",
+      "bytes": 154
+    },
+    {
+      "path": "src/lib/pipelang/text_casefold_test.go",
+      "sha256": "7f6570677de0bb3b8558bc43eb53aaad3d74624ea0ccdd03fd2869d36240395b",
+      "bytes": 13836
+    },
+    {
+      "path": "src/lib/pipelang/text_result_test.go",
+      "sha256": "095119c1628bf141184cc16f55fb8d7ef287b5e635bc6df490ce61046fc23973",
+      "bytes": 12182
+    },
+    {
+      "path": "src/lib/pipelang/text_semantics_test.go",
+      "sha256": "d7472a3d90fbcf83811c24a0914ef8eb8d3a753a015e260524c52a523de50ec0",
+      "bytes": 13426
+    },
+    {
+      "path": "src/lib/pipelang/text_trim_test.go",
+      "sha256": "559b91d1e4389d0ded8d4532821ff128bb15ffe157936474518499d4a1f11c18",
+      "bytes": 12374
+    },
+    {
+      "path": "src/lib/pipelang/two_conditional_locals_test.go",
+      "sha256": "7bc93d3616c8bffd1ce036e687e94affad6ea7f5225d816eba7d4e5dab965ed3",
+      "bytes": 57639
+    },
+    {
+      "path": "src/lib/pipelang/two_expanded_terminal_test.go",
+      "sha256": "edc7146a77d6e4351b6eda13c40aa91a9d1b8280905a9fdf60f5d38a9cba0845",
+      "bytes": 15935
+    },
+    {
+      "path": "src/lib/pipelang/two_stage_checked_propagation_test.go",
+      "sha256": "1eefe87abb87fb8a77187ecf74758f6dc0c7e6f840441e2bb13768074785bdcb",
+      "bytes": 18361
+    },
+    {
+      "path": "src/lib/pipelang/two_stage_contextual_bounded_result_propagation_test.go",
+      "sha256": "16d3f68408f7e0accba3bfa0d4dda4c4ab307194aac68383ced46958e8dc26ac",
+      "bytes": 14006
+    },
+    {
+      "path": "src/lib/pipelang/two_stage_cross_payload_result_propagation_test.go",
+      "sha256": "787a3f6b70a5e3c1fd82395f03f97364c502fbcd4018a9dfaf5c8a34b9af756e",
+      "bytes": 17088
+    },
+    {
+      "path": "src/lib/pipelang/type_ref.go",
+      "sha256": "489fa047ceac2527127905a26a7745e014c259e39bc7464539e4f53e6ae8be9a",
+      "bytes": 10629
+    },
+    {
+      "path": "src/lib/pipelang/type_ref_test.go",
+      "sha256": "80710b7e62277c7267bd85aba3c1cade2961973d505255a4a36068a75575fb9e",
+      "bytes": 10092
+    },
+    {
+      "path": "src/lib/pipelang/typecheck.go",
+      "sha256": "fe73a472714a982c536e81d1c007a82fa791c910a8f517fa4c3d64959bc9dfc6",
+      "bytes": 410599
+    },
+    {
+      "path": "src/lib/pipelang/typecheck_scope_test.go",
+      "sha256": "d0774e0965447ba24841f0762046d0e322f42eb9a9d6248a2ba6db3619f07aa7",
+      "bytes": 1807
+    },
+    {
+      "path": "src/lib/pipelang/typecheck_test.go",
+      "sha256": "a9f058862293df3fbb94a16ce744adf803ca7b21cfb9ab5ae45b6ad7ac43e4c5",
+      "bytes": 1935
+    },
+    {
+      "path": "src/lib/pipelang/view_action_syntax_test.go",
+      "sha256": "6e0c8c0085b54d4771877918a2db9cfe72d58e2d7ee81cc056d0eecd0de48fe9",
+      "bytes": 3556
+    },
+    {
+      "path": "src/lib/pipelang/view_format.go",
+      "sha256": "4b4d3dfc5d2b66abdf47762e6eca3f98d13d022dc26aff626251647f3591c699",
+      "bytes": 8005
+    },
+    {
+      "path": "src/lib/pipelang/view_format_test.go",
+      "sha256": "2975c2a1774e3371d55b3546bdfd893339441e7ac2eb2f089aaa2dfff420a6c3",
+      "bytes": 12261
+    },
+    {
+      "path": "src/lib/pipelang/view_parser.go",
+      "sha256": "79035eaff3bf654ff7df090038b458a683e0811fa415bdfca9834aa149fb55c3",
+      "bytes": 10870
+    },
+    {
+      "path": "src/lib/pipelang/view_parser_test.go",
+      "sha256": "6a6579256f80f9f75cf1613357bb4b22b8abf9721ae43ccf07f36f26aedaf9fc",
+      "bytes": 5719
+    },
+    {
+      "path": "src/lib/pipelang/view_syntax.go",
+      "sha256": "99874b6cf78af34fe8625e5d8293ba1c71af53806e339e51780e874dbd9754a5",
+      "bytes": 12659
+    },
+    {
+      "path": "src/lib/pipelang/view_syntax_test.go",
+      "sha256": "cd43ec13ef7d7644dc32466c54045adf224a03eebc6705312ce60bacbb6e5ffa",
+      "bytes": 9321
+    },
+    {
+      "path": "tests/containedexec/budget.py",
+      "sha256": "3b89f83e98524fe45789df6266a8b1a299581b61448831c10d13f5b250bc521b",
+      "bytes": 18766
+    },
+    {
+      "path": "tests/containedexec/campaign.py",
+      "sha256": "af0bae79704da7476b95edf8824a0253fd93dc7e6ef3cc8e8be939956a158f14",
+      "bytes": 24798
+    },
+    {
+      "path": "tests/containedexec/command_linux.go",
+      "sha256": "6e70b1801cd1d7b4e79b0cded9a891768ead697fef25145fc9b046dcf1f40d2b",
+      "bytes": 4805
+    },
+    {
+      "path": "tests/containedexec/command_other.go",
+      "sha256": "e17ab6437024cef81bc6ef88548b4f74f77b8e2e720b13dcdfd5dade66e1a19a",
+      "bytes": 464
+    },
+    {
+      "path": "tests/containedexec/editor_source_sdk.py",
+      "sha256": "51eceb319e0478b618d8d59a1b98a96a02d1723935a88b95d00e0512b2e44de7",
+      "bytes": 6445
+    },
+    {
+      "path": "tests/containedexec/estate.py",
+      "sha256": "271c0e81941de169bca54ed7cf0460b985e3934b4cdc67638b39fda7be3771d0",
+      "bytes": 9102
+    },
+    {
+      "path": "tests/containedexec/integration.py",
+      "sha256": "ab49766777f44337ae36f5932a4e4c1d57cfe533668c56f2319ae2a32179c357",
+      "bytes": 3966
+    },
+    {
+      "path": "tests/containedexec/job.py",
+      "sha256": "64757658cf19735f3ad656464ea04a890e5cdd6536200c0766503288307ae3e0",
+      "bytes": 7665
+    },
+    {
+      "path": "tests/containedexec/matrix.py",
+      "sha256": "9da423a4642fd34c0d53178544573d12fd03cc64402f193c455ff539e5cf22a4",
+      "bytes": 4415
+    },
+    {
+      "path": "tests/containedexec/native_artifacts.py",
+      "sha256": "132b81ab12db8c98c2908621cf7cb462f9fdcafb1f8995ade64d700e0dc0ab76",
+      "bytes": 14612
+    },
+    {
+      "path": "tests/containedexec/native_nucleon.py",
+      "sha256": "0dce3664bd9b31d9f28c1f07f69ed4d60389737e771a1ca10a2b7401c85c66ac",
+      "bytes": 6904
+    },
+    {
+      "path": "tests/containedexec/nucleon_sdk.py",
+      "sha256": "ef4f6478056129e0f796a7fd3805a07baee3de772be71a5693bca04f657022c3",
+      "bytes": 3255
+    },
+    {
+      "path": "tests/containedexec/pipelang_suite.py",
+      "sha256": "4f1064c813b62d6261536f76c2a33c454eb531d85458977c9efcefb67aff72db",
+      "bytes": 33249
+    },
+    {
+      "path": "tests/containedexec/reporting.py",
+      "sha256": "4df276ffa9085f9bfe550d9745baa61cfe500cbedba8de8ff19a94f43c5947f6",
+      "bytes": 5221
+    },
+    {
+      "path": "tests/containedexec/resume_probe.py",
+      "sha256": "77b1ca4a6beee7ba6350f1e76ed020f06a277e15d13e63acef8050446af5d53e",
+      "bytes": 1524
+    },
+    {
+      "path": "tests/containedexec/run.py",
+      "sha256": "bba3fd51a4b6fa7321ef14b0e194298bd12f6d608a96431c3417ef063a6740d1",
+      "bytes": 11165
+    },
+    {
+      "path": "tests/containedexec/scheduling.py",
+      "sha256": "f563759fa91db71d5a5a5a1a6afe9edde6bb73a9c79ff48315b61e8722631ae6",
+      "bytes": 5781
+    },
+    {
+      "path": "tests/containedexec/shared_runtime_probe.py",
+      "sha256": "cc2f20faa90cb174688b6baeb3c679072f783e33106f85bf61e8d4dccd7d3bd3",
+      "bytes": 9394
+    },
+    {
+      "path": "tests/containedexec/shared_runtime_settings.py",
+      "sha256": "5cee1b57aeb3c35d8c557a2d90d8258fd396e53512c84664eeeec8a5a3bf302c",
+      "bytes": 2415
+    },
+    {
+      "path": "tests/containedexec/suite.py",
+      "sha256": "757957b02694196a22257d2cfe76f94736380a9c26830e9b59749f65b8fbcdc3",
+      "bytes": 3478
+    },
+    {
+      "path": "tests/containedexec/support_inputs.py",
+      "sha256": "8a5c0db3ab2f2cca47c66abd28b5f28cf96b2e11afe2b3699f02027e2064e8f0",
+      "bytes": 2848
+    },
+    {
+      "path": "tests/containedexec/test_campaign.py",
+      "sha256": "bb61565f7b5d428e27dca591d7ac9a8251e5309a7e47f5a41ebea2832c49affe",
+      "bytes": 16420
+    },
+    {
+      "path": "tests/containedexec/test_editor_source_sdk.py",
+      "sha256": "585b1baf5f8bd4b304864212b734a73a681a3980d1c7717beec7e2d44a1e74c8",
+      "bytes": 7413
+    },
+    {
+      "path": "tests/containedexec/test_estate.py",
+      "sha256": "d7e48a425f56d2a67c594bddf6007334f9be6dc08b6f3c4b10c1102f73c2b8a3",
+      "bytes": 28171
+    },
+    {
+      "path": "tests/containedexec/test_input_guard_extension.py",
+      "sha256": "c751794dadc4dec021a9799db8a92ae2d5900f0af8e98e369393f76562962c6f",
+      "bytes": 3205
+    },
+    {
+      "path": "tests/containedexec/test_job.py",
+      "sha256": "0629e71bf3ead7bb440ae5780cd2b7b013926f04f03750e083fa31cef4b92c05",
+      "bytes": 2950
+    },
+    {
+      "path": "tests/containedexec/test_native_artifacts.py",
+      "sha256": "74af302b8e72c7e8dfffc979bf15d283cfa3ff23275f59a8a1d1a2d605eb8693",
+      "bytes": 4833
+    },
+    {
+      "path": "tests/containedexec/test_native_nucleon.py",
+      "sha256": "e3de3e51b1ef29a7774f370477f2ac55eca6515e781f43935e29ed4ed8c5534a",
+      "bytes": 4784
+    },
+    {
+      "path": "tests/containedexec/test_nucleon_sdk.py",
+      "sha256": "22959ec74fced1790a27ba09381960d6719c5a1b6f6d1ebf2d164136b191210a",
+      "bytes": 1629
+    },
+    {
+      "path": "tests/containedexec/test_pipelang_suite.py",
+      "sha256": "df7f016a8e4d8990c753817f4c06b8773392e5948aa5a4aa14ea889c700efc2c",
+      "bytes": 11407
+    },
+    {
+      "path": "tests/containedexec/test_run.py",
+      "sha256": "f11060cb6654dacde0591a54d4c2945dce0a73c4ea6cf9fbea448fb5d2c7ae7b",
+      "bytes": 3816
+    },
+    {
+      "path": "tests/containedexec/test_scheduling.py",
+      "sha256": "43f030155ed00a1c6086dcd2e61d2c6a5b70198e66fc0fbbc3c9c53d8b8ec991",
+      "bytes": 7615
+    },
+    {
+      "path": "tests/containedexec/test_shared_runtime_probe.py",
+      "sha256": "e1395e58293e97ed3ceebf3fdc04a4fdccf6d650fc9266366c014668fc7f4b93",
+      "bytes": 3144
+    },
+    {
+      "path": "tests/containedexec/test_support_inputs.py",
+      "sha256": "85545806a5fbf09a0b975c656941cc7e58c58210e309f49c6cbb72ce8c6f9bea",
+      "bytes": 3140
+    },
+    {
+      "path": "tests/containedexec/test_transcript.py",
+      "sha256": "5d8437a5df4cb33392be0089da63ea235a4edfa78156f1fcdb77a273033d8296",
+      "bytes": 11641
+    },
+    {
+      "path": "tests/containedexec/test_verification.py",
+      "sha256": "790869c8de1e93f7e5a5ad2d1029e150a2ab144ef34427058d56eea030c170d3",
+      "bytes": 7231
+    },
+    {
+      "path": "tests/containedexec/toolchain.go",
+      "sha256": "e97fa0cad242a3877e8ae33a5e1b0a13da3769f3718fbc09e233e78adefb48e1",
+      "bytes": 2216
+    },
+    {
+      "path": "tests/containedexec/toolchain_test.go",
+      "sha256": "2bfc186630ce7fbb07b669b481048707af4afcce380996548344ef1fcf30ff17",
+      "bytes": 1593
+    },
+    {
+      "path": "tests/containedexec/transcript/codec.go",
+      "sha256": "bdb6fce42bcb61a05efd0e4af481ca3f95603427df0064524c7e4f542f67f2a8",
+      "bytes": 9824
+    },
+    {
+      "path": "tests/containedexec/transcript/codec_test.go",
+      "sha256": "6875db464f1dc835257d8e00c86b460d6b73877621dde1f7d7d3d3b3a69ff3f6",
+      "bytes": 939
+    },
+    {
+      "path": "tests/containedexec/transcript/extract.go",
+      "sha256": "e7a5853457bf3aa104f61fbd1084076ab9427949d3243ca0f50d8ad40d216123",
+      "bytes": 1801
+    },
+    {
+      "path": "tests/containedexec/transcript/main_linux.go",
+      "sha256": "abeebf7ec3672ba6ebf224b449e4c0af2972e27ab63ab06b40da5df93fffd8de",
+      "bytes": 2005
+    },
+    {
+      "path": "tests/containedexec/transcript_replay.py",
+      "sha256": "360ad08aa915f12ef04167d8ef16877b74fb9c24995de93a91ced70e40663c7c",
+      "bytes": 6707
+    },
+    {
+      "path": "tests/containedexec/transcript_runtime.py",
+      "sha256": "d532191f0f791e8a58156c367e042b974c05f29d9feca3e6c8eaacd103c2c061",
+      "bytes": 8167
+    },
+    {
+      "path": "tests/containedexec/transcript_suite.py",
+      "sha256": "3f879f7c202c0b6a4e1813ca8f6c95fddcb21c80a3531e947300f7e5c39ee6cb",
+      "bytes": 19667
+    },
+    {
+      "path": "tests/containedexec/verification.py",
+      "sha256": "269518b933b86b33c91c584c552b6ce1fb39243d9fadf5739158b4acdb6270f8",
+      "bytes": 9708
+    },
+    {
+      "path": "tests/containedexec/verification_campaign.py",
+      "sha256": "68ae45d10220a1a01116f3a481cc8a9ab8c341bc072607c5bbb634d8fd07af60",
+      "bytes": 12850
+    },
+    {
+      "path": "tests/native-model-views/test_cross_tool.py",
+      "sha256": "1da54c7b63042ae78bc4f6984f5284d2c1ff66e0d291170b137353e0698e4483",
+      "bytes": 2199
+    },
+    {
+      "path": "tests/native-model-views/test_protocol.py",
+      "sha256": "d4256638e882f262c4acc25c60051244ce0010b9bc7d63a5f3b6881d7ed6b802",
+      "bytes": 7340
+    },
+    {
+      "path": "tests/native-model-views/test_style_generation.py",
+      "sha256": "106c80cf394a0af80f38a00e06b733bef260fbd81f408011d39107c9c82ca31c",
+      "bytes": 8374
+    },
+    {
+      "path": "tests/native-model-views/test_style_inspection.py",
+      "sha256": "9ae155cc01f549fef486fe2b6af9e8e99566b52116f2e25c871076b6cb949c87",
+      "bytes": 4403
+    },
+    {
+      "path": "tests/native-model-views/test_styles.py",
+      "sha256": "5f51f086165da5744e039cd366a7fde149ae06cf0ba509408197e45f399c9dd2",
+      "bytes": 7942
+    },
+    {
+      "path": "tests/native-models/async-composition.py",
+      "sha256": "6875c87c93da919606907873890fac3b423231869ce71363545cf6109a9f3408",
+      "bytes": 3967
+    },
+    {
+      "path": "tests/native-models/collections_source.py",
+      "sha256": "3b9cc41e4890246cbdcd561ff874450bdaa50013d65269ba77a17f78fe3a9e7c",
+      "bytes": 5698
+    },
+    {
+      "path": "tests/native-models/composition-manifest.py",
+      "sha256": "9b76443040458df5ba72b9ff61e377d63003c1d93d6202b35ea011ca9ec31366",
+      "bytes": 4319
+    },
+    {
+      "path": "tests/native-models/composition.py",
+      "sha256": "62bbbfc9f361c8e7b392693ae73e9a0e8de1d7707d3d07875c966eee9ac77d29",
+      "bytes": 12834
+    },
+    {
+      "path": "tests/native-models/concurrent_source.py",
+      "sha256": "92009aee361a908aa4e331f7890ae12af6bcb1a24373ea0d39fac279dea7dfe7",
+      "bytes": 6128
+    },
+    {
+      "path": "tests/native-models/failure-cleanup.py",
+      "sha256": "728298150310a54d9f9d2b5fa3121358943216288d76aba7d170d61072ebb5ea",
+      "bytes": 4839
+    },
+    {
+      "path": "tests/native-models/fundamentals.py",
+      "sha256": "df9e7f8b78ae9761fa22160b3f67f096208a1db3da7b8b2f2f4cd0e50194ea81",
+      "bytes": 6456
+    },
+    {
+      "path": "tests/native-models/interfaces_source.py",
+      "sha256": "af3f04c3cc2268eee1aa1741543e676b1928ee9e1f04b7c56f4e3f1f33aa75c2",
+      "bytes": 12048
+    },
+    {
+      "path": "tests/native-models/iteration-tests.py",
+      "sha256": "fa0ef45f45f247891a590bb4d712ce2b95e87d38bfe01cd6444491ce3dc4f307",
+      "bytes": 3173
+    },
+    {
+      "path": "tests/native-models/mixed.py",
+      "sha256": "086cf77608cc3b6a44b2f7cfeb8cb026f47d6505e0d43905c8b608a3c3ca4084",
+      "bytes": 4149
+    },
+    {
+      "path": "tests/native-models/numeric-guard.py",
+      "sha256": "2e1cd4b247c3641c3fecfe4baf21016ad052d5f1d54f7d19957c61a886dac393",
+      "bytes": 1503
+    },
+    {
+      "path": "tests/native-models/objects_composition.py",
+      "sha256": "bef02657f0275f53ed27d0c35a7ebafcad238f5d48361cda33a4272cf8d06ae8",
+      "bytes": 2883
+    },
+    {
+      "path": "tests/native-models/objects_manifest.py",
+      "sha256": "417c01cc8d51bba023b45a51ea0f026f6b0a0bfe90408754b5f470ba2cf04f51",
+      "bytes": 8453
+    },
+    {
+      "path": "tests/native-models/objects_source.py",
+      "sha256": "61e7eaa54d99f2ad85fe42d532849170959cefdf16cb3c626748d90868061918",
+      "bytes": 8543
+    },
+    {
+      "path": "tests/native-models/parallel_source.py",
+      "sha256": "704262ee77cd3f56a316d15c1c842433f85adc4096078cfb7aea299dec446573",
+      "bytes": 6337
+    },
+    {
+      "path": "tests/native-models/protocol.py",
+      "sha256": "f7549f8d70f3077f86ff882c633fb89b571e489958e1bf5539e6fe92b47cac29",
+      "bytes": 8133
+    },
+    {
+      "path": "tests/native-models/qualify.py",
+      "sha256": "b00963837b40991ccda5579700db511c77490b0812648563802d3f80dd1333f3",
+      "bytes": 28599
+    },
+    {
+      "path": "tests/native-models/synchronization_source.py",
+      "sha256": "ff15e7ca5b88e6af9e596d273148a8048f43f561ed11c74b1535dd8a91ab406d",
+      "bytes": 6544
+    },
+    {
+      "path": "tests/pipelang-native-pilot/driver.py",
+      "sha256": "b8662efd1058346f23b4a56279d9809df43304eb76c0e90ceadfd837523e8754",
+      "bytes": 8236
+    },
+    {
+      "path": "tests/pipelang-native-pilot/test_emitter_protocol.py",
+      "sha256": "535a1f87041b9ddfde2860ba5f2d1f4620c74fdb17cf9e92e7f7fd3922451213",
+      "bytes": 8698
+    },
+    {
+      "path": "tests/pipelang-native-pilot/test_lexer_protocol.py",
+      "sha256": "3e357683703bfcb8a5e022d3798c8720a6cf3be454c9dcfabe2ba2f763ff37b4",
+      "bytes": 6375
+    },
+    {
+      "path": "tests/pipelang-native-pilot/toolchain.py",
+      "sha256": "d8ea3bc9f5ac4b4802aef43689af9f8c7dcdfc29a2bf0b44225af257e5cb0d0e",
+      "bytes": 3752
+    },
+    {
+      "path": "tests/pipelang-native-pilot/worker.py",
+      "sha256": "6ff2a1b51cc17d8c489b8a7746f8e70a69901b1afbd8e02070c4440d3779b77a",
+      "bytes": 7653
+    },
+    {
+      "path": "tests/pipelangcompat/legacy_compat_test.go",
+      "sha256": "dcf4d16d707c23b6baa5d549f51f13c74f9337b24e0b2bf6fb404e10a9ade67d",
+      "bytes": 10361
+    },
+    {
+      "path": "tests/pipeview/check_packages.py",
+      "sha256": "61cdaa85643bbae6de82e6e8bf3804e4f1cbc052628c6045a22636142c1bc94e",
+      "bytes": 4693
+    },
+    {
+      "path": "tests/pipeview/check_test_handles.py",
+      "sha256": "82efd44ef0d47124b9c0cb33081bb416367e6e797d1e5490414867cbe8be25c5",
+      "bytes": 2119
+    },
+    {
+      "path": "tooling/bootstrap_dockpipe.py",
+      "sha256": "77093e114ff3aae60c78af5fee28630310032327eb786eed53fec98e8a0055cb",
+      "bytes": 4228
+    },
+    {
+      "path": "tooling/test_bootstrap_dockpipe.py",
+      "sha256": "7d9bf8cebe0f16f0b82c6257ad721857cbd5b524f13b072f4504713d5ef27ab4",
+      "bytes": 5063
+    },
+    {
+      "path": "tooling/test_release_followup.py",
+      "sha256": "12eb3464250edaea8b5973afac85560e381cb4db7d9a35bc8def05306f207ab1",
+      "bytes": 3249
+    },
+    {
+      "path": "tooling/test_standalone_release.py",
+      "sha256": "b6052ba258806f6adfa5fb49a795b0c3d9b268cd5609084f222d649b8d2deae7",
+      "bytes": 13387
+    },
+    {
+      "path": "workflows/check/assets/scripts/check.py",
+      "sha256": "006b98190a06e5e9c0989f672a2432187fffa595917755b1cef08a62706cb302",
+      "bytes": 2102
+    },
+    {
+      "path": "workflows/ci.windows/assets/scripts/test.py",
+      "sha256": "e33ffe277eff3db10184a2fdcadf8814702bbcbf630d4e63efbaba987dd508be",
+      "bytes": 530
+    },
+    {
+      "path": "workflows/editor/shared/__pycache__/contract.cpython-310.pyc",
+      "sha256": "5e3a98f06e643777150cad541e6db757ff944704cf60a94eca99f939ee65212a",
+      "bytes": 7891
+    },
+    {
+      "path": "workflows/editor/shared/contract.py",
+      "sha256": "ef86e2422bffb6b0037fcbc45bf3fc8b26c73e799f29f804c7f52fe38ab3c758",
+      "bytes": 7833
+    },
+    {
+      "path": "workflows/editor/shared/test_contract.py",
+      "sha256": "849f809c40289f8370de947a54f312a70ab955ec1c6755f99fff9eb73364a8f9",
+      "bytes": 5126
+    },
+    {
+      "path": "workflows/editor.build/assets/scripts/build.py",
+      "sha256": "92685c025986a174974a288d9b5087e840c1cc1965538abeef0fcd68c5886096",
+      "bytes": 3016
+    },
+    {
+      "path": "workflows/editor.publish/assets/scripts/__pycache__/publish.cpython-310.pyc",
+      "sha256": "06024e2db301426f11c441eff9a7fcb5c1b248053a450142f4d2db4ac497926f",
+      "bytes": 1501
+    },
+    {
+      "path": "workflows/editor.publish/assets/scripts/publish.py",
+      "sha256": "88e1c4390b74efdf13a4226527e4525110c498a18a9dafa865a79f2bd9248c05",
+      "bytes": 1333
+    },
+    {
+      "path": "workflows/release/assets/scripts/build.py",
+      "sha256": "7beb0cad71c85aacd33e2fab80f581662ddb274285d0d16983dbba3a3e852f3b",
+      "bytes": 5379
+    },
+    {
+      "path": "workflows/release/assets/scripts/publish.py",
+      "sha256": "f51ca3be23e96e99122f8eb5cd3f51d342e9b1268c9c9bfb2dff0ab0b70cf0eb",
+      "bytes": 7056
+    },
+    {
+      "path": "workflows/release/assets/scripts/qualify.py",
+      "sha256": "86ad2be35e2d4c6c93f68d5aafdfa88a2d53c475e29d15ce77b1c57466d556a7",
+      "bytes": 5317
+    },
+    {
+      "path": "workflows/release/assets/scripts/release_contract.py",
+      "sha256": "e1e873015aae335f96730ecbb06334da35dcda25cd953a3e27f082d0042761db",
+      "bytes": 4770
+    },
+    {
+      "path": "workflows/ci.windows/config.yml",
+      "sha256": "aefc3438a7af6e0bb28a086c2b93e2adccc5952105f26a09e146cd1313bbaf6c",
+      "bytes": 201
+    },
+    {
+      "path": "workflows/ci.windows/assets/scripts/test.sh",
+      "sha256": "c59739c1cbaffc3d91a969d3d52e5eb70bde0f592320401a61ebdad39ddfd5a2",
+      "bytes": 132
+    },
+    {
+      "path": "workflows/editor.build/config.yml",
+      "sha256": "830b783b06045a1a7cf6b78455ae3007e864092ca8bc748a43cf9da17c418489",
+      "bytes": 188
+    },
+    {
+      "path": "workflows/editor.publish/config.yml",
+      "sha256": "b84558e824630f766cdd0f4001a56d6e94ef6def46fed69abcef44d59a16fda7",
+      "bytes": 197
+    },
+    {
+      "path": ".github/workflows/editor-marketplace.yml",
+      "sha256": "27cb8f1115935106a62c285e2cdcbb3dc2de4e11f97bf25be25f6a1715527e7e",
+      "bytes": 3205
+    },
+    {
+      "path": "workflows/test/assets/scripts/class-inheritance.sh",
+      "sha256": "5695e271725dc93c255105fff7045de38d33940ea224b1eb8b0088d51dd11602",
+      "bytes": 4215
+    }
+  ],
+  "active_native_contracts": [
+    "v0.0.0.1 configuration CLI/materializer/editor diagnostics",
+    "pipelang.cpp.float64-calls.v1 scalar frontend and export metadata",
+    "pipelang.native-model.v1/v2/v3",
+    "pipelang.native-model-view.v1",
+    "PipeLangModel 0.1.0 installed C++ runtime/bindings",
+    "native SDK manifest/archive/extraction and C++ containment"
+  ],
+  "retired_api_policy": "Go imports, stream/application-IR and unused historical profile entrypoints are retired, not replicated. Existing published artifacts are not changed.",
+  "qualified_path": "Default Linux headless DockPipe build/check/test/package; terminal proof recorded in the task document.",
+  "platform_limits": "Other platform containment, native interactive UI and hosted/release publication require separate qualification."
+}

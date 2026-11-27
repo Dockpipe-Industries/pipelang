@@ -1,0 +1,36 @@
+module PipeLang.IO.Tests;
+import PipeLang.IO;
+
+public Record FileUsage {
+    public int owners;
+    public int operations;
+    public int descriptors;
+    public int snapshots;
+    public int reservedBytes;
+    public int reads;
+    public int hashes;
+    public int finishes;
+    public int schedules;
+    public int opens;
+    public int openDescriptors;
+}
+
+// Bounded actual fixture effects. Source supplies all names, schedule actions,
+// byte counts, expected outcomes and digests. No expected-case native switch.
+public Interface FileInputs {
+    Result<void,string> Create(string relative, int count, string pattern);
+    Result<void,string> MakeDirectory(string relative);
+    Result<void,string> MakeSymlink(string relative, string target);
+    Result<void,string> MakeFifo(string relative);
+    Result<void,string> MakeHardlink(string relative, string target);
+    Result<void,string> Arm(string boundary, string action, string relative, int value);
+    Result<void,string> Restore();
+    Result<ByteBuffer,string> ReadFixture(string relative, int count);
+    Result<FileUsage,string> Usage();
+    Result<void,string> CancelProbe(int scope);
+    Result<FileDigest,IoFailure> DigestWithWorkLimit(string relative, int maximumBytes, int systemCalls, CancellationToken token);
+    Result<void,string> RecreatePeer();
+    Result<void,string> StartPending(string relative, int maximumBytes);
+    Result<void,string> AwaitPendingRead();
+    Result<CapturedFile,IoFailure> FinishPending();
+}

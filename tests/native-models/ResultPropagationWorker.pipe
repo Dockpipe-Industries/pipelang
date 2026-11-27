@@ -1,0 +1,40 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class Worker {
+    public Worker() {}
+
+    private pure Result<int,string> First(int value) {
+        if (value == 0)
+            return Result<int,string>.Failure("refused");
+        if (value == 1)
+            return Result<int,string>.Cancelled("cancelled");
+        return Result<int,string>.Success(value);
+    }
+
+    private pure Result<int,string> Project(int value) {
+        return Result<int,string>.Success((try First(value)) + 10);
+    }
+
+    public int Run() {
+        List<int> values = List<int>.Empty();
+        values.Add(0);
+        values.Add(1);
+        values.Add(2);
+        Atomic<int> total = Atomic<int>.Create(0);
+        parallel foreach (int value in values) {
+            Result<int,string> result = Project(value);
+            if (result.IsSuccess)
+                total.Add(result.Value);
+            else if (result.IsCancelled)
+                total.Add((value + 1) * -1);
+            else
+                total.Add((value + 1) * -2);
+        }
+        return total.Load();
+    }
+}
+
+public Class App {
+    private Worker worker = new Worker();
+    public App() {}
+    public int Run() => worker.Run();
+}

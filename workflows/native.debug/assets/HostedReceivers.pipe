@@ -1,0 +1,400 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedReceivers;
+
+public Record Route {
+    public string label;
+    public ByteBuffer payload;
+    public bool enabled;
+}
+
+public Record Paths {
+    public string source;
+    public string work;
+    public string output;
+    public string log;
+    public string cache;
+    public string input;
+    public string state;
+    public string manifest;
+}
+
+public Record Inputs {
+    public int seed;
+    public Route route;
+    public string note;
+    public Paths paths;
+}
+
+public Class IndexValue {
+    public pure int Get(int index) {
+        return index;
+    }
+}
+
+public Class ScoreSeed {
+    private int score;
+
+    public ScoreSeed(int score) {
+        this.score = score;
+    }
+
+    public pure int Get() {
+        return score;
+    }
+}
+
+public Class ScoreBundle {
+    private IndexValue first;
+    private IndexValue second;
+    private ScoreSeed seed;
+
+    public ScoreBundle(IndexValue first, IndexValue second, ScoreSeed seed) {
+        this.first = first;
+        this.second = second;
+        this.seed = seed;
+    }
+
+    public pure int Get() {
+        return first.Get(second.Get(seed.Get()));
+    }
+}
+
+public Class ScoreSelection {
+    private Dictionary<int,ScoreSeed> snapshots;
+    private List<ScoreSeed> scores = List<ScoreSeed>.Empty();
+    private Queue<ScoreSeed> arrivals = Queue<ScoreSeed>.Empty();
+    private Stack<int> keys = Stack<int>.Empty();
+    private int? last;
+
+    public ScoreSelection(Dictionary<int,ScoreSeed> snapshots) {
+        this.snapshots = snapshots;
+    }
+
+    public void Record(int key) {
+        ScoreSeed captured = snapshots.At(key);
+        snapshots.Remove(key);
+        snapshots.Add(key + 1, captured);
+        arrivals.Enqueue(snapshots.At(key + 1));
+        scores.Add(arrivals.Dequeue());
+        keys.Push(key);
+        last = keys.Pop();
+    }
+
+    public Result<int,string> Latest() {
+        if (!last.HasValue || last.Value != 1)
+            return Result<int,string>.Failure("missing captured score");
+        return Result<int,string>.Success(scores.At(0).Get());
+    }
+}
+
+public Class Client {
+    private Inputs inputs;
+    private int count;
+    private string label;
+
+    public Client(Inputs value) {
+        this.inputs = value;
+        this.count = value.seed;
+        this.label = value.route.label;
+    }
+
+    public void Adjust(int amount) {
+        try {
+            if (amount == 0)
+                return;
+            count = count + amount;
+        } finally {
+            count = count + 1;
+        }
+    }
+
+    public pure int Current() {
+        return count;
+    }
+
+    public void SetLabel(string value) {
+        label = value;
+    }
+
+    public pure string Label() {
+        return label;
+    }
+
+    public void ChangeRoute() {
+        inputs.route.payload = ByteBuffer.FromUtf8(inputs.route.label);
+        inputs.route.label = inputs.route.label + "-child";
+        inputs.route.payload.Append(ByteBuffer.FromUtf8("-child"));
+    }
+
+    public pure bool HasRoute(string expected) {
+        return inputs.route.label == expected && inputs.route.payload.DecodeUtf8() == expected;
+    }
+
+    public void ReplaceRoute(string label) {
+        inputs.route = Route(label, ByteBuffer.FromUtf8(label), inputs.route.enabled);
+    }
+
+    public async Task<Result<int,string>> Read(int scenario) {
+        count = count + 1;
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(15);
+        if (acquired || inputs.route.label != "étape")
+            return Result<int,string>.Failure("unexpected permit");
+        count = count + 1;
+        if (scenario == 1) {
+            count = count + 100;
+            throw Error("nested receiver fault");
+        }
+        return Result<int,string>.Success(count);
+    }
+}
+
+public Class Port {
+    private Client client;
+    private int adjustments;
+
+    public Port(Client input) {
+        this.client = input;
+    }
+
+    public void Adjust(int amount) {
+        adjustments = adjustments + 1;
+        client.Adjust(amount);
+    }
+
+    public void AdjustAndFail() {
+        client.Adjust(4);
+        throw Error("caught synchronous fault");
+    }
+
+    public pure int Adjustments() {
+        return adjustments;
+    }
+
+    public pure int Current() {
+        return client.Current();
+    }
+
+    public void SetLabel(string value) {
+        client.SetLabel(value);
+    }
+
+    public pure string Label() {
+        return client.Label();
+    }
+
+    public void ChangeRoute() {
+        client.ChangeRoute();
+    }
+
+    public pure bool HasRoute(string expected) {
+        return client.HasRoute(expected);
+    }
+
+    public void ReplaceRoute(string label) {
+        client.ReplaceRoute(label);
+    }
+
+    public async Task<Result<int,string>> Forward(int scenario) {
+        var result = await client.Read(scenario);
+        return result;
+    }
+}
+
+public model Class Session {
+    private Port port;
+    private Inputs inputs;
+    private Port alternate;
+    private string label;
+
+    public Session(Inputs value) {
+        this.inputs = Inputs(value.seed, value.route, value.note, value.paths);
+        this.label = "initial";
+        Client client = new Client(value);
+        this.port = new Port(client);
+        if (value.seed >= 0)
+            this.alternate = new Port(client);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        if (!inputs.route.enabled || inputs.paths.manifest != "manifest.json" ||
+            (scenario < 17 && inputs.note != ""))
+            return Result<int,string>.Failure("constructor record changed");
+        if (scenario == 2) {
+            var alternateResult = await alternate.Forward(0);
+            return alternateResult;
+        }
+        if (scenario == 3) {
+            port.Adjust(10);
+            alternate.Adjust(100);
+            throw Error("rollback synchronous writes");
+        }
+        if (scenario == 4) {
+            try {
+                port.AdjustAndFail();
+            } catch (Error error) {
+                if (error.Message == "caught synchronous fault")
+                    return Result<int,string>.Success(alternate.Current());
+            }
+            return Result<int,string>.Failure("unexpected synchronous fault");
+        }
+        if (scenario == 5)
+            return Result<int,string>.Success(port.Adjustments() + alternate.Adjustments());
+        if (scenario == 6) {
+            port.Adjust(0);
+            return Result<int,string>.Success(alternate.Current());
+        }
+        if (scenario == 7) {
+            label = "root-" + string.FromInt(inputs.seed);
+            port.SetLabel("child-" + string.FromInt(inputs.seed));
+            return Result<int,string>.Success(7);
+        }
+        if (scenario == 8) {
+            if (label != "root-40" || alternate.Label() != "child-40")
+                return Result<int,string>.Failure("receiver text did not survive the invocation");
+            return Result<int,string>.Success(8);
+        }
+        if (scenario == 9) {
+            label = "discard-" + string.FromInt(inputs.seed);
+            alternate.SetLabel("");
+            throw Error("rollback receiver text");
+        }
+        if (scenario == 10) {
+            string previous = label;
+            string previousChild = alternate.Label();
+            label = previous + "-next";
+            port.SetLabel(previousChild + "-next");
+            var gate = SemaphoreSlim.Create(0, 1);
+            var acquired = await gate.WaitAsync(15);
+            if (acquired || previous != "root-40" || previousChild != "child-40")
+                return Result<int,string>.Failure("receiver text borrow expired after replacement");
+            return Result<int,string>.Success(10);
+        }
+        if (scenario == 11) {
+            if (label != "root-40-next" || alternate.Label() != "child-40-next")
+                return Result<int,string>.Failure("committed receiver text changed");
+            return Result<int,string>.Success(11);
+        }
+        if (scenario == 12) {
+            if (label != "initial" || port.Label() != "étape")
+                return Result<int,string>.Failure("receiver text leaked into another instance");
+            return Result<int,string>.Success(12);
+        }
+        if (scenario == 13) {
+            int sum = 0;
+            for (int index = 0; index < 256; index = index + 1) {
+                sum = sum + Score(index);
+            }
+            return Result<int,string>.Success(sum);
+        }
+        if (scenario == 14) {
+            Route previous = inputs.route;
+            this.inputs.route.label = previous.label + "-root";
+            this.inputs.route.payload = ByteBuffer.FromUtf8(previous.label);
+            this.inputs.route.payload.Append(ByteBuffer.FromUtf8("-root"));
+            port.ChangeRoute();
+            var gate = SemaphoreSlim.Create(0, 1);
+            var acquired = await gate.WaitAsync(15);
+            if (acquired || previous.label != "étape" || previous.payload.DecodeUtf8() != "initial")
+                return Result<int,string>.Failure("record snapshot changed across suspension");
+            return Result<int,string>.Success(14);
+        }
+        if (scenario == 15) {
+            if (inputs.route.label != "étape-root" || inputs.route.payload.DecodeUtf8() != "étape-root" ||
+                !port.HasRoute("étape-child"))
+                return Result<int,string>.Failure("nested record fields did not retain text and bytes");
+            return Result<int,string>.Success(15);
+        }
+        if (scenario == 16) {
+            inputs.route.enabled = false;
+            inputs.route.label = "discarded";
+            inputs.route.payload.Add(255u);
+            alternate.ChangeRoute();
+            throw Error("rollback nested record fields");
+        }
+        if (scenario == 17) {
+            Inputs previous = inputs;
+            inputs = Inputs(previous.seed + 1, Route("full-root", ByteBuffer.FromUtf8("full-root"), true),
+                            "durable-" + string.FromInt(previous.seed), previous.paths);
+            port.ReplaceRoute("full-child");
+            var gate = SemaphoreSlim.Create(0, 1);
+            var acquired = await gate.WaitAsync(15);
+            if (acquired || previous.seed != 40 || previous.route.label != "étape-root" ||
+                previous.route.payload.DecodeUtf8() != "étape-root" || previous.note != "")
+                return Result<int,string>.Failure("whole-record replacement changed its earlier snapshot");
+            return Result<int,string>.Success(17);
+        }
+        if (scenario == 18) {
+            if (inputs.seed != 41 || inputs.route.label != "full-root" ||
+                inputs.route.payload.DecodeUtf8() != "full-root" || inputs.note != "durable-40" ||
+                !port.HasRoute("full-child"))
+                return Result<int,string>.Failure("whole-record replacement lost its retained state");
+            return Result<int,string>.Success(18);
+        }
+        if (scenario == 19) {
+            inputs = Inputs(0, Route("discard", ByteBuffer.Empty(), false), "", inputs.paths);
+            alternate.ReplaceRoute("");
+            throw Error("rollback whole receiver records");
+        }
+        if (scenario == 20)
+            return Result<int,string>.Success(ScopedScore());
+        if (scenario == 21) {
+            IndexValue helper = new IndexValue();
+            var gate = SemaphoreSlim.Create(0, 1);
+            bool opened = await gate.WaitAsync(15);
+            if (opened)
+                return Result<int,string>.Failure("unexpected scoped receiver signal");
+            return Result<int,string>.Success(helper.Get(42));
+        }
+        if (scenario == 22 || scenario == 23) {
+            int seed = scenario == 22 ? 42 : -1;
+            ScoreSeed result = try MakeScore(seed);
+            ScoreSeed alias = result;
+            Dictionary<int,ScoreSeed> snapshots = Dictionary<int,ScoreSeed>.Empty();
+            snapshots.Add(1, alias);
+            ScoreSelection selection = new ScoreSelection(snapshots);
+            selection.Record(1);
+            ScoreSeed resumed = try await ReadScore(snapshots.At(1));
+            int selected = try selection.Latest();
+            if (selected != resumed.Get())
+                return Result<int,string>.Failure("captured score changed");
+            return Result<int,string>.Success(resumed.Get());
+        }
+        var result = await port.Forward(scenario);
+        return result;
+    }
+
+    private Result<ScoreSeed,string> MakeScore(int seed) {
+        if (seed < 0)
+            return Result<ScoreSeed,string>.Failure("negative score");
+        ScoreSeed result = new ScoreSeed(seed);
+        return Result<ScoreSeed,string>.Success(result);
+    }
+
+    private async Task<Result<ScoreSeed,string>> ReadScore(ScoreSeed seed) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(15);
+        if (opened)
+            return Result<ScoreSeed,string>.Failure("unexpected score signal");
+        return Result<ScoreSeed,string>.Success(seed);
+    }
+
+    private int Score(int index) {
+        IndexValue helper = new IndexValue();
+        return helper.Get(index);
+    }
+
+    private int ScopedScore() {
+        int score = 0;
+        for (int index = 0; index < 256; index = index + 1) {
+            IndexValue temporary = new IndexValue();
+            score = score + temporary.Get(index);
+        }
+        if (score != 32640)
+            return 0;
+        IndexValue helper = new IndexValue();
+        ScoreSeed seed = new ScoreSeed(42);
+        ScoreBundle bundle = new ScoreBundle(helper, new IndexValue(), seed);
+        return bundle.Get();
+    }
+}

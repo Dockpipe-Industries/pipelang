@@ -1,0 +1,8 @@
+name: pipelang-crypto-build
+description: Build the maintained crypto capability through the installed PipeLang native dependency resolver
+docker_preflight: false
+steps:
+  - id: crypto
+    kind: host
+    cwd: repo
+    run: assets/scripts/run.sh

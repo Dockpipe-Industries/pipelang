@@ -1,0 +1,31 @@
+module PipeLang.Testing;
+
+public Class Assert {
+    public static pure Result<void,TestFailure> True(bool actual, string message) {
+        if (actual)
+            return Result<void,TestFailure>.Success();
+
+        return Result<void,TestFailure>.Failure(TestFailure("assert.true", message));
+    }
+
+    public static pure Result<void,TestFailure> False(bool actual, string message) {
+        if (!actual)
+            return Result<void,TestFailure>.Success();
+
+        return Result<void,TestFailure>.Failure(TestFailure("assert.false", message));
+    }
+
+    public static pure Result<void,TestFailure> Equal<T>(T expected, T actual, string message) {
+        if (expected == actual)
+            return Result<void,TestFailure>.Success();
+
+        return Result<void,TestFailure>.Failure(TestFailure("assert.equal", message));
+    }
+
+    public static pure Result<void,TestFailure> NotEqual<T>(T expected, T actual, string message) {
+        if (expected != actual)
+            return Result<void,TestFailure>.Success();
+
+        return Result<void,TestFailure>.Failure(TestFailure("assert.not_equal", message));
+    }
+}

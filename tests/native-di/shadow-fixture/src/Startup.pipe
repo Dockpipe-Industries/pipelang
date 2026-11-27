@@ -1,0 +1,7 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module construction;
+
+public composition construction {
+    singleton Service = Service;
+    export Service;
+}

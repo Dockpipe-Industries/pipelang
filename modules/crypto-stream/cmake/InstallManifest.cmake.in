@@ -1,0 +1,34 @@
+set(crypto_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+
+function(require_installed_hash relative expected)
+    file(SHA256 "${crypto_prefix}/${relative}" actual)
+    if(NOT actual STREQUAL expected)
+        message(FATAL_ERROR "Installed selected CryptoStream input drifted: ${relative}")
+    endif()
+endfunction()
+
+require_installed_hash("@CMAKE_INSTALL_LIBDIR@/libpipelang_crypto_stream_provider.a"
+    "@PIPELANG_CRYPTO_PROVIDER_LIBRARY_SHA256@")
+require_installed_hash("@CMAKE_INSTALL_INCLUDEDIR@/pipelang_crypto_stream.h"
+    "@PIPELANG_CRYPTO_PROVIDER_HEADER_SHA256@")
+require_installed_hash("@package_share@/provider/Cargo.lock"
+    "@PIPELANG_CRYPTO_PROVIDER_LOCK_SHA256@")
+require_installed_hash("@package_share@/provider/build-receipt.json"
+    "@PIPELANG_CRYPTO_PROVIDER_RECEIPT_SHA256@")
+require_installed_hash("@package_share@/library/library.json" "@crypto_library_sha256@")
+
+execute_process(COMMAND "@PipeLangModel_GENERATOR@" verify
+    --prefix "@PipeLangModel_SDK_PREFIX@" --manifest "@PipeLangModel_MANIFEST@"
+    --sha256 "@PIPELANG_CORE_MANIFEST_SHA256@" RESULT_VARIABLE core_status)
+if(NOT core_status EQUAL 0)
+    message(FATAL_ERROR "Selected exact core SDK drifted before optional package inventory")
+endif()
+
+execute_process(COMMAND "@PipeLangModel_GENERATOR@" manifest
+    --prefix "${crypto_prefix}"
+    --manifest "${crypto_prefix}/@package_share@/sdk-manifest.json"
+    --roots "@CMAKE_INSTALL_INCLUDEDIR@" "@CMAKE_INSTALL_LIBDIR@" "@package_share@"
+    RESULT_VARIABLE manifest_status)
+if(NOT manifest_status EQUAL 0)
+    message(FATAL_ERROR "Failed to inventory the independent optional CryptoStream package")
+endif()

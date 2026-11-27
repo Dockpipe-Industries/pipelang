@@ -1,0 +1,7 @@
+module PipeLang.Json;
+
+// Explicit positive admission. There is no implicit index allocation/default.
+public Record JsonStringIndexLimits {
+    public int entries = 0;
+    public int retainedBytes = 0;
+}

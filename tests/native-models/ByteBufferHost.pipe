@@ -1,0 +1,5 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Interface ByteBufferHost {
+    Result<ByteBufferPacket,string> Exchange(ByteBufferPacket packet);
+    Task<Result<ByteBuffer,string>> Read(ByteBuffer input, CancellationToken cancellation);
+}

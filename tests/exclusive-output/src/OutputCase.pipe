@@ -1,0 +1,244 @@
+module PipeLang.IO.OutputTests;
+import PipeLang.IO;
+import PipeLang.Testing;
+
+public Class OutputCase : IProbeTestCase {
+    private ExclusiveFileOutput output;
+    private FileStreams input;
+    private OutputFixture fixture;
+    private int scenario;
+    private int handle = 0;
+    private string path = "";
+    private int effectsBefore = 0;
+
+    public OutputCase(ExclusiveFileOutput output, FileStreams input, OutputFixture fixture, int scenario) {
+        this.output = output;
+        this.input = input;
+        this.fixture = fixture;
+        this.scenario = scenario;
+        path = "output-" + string.FromInt(scenario);
+    }
+
+    public pure string Id() => "io.output." + string.FromInt(scenario);
+    public pure string Name() => "exclusive output custody " + string.FromInt(scenario);
+
+    public Result<void,TestFailure> Setup(CancellationToken token) {
+        Result<int,string> effects = fixture.Effects();
+        try Assert.True(effects.IsSuccess, "observe actual effect baseline");
+        effectsBefore = effects.Value;
+        return Assert.True(fixture.OpenOperations().Value == 0, "fixture starts with no retained operations");
+    }
+
+    public Result<void,TestFailure> Cleanup() {
+        bool closed = true;
+        if (handle != 0)
+            closed = output.CloseOutput(handle).IsSuccess;
+
+        bool restored = fixture.Restore().IsSuccess;
+        Result<int,string> remaining = fixture.OpenOperations();
+        return Assert.True(closed && restored && remaining.IsSuccess && remaining.Value == 0,
+                           "independent teardown releases output and crypto custody");
+    }
+
+    private Result<void,TestFailure> Begin(int cap, CancellationToken token) {
+        Result<int,IoFailure> begun = output.BeginExclusiveOutput(path, cap, token);
+        try Assert.True(begun.IsSuccess, "exclusive output admitted");
+        handle = begun.Value;
+        return Assert.True(handle > 0, "actual positive handle");
+    }
+
+    private Result<void,TestFailure> Terminal(OutputEffect expected) {
+        Result<OutputEffect,IoFailure> terminal = output.CloseOutput(handle);
+        try Assert.True(terminal.IsSuccess, "close releases resources");
+        try Assert.True(terminal.Value == expected, "terminal effect reflects actual custody");
+        Result<OutputEffect,IoFailure> repeated = output.CloseOutput(handle);
+        try Assert.True(repeated.IsSuccess && repeated.Value == expected, "bounded close preserves terminal effect");
+        handle = 0;
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> Digest(string relative, int count, string expected,
+                                             CancellationToken token) {
+        Result<FileDigest,IoFailure> digest = input.DigestFile(relative, count, token);
+        try Assert.True(digest.IsSuccess, "actual confined output is readable independently");
+        try Assert.Equal<int>(count, digest.Value.byteCount, "actual retained byte count");
+        return Assert.Equal<string>(expected, digest.Value.sha256, "actual retained bytes");
+    }
+
+    private Result<void,TestFailure> Success(CancellationToken token) {
+        int cap = 3;
+        int count = 3;
+        string digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        if (scenario == 0) {
+            cap = 0;
+            count = 0;
+            digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        } else if (scenario == 15) {
+            cap = 4194304;
+            count = 4194304;
+            digest = "299285fc41a44cdb038b9fdaf494c76ca9d0c866672b2b266c1a0c17dda60a05";
+        }
+
+        try Begin(cap, token);
+        Result<int,string> mode = fixture.Mode(path);
+        try Assert.True(mode.IsSuccess && mode.Value == 384, "entry is visible immediately with private mode 0600");
+        if (scenario == 1) {
+            try Assert.True(output.AppendOutput(handle, ByteBuffer.FromUtf8("a"), token).IsSuccess, "first real fragment");
+            try Assert.True(output.AppendOutput(handle, ByteBuffer.FromUtf8("bc"), token).IsSuccess, "second real fragment");
+        } else if (scenario == 15) {
+            Result<ByteBuffer,string> block = fixture.Block(1048576);
+            try Assert.True(block.IsSuccess && block.Value.Length == 1048576, "real 1 MiB input");
+            for (int index = 0; index < 4; index = index + 1)
+                try Assert.True(output.AppendOutput(handle, block.Value, token).IsSuccess, "4 MiB running cap");
+        }
+
+        Result<FileDigest,IoFailure> committed = output.CommitOutput(handle, token);
+        try Assert.True(committed.IsSuccess, "complete durable effects admitted");
+        try Assert.Equal<int>(count, committed.Value.byteCount, "committed accepted count");
+        try Assert.Equal<string>(digest, committed.Value.sha256, "commit seals written bytes");
+        try Terminal(OutputEffect.Committed);
+        Result<int,IoFailure> duplicate = output.BeginExclusiveOutput(path, cap, token);
+        try Assert.True(duplicate.IsFailure && duplicate.Error.code == "io.output_exists" &&
+            duplicate.Error.effect == OutputEffect.NoDurableOutput, "exclusive duplicate refuses without replacement");
+        return Digest(path, count, digest, token);
+    }
+
+    private Result<void,TestFailure> RefusedBegin(CancellationToken token, CancellationToken probeToken) {
+        if (scenario == 4) {
+            Result<int,IoFailure> cancelled = output.BeginExclusiveOutput(path, 3, probeToken);
+            try Assert.True(cancelled.IsCancelled && cancelled.Error.effect == OutputEffect.NoDurableOutput,
+                            "pre-cancel refused before creation");
+            return Assert.True(input.DigestFile(path, 3, token).IsFailure, "no file was created");
+        }
+
+        try Assert.True(fixture.Arm(path, "cancel_create", 0).IsSuccess, "creation fault armed");
+        Result<int,IoFailure> result = output.BeginExclusiveOutput(path, 3, probeToken);
+        try Assert.True(result.IsCancelled && result.Error.effect == OutputEffect.Unknown,
+                        "cancellation after creation preserves the visible file");
+        return Digest(path, 0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", token);
+    }
+
+    private Result<void,TestFailure> AppendFailure(CancellationToken token, CancellationToken probeToken) {
+        string empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        string abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        string first = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
+        int cap = 3;
+        if (scenario == 2)
+            cap = 1;
+
+        string fault = "";
+        string expected = "io.byte_limit";
+        int count = 0;
+        string digest = empty;
+        if (scenario == 7) {
+            fault = "cancel_write";
+            count = 3;
+            digest = abc;
+        } else if (scenario == 8) {
+            fault = "short_error";
+            expected = "io.write_failed";
+            count = 1;
+            digest = first;
+        } else if (scenario == 9) {
+            fault = "zero";
+            expected = "io.write_progress";
+        } else if (scenario == 10) {
+            fault = "interrupt";
+            expected = "io.work_limit";
+        }
+
+        if (fault != "")
+            try Assert.True(fixture.Arm(path, fault, 1).IsSuccess, "native write schedule armed before creation");
+
+        try Begin(cap, token);
+        if (scenario == 2) {
+            try Assert.True(output.AppendOutput(handle, ByteBuffer.FromUtf8("a"), token).IsSuccess, "accepted prefix exists");
+            count = 1;
+            digest = first;
+        }
+        if (scenario == 3) {
+            try Assert.True(output.AppendOutput(handle, ByteBuffer.FromUtf8("abc"), token).IsSuccess, "uncommitted accepted bytes");
+            try Terminal(OutputEffect.Unknown);
+            return Digest(path, 3, abc, token);
+        }
+
+        ByteBuffer bytes = ByteBuffer.FromUtf8("abc");
+        Result<void,IoFailure> result = Result<void,IoFailure>.Failure(new IoFailure {});
+        if (scenario == 5 || scenario == 7)
+            result = output.AppendOutput(handle, bytes, probeToken);
+        else
+            result = output.AppendOutput(handle, bytes, token);
+        if (scenario == 5 || scenario == 7) {
+            try Assert.True(result.IsCancelled, "typed cancellation consumes writer");
+        } else {
+            try Assert.True(result.IsFailure && result.Error.code == expected, "typed append refusal");
+        }
+
+        try Assert.True(result.Error.effect == OutputEffect.Unknown, "named output remains uncertain after failed append");
+        Result<FileDigest,IoFailure> replay = output.CommitOutput(handle, token);
+        try Assert.True(replay.IsFailure && replay.Error.effect == OutputEffect.Unknown, "consumed writer cannot be replayed");
+        try Terminal(OutputEffect.Unknown);
+        return Digest(path, count, digest, token);
+    }
+
+    private Result<void,TestFailure> CommitFailure(CancellationToken token, CancellationToken probeToken) {
+        string fault = "sync_error";
+        string expected = "io.file_sync";
+        if (scenario == 12) {
+            fault = "cancel_sync";
+        } else if (scenario == 13) {
+            fault = "replace";
+            expected = "io.output_changed";
+        } else if (scenario == 14) {
+            fault = "close_error";
+            expected = "io.close_failed";
+        }
+
+        try Assert.True(fixture.Arm(path, fault, 2).IsSuccess, "commit schedule armed");
+        try Begin(3, token);
+        try Assert.True(output.AppendOutput(handle, ByteBuffer.FromUtf8("abc"), token).IsSuccess, "actual input written");
+        Result<FileDigest,IoFailure> committed = Result<FileDigest,IoFailure>.Failure(new IoFailure {});
+        if (scenario == 12)
+            committed = output.CommitOutput(handle, probeToken);
+        else
+            committed = output.CommitOutput(handle, token);
+        if (scenario == 12) {
+            try Assert.True(committed.IsCancelled, "cancellation after actual sync stays cancelled");
+        } else {
+            try Assert.True(committed.IsFailure && committed.Error.code == expected, "typed commit refusal");
+        }
+
+        try Assert.True(committed.Error.effect == OutputEffect.Unknown, "commit failure retains named custody");
+        try Terminal(OutputEffect.Unknown);
+        string abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        if (scenario == 13) {
+            try Digest(path + ".saved", 3, abc, token);
+            return Digest(path, 3, "11507a0e2f5e69d5dfa40a62a1bd7b6ee57e6bcd85c67c9b8431b36fff21c437", token);
+        }
+
+        return Digest(path, 3, abc, token);
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        return Assert.True(false, "output contracts use genuine scoped probe dispatch");
+    }
+
+    public Result<void,TestFailure> BodyWithProbe(CancellationToken token, CancellationToken probeToken) {
+        Result<void,TestFailure> tested = Result<void,TestFailure>.Success();
+        if (scenario <= 1 || scenario == 15) {
+            tested = Success(token);
+        } else if (scenario == 4 || scenario == 6) {
+            tested = RefusedBegin(token, probeToken);
+        } else if (scenario <= 10) {
+            tested = AppendFailure(token, probeToken);
+        } else {
+            tested = CommitFailure(token, probeToken);
+        }
+        try tested;
+
+        if (scenario == 6 || (scenario >= 7 && scenario <= 14))
+            try Assert.True(fixture.Effects().Value > effectsBefore, "real scheduled boundary was reached");
+
+        return Result<void,TestFailure>.Success();
+    }
+}

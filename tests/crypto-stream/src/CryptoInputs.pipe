@@ -1,0 +1,12 @@
+module PipeLang.Crypto.Tests;
+
+// Only bounded bytes, actual cancellation effects and provider lifetime effects.
+// Test expectations and interpretation remain in the authored Source cases.
+public Interface CryptoInputs {
+    Result<ByteBuffer,string> Slice(int fixture, int offset, int count);
+    Result<void,string> CancelProbe(int scope);
+    Result<void,string> CancelAfterProviderCall(int scope, bool finish);
+    Result<int,string> UpdateCalls();
+    Result<int,string> FinishCalls();
+    Result<void,string> RecreatePeer();
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "sdk": {
+    "version": "0.1.0",
+    "manifest_sha256": "200890fd5a451f7e1f1665104dcedb8cce4491fac9c09a2f3d98b51bec6c5281",
+    "contained_runner_sha256": "19d55b36acc5796f86b44d2ee6e965991663d844c8468d86d20fab33e2272173"
+  },
+  "crypto": {
+    "abi": 1,
+    "header_sha256": "798d0e7fcae263ac06a12d62fd8d817d7bdffc6afadccd74c3fe6be2904028f0",
+    "library_sha256": "d94a241d22783db6bf3d36d429e5942c339ff610ded4122b32a3afe64ee858c8"
+  }
+}

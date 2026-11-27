@@ -1,0 +1,46 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedInterfaceField;
+
+public source Interface Reader {
+    pure int Read();
+}
+
+public Class Leaf : Reader {
+    private int amount;
+
+    public Leaf(int initial) {
+        amount = initial;
+    }
+
+    public pure int Read() {
+        return amount;
+    }
+}
+
+public Class Forwarder : Reader {
+    private Reader inner;
+
+    public Forwarder(Reader inner) {
+        this.inner = inner;
+    }
+
+    public pure int Read() {
+        return inner.Read();
+    }
+}
+
+public model Class Session {
+    private Reader node;
+
+    public Session() {
+        node = new Forwarder(new Leaf(20));
+    }
+
+    public int Run(int scenario) {
+        if (scenario == 1) {
+            Reader replacement = new Leaf(42);
+            node = new Forwarder(replacement);
+        }
+        return node.Read();
+    }
+}

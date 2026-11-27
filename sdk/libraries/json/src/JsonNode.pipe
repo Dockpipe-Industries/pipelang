@@ -1,0 +1,7 @@
+module PipeLang.Json;
+
+// Opaque identities. Constructing a record does not grant access to a document.
+public Record JsonNode {
+    public int document = 0;
+    public int node = 0;
+}

@@ -1,0 +1,57 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.Trace;
+
+public Class Math {
+    public static int Divide(int denominator) {
+        return 42 / denominator;
+    }
+
+    public static int Relay(int denominator) {
+        return Divide(denominator);
+    }
+}
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(2);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected gate");
+
+        if (scenario == 0)
+            return Result<int,string>.Success(Math.Relay(scenario));
+        if (scenario == 1) {
+            try {
+                return Result<int,string>.Success(Math.Relay(0));
+            } catch (Error error) {
+                return Result<int,string>.Failure("handled " + error.Message);
+            }
+        }
+        if (scenario == 3) {
+            int computed = try await Child();
+            return Result<int,string>.Success(computed);
+        }
+        if (scenario == 4) {
+            Result<int,string> discarded = await Child();
+            if (discarded.IsFailure)
+                return Result<int,string>.Failure("integer division by zero");
+        }
+        if (scenario == 5) {
+            int? absent = null;
+            return Result<int,string>.Success(absent.Value);
+        }
+        if (scenario == 6) {
+            Result<int,string> failed = Result<int,string>.Failure("original failure");
+            return Result<int,string>.Success(failed.Value);
+        }
+        return Result<int,string>.Success(42);
+    }
+
+    private static async Task<Result<int,string>> Child() {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(2);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected child gate");
+        return Result<int,string>.Success(Math.Relay(0));
+    }
+}

@@ -1,0 +1,88 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedGraphCycles;
+
+public Class Link {
+    private int identifier;
+    private Link? next;
+
+    public Link(int value) {
+        identifier = value;
+    }
+
+    public void Connect(Link peer) {
+        next = peer;
+    }
+
+    public pure Link Next() {
+        return next.Value;
+    }
+
+    public pure int Read() {
+        return identifier;
+    }
+}
+
+public Class Broken {
+    private string label = "construction text";
+    private List<string> notes = List<string>.Empty();
+
+    public Broken() {
+        notes.Add(label);
+        throw Error("discarded constructor");
+    }
+}
+
+public Class SynchronizedLocal {
+    private Lock guard = Lock.Create();
+
+    public SynchronizedLocal() {}
+
+    public int Read() {
+        lock (guard) {
+            return 42;
+        }
+    }
+}
+
+public model Class Session {
+    private Link? retained;
+
+    public Session() {}
+
+    private Link MakeCycle() {
+        Link first = new Link(20);
+        Link second = new Link(22);
+        first.Connect(second);
+        second.Connect(first);
+        return first;
+    }
+
+    public int Run(int scenario) {
+        if (scenario == 0) {
+            retained = MakeCycle();
+        } else if (scenario == 1) {
+            Link first = retained.Value;
+            Link second = first.Next();
+            if (second.Next() != first)
+                return -1;
+            return first.Read() + second.Read();
+        } else if (scenario == 2) {
+            retained = null;
+        } else if (scenario == 3) {
+            Link temporary = MakeCycle();
+            return temporary.Read() + temporary.Next().Read();
+        } else if (scenario == 4) {
+            try {
+                Broken temporary = new Broken();
+                return -1;
+            } catch (Error error) {
+                if (error.Message != "discarded constructor")
+                    throw error;
+            }
+        } else {
+            SynchronizedLocal temporary = new SynchronizedLocal();
+            return temporary.Read();
+        }
+        return 42;
+    }
+}

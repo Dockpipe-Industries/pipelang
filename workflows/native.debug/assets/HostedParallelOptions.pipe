@@ -1,0 +1,13 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedParallelOptions;
+
+public model Class Session {
+    public int Run(List<int> jobs, Atomic<int> arrivals, SemaphoreSlim proceed) {
+        parallel foreach (int job in jobs) {
+            arrivals.Increment();
+            if (!proceed.Wait(2000))
+                throw Error("worker readiness deadline");
+        }
+        return arrivals.Load();
+    }
+}

@@ -1,0 +1,25 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Bootstrap;
+import DiFixture.Contracts;
+import DiFixture.Root;
+import DiFixture.Requests;
+import DiFixture.Application;
+
+public composition Startup {
+    singleton input ConstructionPolicy;
+    singleton IIdentitySequence = IdentitySequence;
+    scoped input ScopeStamp;
+    transient RootDependency = RootDependency;
+    singleton IRootService = RootService;
+    scoped IRequestService = RequestService;
+    scoped ScopeEcho = ScopeEcho;
+    transient IUseCase = UseCase;
+    singleton IFaultyService = FaultyService;
+    export IIdentitySequence;
+    export RootDependency;
+    export IRootService;
+    export IRequestService;
+    export ScopeEcho;
+    export IUseCase;
+    export IFaultyService;
+}

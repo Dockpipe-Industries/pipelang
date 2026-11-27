@@ -1,0 +1,47 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ResultOutcomes;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int input) {
+        var outcome = await App.Execute(input);
+        return outcome;
+    }
+
+    private static async Task<Result<int,string>> Execute(int input) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(100);
+        var outcome = Result<int,string>.Success(42);
+        if (input == 1) {
+            outcome = Result<int,string>.Failure("échec \"workflow\"");
+        }
+        if (input == 2) {
+            outcome = Result<int,string>.Cancelled("source cancelled");
+        }
+        if (input == 3) {
+            outcome = Result<int,string>.Cancelled();
+        }
+        if (input == 4) {
+            outcome = Result<int,string>.Failure("do not read Value");
+            return Result<int,string>.Success(outcome.Value);
+        }
+        if (input == 5) {
+            return Result<int,string>.Failure(outcome.Error);
+        }
+        if (input == 6) {
+            outcome = Result<int,string>.Success(41);
+        }
+        if (outcome.IsSuccess && outcome.Value == 42) {
+            return outcome;
+        }
+        if (!outcome.IsSuccess || outcome.Value == 42) {
+            var reason = outcome.Error;
+            if (outcome.IsCancelled) {
+                return Result<int,string>.Cancelled(reason);
+            }
+            if (outcome.IsFailure) {
+                return Result<int,string>.Failure(reason);
+            }
+        }
+        return Result<int,string>.Success(outcome.Value);
+    }
+}

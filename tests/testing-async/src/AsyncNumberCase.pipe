@@ -1,0 +1,30 @@
+module PipeLang.Testing.AsyncSelfTests;
+import PipeLang.Testing;
+import PipeLang.Testing.Async;
+
+public Class AsyncNumberCase : IAsyncTestCase {
+    private AsyncNumberData data;
+
+    public AsyncNumberCase(AsyncNumberData data) {
+        this.data = data;
+    }
+
+    public pure string Id() => data.id;
+    public pure string Name() => "Async typed table " + data.id;
+
+    public async Task<Result<TestStepResult,string>> Setup(TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.Passed());
+    }
+
+    public async Task<Result<TestStepResult,string>> Body(TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.From(
+            Assert.Equal<int>(data.expected, data.input * data.input, "typed table expected square")));
+    }
+
+    public async Task<Result<TestStepResult,string>> Cleanup(TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.Passed());
+    }
+}

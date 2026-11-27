@@ -1,0 +1,11 @@
+module PipeLang.IO;
+
+// One injected service owns one descriptor root. Capture publishes its immutable
+// copy only after complete bounded read/hash/identity checks. Neither operation
+// promises an atomic source-file snapshot or a continuous named-root lease.
+public Interface FileStreams {
+    Result<CapturedFile,IoFailure> CaptureSnapshot(string relative, int maximumBytes, CancellationToken token);
+    Result<ByteBuffer,IoFailure> ReadSnapshot(int snapshotId, int offset, int count);
+    Result<void,IoFailure> CloseSnapshot(int snapshotId);
+    Result<FileDigest,IoFailure> DigestFile(string relative, int maximumBytes, CancellationToken token);
+}

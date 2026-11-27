@@ -1,0 +1,69 @@
+module PipeLang.Json.Tests;
+import PipeLang.Json;
+import PipeLang.Testing;
+
+public Class OwnershipCase : ITestCase {
+    private JsonReader reader;
+    private JsonReader other;
+    private FixtureBytes bytes;
+    private int first = 0;
+    private int second = 0;
+
+    public OwnershipCase(JsonReader service, JsonReader independent, FixtureBytes effects) {
+        reader = service;
+        other = independent;
+        bytes = effects;
+    }
+
+    public pure string Id() => "json.ownership";
+    public pure string Name() => "Document generation, cancellation, bounds and cleanup";
+    public Result<void,TestFailure> Setup(CancellationToken token) => Result<void,TestFailure>.Success();
+
+    public Result<void,TestFailure> Cleanup() {
+        if (first != 0)
+            try Assert.True(reader.CloseDocument(first).IsSuccess, "first cleanup");
+        if (second != 0)
+            try Assert.True(reader.CloseDocument(second).IsSuccess, "second cleanup");
+
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Body(CancellationToken token) {
+        JsonReadLimits invalid = new JsonReadLimits {};
+        invalid.inputBytes = 4194305;
+        try Assert.True(reader.BeginDocument(invalid).IsFailure, "hard input ceiling cannot be raised");
+        invalid.inputBytes = 0;
+        try Assert.True(reader.BeginDocument(invalid).IsFailure, "zero limits refused");
+        JsonReadLimits limits = new JsonReadLimits {};
+        first = reader.BeginDocument(limits).Value;
+        second = reader.BeginDocument(limits).Value;
+        try Assert.True(reader.BeginDocument(limits).IsFailure, "exact two-document cap");
+        try Assert.True(reader.Kind(JsonNode(first, 0)).IsFailure, "queries require complete input");
+        try Assert.True(other.InputLength(first).IsFailure, "document belongs to its reader");
+
+        try Assert.True(reader.AppendDocument(first, ByteBuffer.FromUtf8("null")).IsSuccess, "first append");
+        JsonNode root = reader.CompleteDocument(first, token).Value;
+        try Assert.True(other.Kind(root).IsFailure, "cross-reader node rejected");
+        try Assert.True(reader.CompleteDocument(first, token).IsFailure, "complete occurs exactly once");
+        try Assert.True(reader.AppendDocument(second, ByteBuffer.FromUtf8("true")).IsSuccess, "second append");
+        JsonNode secondRoot = reader.CompleteDocument(second, token).Value;
+        try Assert.True(reader.Kind(JsonNode(second, root.node)).IsFailure, "mixed document/node identities rejected");
+        try Assert.True(reader.Kind(JsonNode(first, -1)).IsFailure, "invalid node rejected");
+        try Assert.True(reader.Count(root).IsFailure, "count requires container");
+        try Assert.True(reader.NameLength(root).IsFailure, "root has no member name");
+        try Assert.True(reader.BoolValue(secondRoot).Value, "second document independent");
+
+        try Assert.True(reader.CloseDocument(first).IsSuccess, "close completed document");
+        try Assert.True(reader.CloseDocument(first).IsSuccess, "immediately repeated close is idempotent");
+        try Assert.True(reader.Kind(root).IsFailure, "closed node is stale");
+        first = reader.BeginDocument(limits).Value;
+        try Assert.True(reader.Kind(root).IsFailure, "generation reuse never revives nodes");
+        try Assert.True(reader.AppendDocument(first, ByteBuffer.FromUtf8("0")).IsSuccess, "cancelled document append");
+        Result<JsonNode,string> stopped = bytes.CompleteCancelled(first);
+        try Assert.True(stopped.IsCancelled, "cancellation remains typed");
+        try Assert.Equal<string>("json.cancelled", stopped.Error, "cancellation error code");
+        try Assert.True(reader.CompleteDocument(first, token).IsFailure, "cancellation poisons document");
+
+        return Result<void,TestFailure>.Success();
+    }
+}

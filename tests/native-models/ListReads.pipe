@@ -1,0 +1,124 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Record Row {
+    public int number = 0;
+    public int other = 0;
+}
+
+public Record Inner {
+    public List<Row> rows;
+}
+
+public Record Nested {
+    public Inner inner;
+}
+
+public Record Bag {
+    public List<int> items;
+}
+
+public Class ListReads {
+    private List<int> values;
+    private Nested nested;
+    private List<Bag> bags;
+    public int effects = 0;
+
+    public ListReads() {
+        Reset();
+        nested.inner.rows.Add(new Row { number = 7, other = 11 });
+        nested.inner.rows.Add(new Row { number = 13, other = 17 });
+        Bag bag = new Bag {};
+        bag.items.Add(4);
+        bag.items.Add(8);
+        bags.Add(bag);
+    }
+
+    public void Reset() {
+        values = List<int>.Empty();
+        values.Add(10);
+        values.Add(20);
+        effects = 0;
+    }
+
+    public pure int ReadScalars(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + values.At(index % values.Count);
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int ReadRows(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            Row row = nested.inner.rows.At(index % nested.inner.rows.Count);
+            total = total + row.number + row.other;
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int CountRepeatedly(int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + values.Count + nested.inner.rows.Count;
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int ReadParameter(List<int> input, int repetitions) {
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + input.At(index % input.Count);
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int ReadLocal(int repetitions) {
+        List<int> local = values;
+        int total = 0;
+        int index = 0;
+        while (index < repetitions) {
+            total = total + local.At(index % local.Count);
+            index = index + 1;
+        }
+        return total;
+    }
+
+    public pure int ConditionalIndex(bool second) => values.At(second ? 1 : 0);
+    public pure Bag OwnedBag() => bags.At(0);
+
+    private int Replace() {
+        effects = effects + 1;
+        values = List<int>.Empty();
+        values.Add(90);
+        return 1;
+    }
+
+    private int Append() {
+        effects = effects + 1;
+        int previousCount = values.Count;
+        values.Add(30);
+        return previousCount;
+    }
+
+    public int ReplaceIndex() => values.At(Replace());
+    public int AppendIndex() => values.At(Append());
+    public pure int Size() => values.Count;
+    public pure int First() => values.At(0);
+
+    private pure Result<List<int>,string> GetResult()
+        => Result<List<int>,string>.Success(values);
+
+    private pure List<int> GetList() => values;
+
+    public pure int TemporaryResult() => GetResult().Value.At(1);
+    public pure int TemporaryList() => GetList().At(0);
+    public pure int TemporaryCount() => GetResult().Value.Count;
+}

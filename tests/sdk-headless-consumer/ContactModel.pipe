@@ -1,0 +1,5 @@
+public Class ContactModel {
+    public const float32 Gravity = 981.0f;
+    public const uint32 PartId = 7u;
+    public pure float32 Half(float32 value) => value * 0.5f;
+}

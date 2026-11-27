@@ -1,0 +1,42 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedObjectReferences;
+
+public Class Item {
+    private int number;
+
+    public Item(int number) { this.number = number; }
+    public pure int Read() => number;
+}
+
+public model Class Model {
+    private Item? current;
+    private SemaphoreSlim ready = SemaphoreSlim.Create(0, 1);
+
+    public Item Put(int number) {
+        Item created = new Item(number);
+        current = created;
+        return created;
+    }
+
+    public Item Temporary(int number) => new Item(number);
+
+    public int Inspect(Item item) => item.Read();
+
+    public pure Item? Current() => current;
+
+    public List<Item> Repeat(Item item) {
+        List<Item> values = List<Item>.Empty();
+        values.Add(item);
+        values.Add(item);
+        return values;
+    }
+
+    public void Drop() { current = null; }
+
+    public async Task<Result<int,string>> Wait(Item item) {
+        await ready.WaitAsync();
+        return Result<int,string>.Success(item.Read());
+    }
+
+    public void Signal() { ready.Release(); }
+}

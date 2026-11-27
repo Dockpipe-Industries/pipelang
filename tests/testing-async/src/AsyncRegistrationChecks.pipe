@@ -1,0 +1,149 @@
+module PipeLang.Testing.AsyncSelfTests;
+import PipeLang.Testing;
+import PipeLang.Testing.Async;
+
+public Class AsyncRegistrationChecks {
+    private TestClock clock;
+    private AsyncFixture fixture;
+
+    public AsyncRegistrationChecks(TestClock clock, AsyncFixture fixture) {
+        this.clock = clock;
+        this.fixture = fixture;
+    }
+
+    private Result<void,TestFailure> VerifyCancelled(List<AsyncTestResult> actual,
+                                                          ScriptedAsyncCase first, ScriptedAsyncCase second) {
+        try Assert.Equal<int>(2, actual.Count, "pre-cancelled registry retains every declaration");
+        try Assert.Equal<string>("cancel.first", actual.At(0).test.id, "first stable ID retained");
+        try Assert.Equal<string>("cancel.second", actual.At(1).test.id, "declaration order retained");
+        foreach (AsyncTestResult result in actual) {
+            try Assert.Equal<TestOutcome>(TestOutcome.Cancelled, result.test.outcome, "pre-cancelled outcome");
+            try Assert.Equal<TestPhase>(TestPhase.NotRun, result.test.primaryPhase, "pre-cancelled phase");
+            try Assert.False(result.test.bodyRan, "pre-cancelled body skipped");
+            try Assert.False(result.test.cleanupRan, "pre-cancelled lifecycle skipped");
+        }
+        try Assert.Equal<string>("", first.trace, "first hooks never entered");
+        try Assert.Equal<string>("", second.trace, "second hooks never entered");
+        return Result<void,TestFailure>.Success();
+    }
+
+    private Result<void,TestFailure> VerifyCancellation(AsyncTestResult body, ScriptedAsyncCase bodyCase,
+                                                       AsyncTestResult cleanup, ScriptedAsyncCase cleanupCase) {
+        try Assert.Equal<TestOutcome>(TestOutcome.Cancelled, body.test.primaryOutcome, "body cancellation classified");
+        try Assert.Equal<TestPhase>(TestPhase.Body, body.test.primaryPhase, "cancellation observed after suspended body");
+        try Assert.Equal<string>("test.cancelled", body.test.primaryFailure.Value.code, "body cancellation identity");
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, body.test.cleanupOutcome, "mandatory cleanup succeeds independently");
+        try Assert.False(bodyCase.cleanupCancelled, "body cancellation does not contaminate cleanup token");
+        try Assert.True(bodyCase.asyncObserved, "native gate genuinely suspended source body");
+        try Assert.Equal<string>("setupbodycleanup", bodyCase.trace, "cancelled body still owns cleanup");
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, cleanup.test.primaryOutcome, "cancelled cleanup token does not cancel body");
+        try Assert.Equal<TestOutcome>(TestOutcome.Cancelled, cleanup.test.cleanupOutcome, "cleanup cancellation retained");
+        try Assert.Equal<TestOutcome>(TestOutcome.Failed, cleanup.test.outcome, "unsuccessful cleanup fails final case");
+        try Assert.True(cleanupCase.cleanupCancelled, "authored cleanup token is honored independently");
+        try Assert.Equal<string>("setupbodycleanup", cleanupCase.trace, "cancelled cleanup still attempted exactly once");
+        return Result<void,TestFailure>.Success();
+    }
+
+    public async Task<Result<TestStepResult,string>> Run(CancellationToken activeToken, CancellationToken cancelledToken) {
+        TestSteps steps = new TestSteps();
+        AsyncTestRunner runner = new AsyncTestRunner(clock);
+        ScriptedAsyncCase first = new ScriptedAsyncCase("cancel.first", AsyncBehavior.Success,
+            AsyncBehavior.Success, AsyncBehavior.Success, clock, fixture);
+        ScriptedAsyncCase second = new ScriptedAsyncCase("cancel.second", AsyncBehavior.Success,
+            AsyncBehavior.Success, AsyncBehavior.Success, clock, fixture);
+        List<IAsyncTestCase> registered = List<IAsyncTestCase>.Empty();
+        registered.Add(first);
+        registered.Add(second);
+        Result<List<AsyncTestResult>,string> cancelled = await runner.RunAll(registered, 10, 4,
+            cancelledToken, CancellationToken.None);
+        if (!cancelled.IsSuccess)
+            return Result<TestStepResult,string>.Failure(cancelled.Error);
+        Result<void,TestFailure> checkedCancellation = VerifyCancelled(cancelled.Value, first, second);
+        if (!checkedCancellation.IsSuccess)
+            return Result<TestStepResult,string>.Success(steps.From(checkedCancellation));
+
+        List<IAsyncTestCase> duplicates = List<IAsyncTestCase>.Empty();
+        duplicates.Add(first);
+        duplicates.Add(first);
+        bool duplicateRefused = false;
+        try {
+            Result<List<AsyncTestResult>,string> duplicate = await runner.RunAll(duplicates, 10, 4,
+                CancellationToken.None, CancellationToken.None);
+            duplicateRefused = duplicate.IsFailure;
+        } catch (Error error) {
+            duplicateRefused = true;
+        }
+        bool budgetRefused = false;
+        try {
+            Result<AsyncTestResult,string> invalid = await runner.Run(first, 0, 4,
+                CancellationToken.None, CancellationToken.None);
+            budgetRefused = invalid.IsFailure;
+        } catch (Error error) {
+            budgetRefused = true;
+        }
+        List<IAsyncTestCase> tooMany = List<IAsyncTestCase>.Empty();
+        while (tooMany.Count < 129)
+            tooMany.Add(first);
+        bool countRefused = false;
+        try {
+            Result<List<AsyncTestResult>,string> invalid = await runner.RunAll(tooMany, 10, 4,
+                CancellationToken.None, CancellationToken.None);
+            countRefused = invalid.IsFailure;
+        } catch (Error error) {
+            countRefused = true;
+        }
+        ScriptedAsyncCase emptyId = new ScriptedAsyncCase("", AsyncBehavior.Success,
+            AsyncBehavior.Success, AsyncBehavior.Success, clock, fixture);
+        bool emptyRefused = false;
+        try {
+            Result<AsyncTestResult,string> invalid = await runner.Run(emptyId, 10, 4,
+                CancellationToken.None, CancellationToken.None);
+            emptyRefused = invalid.IsFailure;
+        } catch (Error error) {
+            emptyRefused = true;
+        }
+        bool cleanupBudgetRefused = false;
+        try {
+            Result<AsyncTestResult,string> invalid = await runner.Run(first, 10, -1,
+                CancellationToken.None, CancellationToken.None);
+            cleanupBudgetRefused = invalid.IsFailure;
+        } catch (Error error) {
+            cleanupBudgetRefused = true;
+        }
+        Result<void,TestFailure> registration = Assert.True(duplicateRefused && budgetRefused && countRefused &&
+            emptyRefused && cleanupBudgetRefused && first.trace == "" && emptyId.trace == "",
+            "invalid registrations and budgets fail before setup");
+        if (!registration.IsSuccess)
+            return Result<TestStepResult,string>.Success(steps.From(registration));
+
+        Result<void,string> armed = fixture.FailClockAfter(0);
+        if (!armed.IsSuccess)
+            return Result<TestStepResult,string>.Failure(armed.Error);
+        Result<AsyncTestResult,string> clockFault = await runner.Run(first, 10, 4,
+            CancellationToken.None, CancellationToken.None);
+        if (!clockFault.IsSuccess)
+            return Result<TestStepResult,string>.Failure(clockFault.Error);
+        Result<void,TestFailure> clockChecked = Assert.True(
+            clockFault.Value.test.primaryPhase == TestPhase.NotRun &&
+            clockFault.Value.test.primaryFailure.Value.code == "test.clock_error" &&
+            !clockFault.Value.test.cleanupRan && first.trace == "",
+            "a failed initial clock cannot enter setup or invent a cleanup attempt");
+        if (!clockChecked.IsSuccess)
+            return Result<TestStepResult,string>.Success(steps.From(clockChecked));
+
+        ScriptedAsyncCase cleanupCase = new ScriptedAsyncCase("cleanup.cancelled", AsyncBehavior.Success,
+            AsyncBehavior.Success, AsyncBehavior.Success, clock, fixture);
+        Result<AsyncTestResult,string> cleanup = await runner.Run(cleanupCase, 10, 4,
+            CancellationToken.None, cancelledToken);
+        if (!cleanup.IsSuccess)
+            return Result<TestStepResult,string>.Failure(cleanup.Error);
+        ScriptedAsyncCase bodyCase = new ScriptedAsyncCase("body.cancelled", AsyncBehavior.Success,
+            AsyncBehavior.CancelDuringBody, AsyncBehavior.Success, clock, fixture);
+        Result<AsyncTestResult,string> body = await runner.Run(bodyCase, 10, 4,
+            activeToken, CancellationToken.None);
+        if (!body.IsSuccess)
+            return Result<TestStepResult,string>.Failure(body.Error);
+        return Result<TestStepResult,string>.Success(steps.From(
+            VerifyCancellation(body.Value, bodyCase, cleanup.Value, cleanupCase)));
+    }
+}

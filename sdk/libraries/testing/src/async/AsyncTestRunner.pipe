@@ -1,0 +1,245 @@
+module PipeLang.Testing.Async;
+import PipeLang.Testing;
+
+public Class AsyncTestRunner {
+    private TestClock clock;
+    private bool clockObserved = false;
+    private int lastNowMilliseconds = 0;
+
+    public AsyncTestRunner(TestClock clock) {
+        this.clock = clock;
+    }
+
+    private void ValidateBudgets(int bodyBudgetMilliseconds, int cleanupBudgetMilliseconds) {
+        if (bodyBudgetMilliseconds <= 0 || cleanupBudgetMilliseconds <= 0)
+            throw Error("Async test budgets must be positive milliseconds");
+    }
+
+    private pure TestStepResult Failed(string code, string message) {
+        return TestStepResult(TestOutcome.Failed, TestFailure(code, message));
+    }
+
+    private Result<int,TestFailure> ReadClock() {
+        try {
+            Result<int,string> now = clock.NowMilliseconds();
+            if (!now.IsSuccess)
+                return Result<int,TestFailure>.Failure(TestFailure("test.clock_error", now.Error));
+            if (now.Value < 0 || (clockObserved && now.Value < lastNowMilliseconds))
+                return Result<int,TestFailure>.Failure(
+                    TestFailure("test.clock_error", "Test clock must be nonnegative and monotonic"));
+            clockObserved = true;
+            lastNowMilliseconds = now.Value;
+            return Result<int,TestFailure>.Success(now.Value);
+        } catch (Error error) {
+            return Result<int,TestFailure>.Failure(TestFailure("test.clock_error", error.Message));
+        }
+    }
+
+    private Result<TestDeadline,TestFailure> Deadline(int budgetMilliseconds) {
+        Result<int,TestFailure> now = ReadClock();
+        if (!now.IsSuccess)
+            return Result<TestDeadline,TestFailure>.Failure(now.Error);
+        if (now.Value > 9223372036854775807 - budgetMilliseconds)
+            return Result<TestDeadline,TestFailure>.Failure(
+                TestFailure("test.clock_error", "Test deadline exceeds the clock range"));
+        return Result<TestDeadline,TestFailure>.Success(TestDeadline(now.Value + budgetMilliseconds));
+    }
+
+    private TestStepResult Check(TestDeadline deadline, CancellationToken token) {
+        Result<int,TestFailure> now = ReadClock();
+        if (!now.IsSuccess)
+            return TestStepResult(TestOutcome.Failed, now.Error);
+        if (token.IsCancellationRequested)
+            return TestStepResult(TestOutcome.Cancelled,
+                                  TestFailure("test.cancelled", "Test phase cancellation requested"));
+        if (now.Value >= deadline.expiresAtMilliseconds)
+            return Failed("test.deadline_exceeded", "Cooperative test phase deadline exceeded");
+        TestSteps steps = new TestSteps();
+        return steps.Passed();
+    }
+
+    private pure TestStepResult Transport(Result<TestStepResult,string> result) {
+        if (result.IsFailure)
+            return Failed("test.unexpected_error", result.Error);
+        if (result.IsCancelled)
+            return TestStepResult(TestOutcome.Cancelled, TestFailure("test.cancelled", result.Error));
+        TestStepResult step = result.Value;
+        if ((step.outcome == TestOutcome.Passed && step.failure.HasValue) ||
+            (step.outcome != TestOutcome.Passed && !step.failure.HasValue))
+            return Failed("test.invalid_step", "A test step must own a failure exactly when unsuccessful");
+        return step;
+    }
+
+    private async Task<Result<TestStepResult,string>> Setup(
+        IAsyncTestCase test, TestDeadline deadline, CancellationToken token) {
+        try {
+            Result<TestStepResult,string> result = await test.Setup(deadline, token);
+            return Result<TestStepResult,string>.Success(Transport(result));
+        } catch (Error error) {
+            return Result<TestStepResult,string>.Success(Failed("test.unexpected_error", error.Message));
+        }
+    }
+
+    private async Task<Result<TestStepResult,string>> Body(
+        IAsyncTestCase test, TestDeadline deadline, CancellationToken token) {
+        try {
+            Result<TestStepResult,string> result = await test.Body(deadline, token);
+            return Result<TestStepResult,string>.Success(Transport(result));
+        } catch (Error error) {
+            return Result<TestStepResult,string>.Success(Failed("test.unexpected_error", error.Message));
+        }
+    }
+
+    private async Task<Result<TestStepResult,string>> Cleanup(
+        IAsyncTestCase test, TestDeadline deadline, CancellationToken token) {
+        try {
+            Result<TestStepResult,string> result = await test.Cleanup(deadline, token);
+            return Result<TestStepResult,string>.Success(Transport(result));
+        } catch (Error error) {
+            return Result<TestStepResult,string>.Success(Failed("test.unexpected_error", error.Message));
+        }
+    }
+
+    private TestStepResult AfterPhase(TestStepResult step, TestDeadline deadline, CancellationToken token) {
+        TestStepResult checked = Check(deadline, token);
+        // Never overwrite an authored assertion or an earlier phase failure.
+        if (step.outcome != TestOutcome.Passed)
+            return step;
+        return checked;
+    }
+
+    private async Task<Result<AsyncCleanupResult,string>> AttemptCleanup(
+        IAsyncTestCase test, int budgetMilliseconds, CancellationToken token) {
+        Result<TestDeadline,TestFailure> created = Deadline(budgetMilliseconds);
+        TestDeadline deadline = TestDeadline(0);
+        TestFailure? clockFailure = null;
+        if (created.IsSuccess)
+            deadline = created.Value;
+        else
+            clockFailure = created.Error;
+
+        // Cleanup is attempted even with a cancelled token or failed clock.
+        // The expired fallback prohibits a hook from starting unbounded work.
+        Result<TestStepResult,string> called = await Cleanup(test, deadline, token);
+        TestStepResult step = Transport(called);
+        TestStepResult checked = Check(deadline, token);
+        if (checked.failure.HasValue && checked.failure.Value.code == "test.clock_error") {
+            if (!clockFailure.HasValue)
+                clockFailure = checked.failure;
+        } else if (step.outcome == TestOutcome.Passed && !clockFailure.HasValue) {
+            step = checked;
+        }
+        return Result<AsyncCleanupResult,string>.Success(AsyncCleanupResult(step, clockFailure));
+    }
+
+    private pure AsyncTestResult Completed(string id, string name, TestStepResult primary,
+                                          TestPhase phase, AsyncCleanupResult cleanup,
+                                          bool bodyRan, bool cleanupRan) {
+        TestOutcome outcome = primary.outcome;
+        if (cleanup.step.outcome != TestOutcome.Passed || cleanup.clockFailure.HasValue)
+            outcome = TestOutcome.Failed;
+        TestResult test = TestResult(id, name, outcome, primary.outcome, phase, primary.failure,
+                                     cleanup.step.outcome, cleanup.step.failure, bodyRan, cleanupRan);
+        return AsyncTestResult(test, cleanup.clockFailure);
+    }
+
+    private async Task<Result<AsyncTestResult,string>> RunRegistered(
+        IAsyncTestCase test, string id, string name, int bodyBudgetMilliseconds,
+        int cleanupBudgetMilliseconds, CancellationToken bodyToken, CancellationToken cleanupToken) {
+        TestSteps steps = new TestSteps();
+        AsyncCleanupResult cleanup = AsyncCleanupResult(steps.Passed(), null);
+        if (bodyToken.IsCancellationRequested) {
+            TestStepResult cancelled = TestStepResult(TestOutcome.Cancelled,
+                TestFailure("test.cancelled", "Cancelled before setup"));
+            return Result<AsyncTestResult,string>.Success(
+                Completed(id, name, cancelled, TestPhase.NotRun, cleanup, false, false));
+        }
+        Result<TestDeadline,TestFailure> created = Deadline(bodyBudgetMilliseconds);
+        if (!created.IsSuccess) {
+            TestStepResult failed = TestStepResult(TestOutcome.Failed, created.Error);
+            return Result<AsyncTestResult,string>.Success(
+                Completed(id, name, failed, TestPhase.NotRun, cleanup, false, false));
+        }
+        TestDeadline deadline = created.Value;
+        TestStepResult primary = Check(deadline, bodyToken);
+        if (primary.outcome != TestOutcome.Passed)
+            return Result<AsyncTestResult,string>.Success(
+                Completed(id, name, primary, TestPhase.NotRun, cleanup, false, false));
+
+        TestPhase phase = TestPhase.Setup;
+        bool bodyRan = false;
+        try {
+            Result<TestStepResult,string> setup = await Setup(test, deadline, bodyToken);
+            primary = AfterPhase(Transport(setup), deadline, bodyToken);
+            if (primary.outcome == TestOutcome.Passed) {
+                primary = Check(deadline, bodyToken);
+                if (primary.outcome == TestOutcome.Passed) {
+                    phase = TestPhase.Body;
+                    bodyRan = true;
+                    Result<TestStepResult,string> body = await Body(test, deadline, bodyToken);
+                    primary = AfterPhase(Transport(body), deadline, bodyToken);
+                }
+            }
+        } finally {
+            // Every setup attempt owns one awaited cleanup attempt, including
+            // terminal faults for which no AsyncTestResult can be promised.
+            Result<AsyncCleanupResult,string> finished = await AttemptCleanup(
+                test, cleanupBudgetMilliseconds, cleanupToken);
+            if (finished.IsSuccess)
+                cleanup = finished.Value;
+            else if (finished.IsCancelled)
+                cleanup = AsyncCleanupResult(TestStepResult(TestOutcome.Cancelled,
+                    TestFailure("test.cancelled", finished.Error)), null);
+            else
+                cleanup = AsyncCleanupResult(Failed("test.unexpected_error", finished.Error), null);
+        }
+        return Result<AsyncTestResult,string>.Success(
+            Completed(id, name, primary, phase, cleanup, bodyRan, true));
+    }
+
+    public async Task<Result<AsyncTestResult,string>> Run(
+        IAsyncTestCase test, int bodyBudgetMilliseconds, int cleanupBudgetMilliseconds,
+        CancellationToken bodyToken, CancellationToken cleanupToken) {
+        ValidateBudgets(bodyBudgetMilliseconds, cleanupBudgetMilliseconds);
+        string id = test.Id();
+        string name = test.Name();
+        if (id == "" || name == "")
+            throw Error("Tests require an explicit nonempty stable id and name");
+        Result<AsyncTestResult,string> result = await RunRegistered(test, id, name, bodyBudgetMilliseconds,
+            cleanupBudgetMilliseconds, bodyToken, cleanupToken);
+        return result;
+    }
+
+    public async Task<Result<List<AsyncTestResult>,string>> RunAll(
+        List<IAsyncTestCase> tests, int bodyBudgetMilliseconds, int cleanupBudgetMilliseconds,
+        CancellationToken bodyToken, CancellationToken cleanupToken) {
+        ValidateBudgets(bodyBudgetMilliseconds, cleanupBudgetMilliseconds);
+        if (tests.Count > 128)
+            throw Error("A test suite supports at most 128 explicitly registered cases");
+        HashSet<string> ids = HashSet<string>.Empty();
+        List<string> registeredIds = List<string>.Empty();
+        List<string> registeredNames = List<string>.Empty();
+        foreach (IAsyncTestCase test in tests) {
+            string id = test.Id();
+            string name = test.Name();
+            if (id == "" || name == "" || !ids.Add(id))
+                throw Error("Test registration requires nonempty unique stable ids and names");
+            registeredIds.Add(id);
+            registeredNames.Add(name);
+        }
+        List<AsyncTestResult> results = List<AsyncTestResult>.Empty();
+        int index = 0;
+        foreach (IAsyncTestCase test in tests) {
+            Result<AsyncTestResult,string> result = await RunRegistered(test, registeredIds.At(index),
+                registeredNames.At(index), bodyBudgetMilliseconds, cleanupBudgetMilliseconds, bodyToken, cleanupToken);
+            if (!result.IsSuccess) {
+                if (result.IsCancelled)
+                    return Result<List<AsyncTestResult>,string>.Cancelled(result.Error);
+                return Result<List<AsyncTestResult>,string>.Failure(result.Error);
+            }
+            results.Add(result.Value);
+            index = index + 1;
+        }
+        return Result<List<AsyncTestResult>,string>.Success(results);
+    }
+}

@@ -1,0 +1,28 @@
+public Class App {
+    public static async Task<Result<int,string>> Run(int index) {
+        var result = await App.Read(index);
+
+        return result;
+    }
+
+    private static async Task<Result<int,string>> Read(int index) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(100);
+        var flags = List<bool>.Empty();
+        flags.Add(acquired);
+        flags.Add(true);
+
+        var values = Array<int>.Create(2, 7);
+        values.Set(1, 42);
+
+        if (index == values.Count) {
+            return Result<int,string>.Success(values.At(index));
+        }
+
+        if (flags.At(index)) {
+            return Result<int,string>.Success(values.At(index));
+        }
+
+        return Result<int,string>.Success(flags.Count);
+    }
+}

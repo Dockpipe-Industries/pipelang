@@ -1,0 +1,6 @@
+module Contracts;
+
+public source Interface ICounter {
+    pure int Read();
+    void Increment();
+}

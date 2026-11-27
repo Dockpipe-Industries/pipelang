@@ -1,48 +1,35 @@
-name: Standalone release
+name: Native SDK package candidate
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  artifacts:
-    runs-on: ubuntu-latest
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          go-version: '1.26.9'
-      - name: Verify release tag
-        if: startsWith(github.ref, 'refs/tags/')
-        run: test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
-      - name: Install the locked Dockpipe version
-        run: python3 tooling/bootstrap_dockpipe.py --output "$RUNNER_TEMP/dockpipe"
-      - name: Build standalone archives through Dockpipe
+          persist-credentials: false
+      - name: Prepare native containment
         run: |
-          "$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml --
-          echo "PIPELANG_RELEASE_DIR=$("$DOCKPIPE_BIN" scope workflow release release)" >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v4
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          command -v cmake c++ strace systemd-run
+      - name: Install checksum-locked DockPipe
+        run: cmake -DOUTPUT_DIRECTORY="$RUNNER_TEMP/dockpipe" -P tooling/bootstrap-dockpipe.cmake
+      - name: Build, qualify and package through DockPipe
+        run: |
+          "$DOCKPIPE_BIN" --workflow-file workflows/build/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/check/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/test/config.yml
+          "$DOCKPIPE_BIN" --workflow-file workflows/release/config.yml
+          echo "PACKAGE_DIRECTORY=$(readlink -f bin/native-package)" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: pipelang-standalone
-          path: ${{ env.PIPELANG_RELEASE_DIR }}
+          name: pipelang-native-linux-amd64
+          path: ${{ env.PACKAGE_DIRECTORY }}
           if-no-files-found: error
-  draft-release:
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: artifacts
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: pipelang-standalone
-          path: release-artifacts
-      - name: Create a reviewable standalone GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" release-artifacts/* \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
-            --title "PipeLang $GITHUB_REF_NAME" \
-            --notes 'Standalone CLI archives and checksums. Go SDK consumers use the matching module tag. Native platform qualification is recorded separately.'
+          retention-days: 7

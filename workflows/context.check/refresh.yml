@@ -1,0 +1,10 @@
+name: pipelang-context-refresh
+description: Qualify context corrections while reusing byte-identical compiler sources and explicitly rechecking changed runtime contracts.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: refresh
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/context.check/assets/scripts/refresh.sh

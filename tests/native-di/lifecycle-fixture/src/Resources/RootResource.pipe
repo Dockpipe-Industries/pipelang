@@ -1,0 +1,24 @@
+module DiLifecycle.Resources;
+import DiLifecycle.Contracts;
+
+public Class RootResource : IRootResource, IResourceCleanup {
+    private ResourcePort port;
+    private int resource;
+    private RootDependency dependency;
+
+    public RootResource(ResourcePort resourcePort, int identity, RootDependency child) {
+        port = resourcePort;
+        resource = identity;
+        dependency = child;
+    }
+
+    public pure int Identity() => resource;
+    public pure int DependencyIdentity() => dependency.Identity();
+
+    public Result<void,string> Close(CancellationToken token) {
+        Result<void,string> noted = port.Note("cleanup-live", resource, dependency.Identity());
+        if (!noted.IsSuccess)
+            return noted;
+        return port.Close(resource, token);
+    }
+}

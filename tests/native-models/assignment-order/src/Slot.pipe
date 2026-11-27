@@ -1,0 +1,5 @@
+module AssignmentOrder;
+
+public Record Slot {
+    public Result<int,string> acquired;
+}

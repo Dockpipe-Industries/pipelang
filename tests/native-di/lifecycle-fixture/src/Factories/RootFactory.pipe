@@ -1,0 +1,33 @@
+module DiLifecycle.Factories;
+import DiLifecycle.Contracts;
+import DiLifecycle.Resources;
+
+public Class RootFactory {
+    private ResourcePort port;
+
+    public RootFactory(ResourcePort resourcePort) {
+        port = resourcePort;
+    }
+
+    public Result<RootResource,string> Create(RootDependency dependency) {
+        Result<int,string> opened = Result<int,string>.Failure("fixture.not_acquired");
+        bool transferred = false;
+        try {
+            opened = port.Open("root", 0);
+            if (!opened.IsSuccess) {
+                if (opened.IsCancelled)
+                    return Result<RootResource,string>.Cancelled(opened.Error);
+                return Result<RootResource,string>.Failure(opened.Error);
+            }
+            RootResource service = new RootResource(port, opened.Value, dependency);
+            transferred = true;
+            return Result<RootResource,string>.Success(service);
+        } finally {
+            if (opened.IsSuccess && !transferred) {
+                Result<void,string> closed = port.Close(opened.Value, CancellationToken.None);
+                if (!closed.IsSuccess)
+                    throw Error(closed.Error);
+            }
+        }
+    }
+}

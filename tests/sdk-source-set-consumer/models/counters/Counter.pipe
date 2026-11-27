@@ -1,0 +1,13 @@
+module Counters;
+import Contracts;
+import Foundation;
+import Values;
+
+public Class Counter : CounterBase, ICounter {
+    public Counter(int initial) : base(initial) {}
+
+    public override pure int Read() {
+        Offset offset = new Offset {};
+        return base.Read() + offset.amount;
+    }
+}

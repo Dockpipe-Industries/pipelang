@@ -1,0 +1,7 @@
+module PipeLang.Json;
+
+// Composition owns the sink and its commit or abort policy. A failed or
+// cancelled write may have delivered a prefix to that sink.
+public Interface JsonValueRenderer {
+    Result<int,string> WriteValue(JsonNode value, JsonRenderOptions options, CancellationToken token);
+}

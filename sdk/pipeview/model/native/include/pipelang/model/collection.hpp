@@ -1,0 +1,291 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+#pragma once
+#include "result.hpp"
+#include "limits.hpp"
+#include <cstdint>
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace pipelang::model {
+inline constexpr std::size_t maximumListElements = 4096;
+inline constexpr std::size_t maximumListBytes = 1024 * 1024;
+
+// Return cap + 1 as a stable saturation sentinel. Never add before checking.
+inline constexpr std::size_t boundedOwnedSum(std::size_t left, std::size_t right,
+                                   std::size_t cap) noexcept {
+    if (left > cap || right > cap || right > cap - left)
+        return cap + 1;
+    return left + right;
+}
+
+template<class E> std::size_t ownedBytes(const IResult<E>& value);
+template<class E> std::size_t ownedElements(const IResult<E>& value);
+template<class T> class List;
+template<class T, std::size_t N> class FixedArray;
+// These declarations must precede every wrapper's dependent recursive calls in
+// result.hpp too. Definitions there must recurse using unqualified calls so ADL
+// finds generated record owners. A declaration here alone cannot fix lookup in
+// an earlier wrapper definition.
+template<class T> constexpr std::size_t ownedBytes(const T& value);
+inline std::size_t ownedBytes(const std::string& value);
+inline std::size_t ownedBytes(const Error& value);
+template<class T> constexpr std::size_t ownedBytes(const Optional<T>& value);
+template<class T, class E> constexpr std::size_t ownedBytes(const Result<T, E>& value);
+template<class T> std::size_t ownedBytes(const List<T>& value);
+template<class T, std::size_t N> constexpr std::size_t ownedBytes(const FixedArray<T, N>& value);
+template<class T> constexpr std::size_t ownedElements(const T& value);
+template<class T> constexpr std::size_t ownedElements(const Optional<T>& value);
+template<class T, class E> constexpr std::size_t ownedElements(const Result<T, E>& value);
+template<class T> std::size_t ownedElements(const List<T>& value);
+template<class T, std::size_t N> constexpr std::size_t ownedElements(const FixedArray<T, N>& value);
+template<class T> void validate(const List<T>& value);
+template<class T, std::size_t N> constexpr void validate(const FixedArray<T, N>& value);
+
+template<class T>
+constexpr std::size_t ownedBytes(const T&) { return sizeof(T); }
+inline std::size_t ownedBytes(const std::string& value) {
+    return boundedOwnedSum(sizeof(std::string), value.size(), maximumListBytes);
+}
+inline std::size_t ownedBytes(const Error& value) {
+    return boundedOwnedSum(sizeof(value), ownedBytes(value.message), maximumListBytes);
+}
+template<class T>
+constexpr std::size_t ownedElements(const T&) { return 0; }
+
+// Footprint is a deterministic conservative logical ownership cost: the list
+// object plus each element's recursively owned cost. Capacity/allocator overhead
+// is deliberately excluded; it is not a process RSS guarantee. Generated record
+// overloads count sizeof(record) plus recursively owned field costs. Wrapper
+// overloads count their object size plus the active payload/error costs.
+template<class T>
+constexpr std::size_t ownedBytes(const Optional<T>& value) {
+    return value.has_value() ? boundedOwnedSum(sizeof(value), ownedBytes(value.value()), maximumListBytes) : sizeof(value);
+}
+template<class T, class E>
+constexpr std::size_t ownedBytes(const Result<T, E>& value) {
+    auto bytes = boundedOwnedSum(sizeof(value), ownedBytes(value.error()), maximumListBytes);
+    if constexpr (!std::is_void_v<T>) {
+        if (value.is_success())
+            bytes = boundedOwnedSum(bytes, ownedBytes(value.value()), maximumListBytes);
+    }
+    return bytes;
+}
+template<class T>
+constexpr std::size_t ownedElements(const Optional<T>& value) {
+    return value.has_value() ? ownedElements(value.value()) : 0;
+}
+template<class T, class E>
+constexpr std::size_t ownedElements(const Result<T, E>& value) {
+    auto elements = ownedElements(value.error());
+    if constexpr (!std::is_void_v<T>) {
+        if (value.is_success())
+            elements = boundedOwnedSum(elements, ownedElements(value.value()), maximumListElements);
+    }
+    return elements;
+}
+
+inline constexpr std::size_t addOwnedBytes(std::size_t left, std::size_t right) {
+    return boundedOwnedSum(left, right, maximumListBytes);
+}
+
+class EvaluationBudget {
+public:
+    static EvaluationBudget forInitialization(std::size_t requested) {
+        requireInitializationSteps(requested);
+        EvaluationBudget budget;
+        budget.remaining_ = requested;
+        return budget;
+    }
+
+    static EvaluationBudget forInvocation(std::size_t requested) {
+        requireEvaluationStepsPerSegment(requested);
+        EvaluationBudget budget;
+        budget.remaining_ = requested;
+        budget.normalResetSteps_ = requested;
+        return budget;
+    }
+
+    class CleanupRegion {
+    public:
+        explicit CleanupRegion(EvaluationBudget& budget) : budget_(budget) { ++budget_.cleanupDepth_; }
+        CleanupRegion(const CleanupRegion&) = delete;
+        CleanupRegion& operator=(const CleanupRegion&) = delete;
+        ~CleanupRegion() { --budget_.cleanupDepth_; }
+    private:
+        EvaluationBudget& budget_;
+    };
+#if defined(__SANITIZE_ADDRESS__)
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+#endif
+    void step() {
+        if (cleanupDepth_ == 0 && !cancellationCheck_ && !shared_ && remaining_ != 0) {
+            --remaining_;
+            return;
+        }
+        slowStep();
+    }
+
+    void chargeSteps(std::size_t count) {
+        if (cleanupDepth_ == 0 && !cancellationCheck_ && !shared_ && remaining_ >= count) {
+            remaining_ -= count;
+            return;
+        }
+        for (std::size_t index = 0; index < count; ++index)
+            step();
+    }
+
+private:
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    void slowStep() {
+        if (cleanupDepth_ == 0 && cancellationCheck_ && cancellationCheck_())
+            throw OperationCancelled("parallel operation cancelled");
+        if (shared_) {
+            auto& remaining = cleanupDepth_ == 0 ? shared_->normal : shared_->cleanup;
+            auto observed = remaining.load(std::memory_order_relaxed);
+            for (;;) {
+                if (observed == 0)
+                    throw EvaluationLimitFailure(cleanupDepth_ == 0
+                        ? "source evaluation budget exceeded" : "cleanup evaluation budget exceeded");
+                if (remaining.compare_exchange_strong(observed, observed - 1, std::memory_order_relaxed))
+                    return;
+            }
+        }
+        auto& remaining = cleanupDepth_ == 0 ? remaining_ : cleanupRemaining_;
+        if (remaining == 0)
+            throw EvaluationLimitFailure(cleanupDepth_ == 0
+                ? "source evaluation budget exceeded" : "cleanup evaluation budget exceeded");
+        --remaining;
+    }
+public:
+    bool inCleanup() const noexcept {
+        return cleanupDepth_ != 0;
+    }
+    CleanupRegion cleanup() { return CleanupRegion(*this); }
+    void reset() {
+        // A suspension inside cleanup is not a new cleanup allowance. Awaited
+        // source descendants share this region and the same finite reserve.
+        if (cleanupDepth_ != 0)
+            return;
+        remaining_ = normalResetSteps_;
+        cleanupRemaining_ = maximumSteps;
+        if (shared_) {
+            shared_->normal.store(normalResetSteps_, std::memory_order_relaxed);
+            shared_->cleanup.store(maximumSteps, std::memory_order_relaxed);
+        }
+    }
+    void prepareParallel() {
+        if (cleanupDepth_ != 0)
+            throw ExecutionFailure("parallel work cannot start during cleanup");
+        if (!shared_)
+            shared_ = std::make_shared<SharedCounters>(remaining_, cleanupRemaining_);
+    }
+    EvaluationBudget fork() const {
+        if (!shared_)
+            throw ExecutionFailure("parallel budget must be prepared before worker creation");
+        EvaluationBudget child;
+        child.shared_ = shared_;
+        child.normalResetSteps_ = normalResetSteps_;
+        child.cancellationCheck_ = cancellationCheck_;
+        return child;
+    }
+    void setCancellationCheck(std::function<bool()> check) {
+        if (!cancellationCheck_) {
+            cancellationCheck_ = std::move(check);
+            return;
+        }
+        auto inherited = std::move(cancellationCheck_);
+        cancellationCheck_ = [inherited = std::move(inherited), check = std::move(check)] {
+            return inherited() || (check && check());
+        };
+    }
+    static constexpr std::size_t maximumSteps = defaultEvaluationSteps;
+private:
+    struct SharedCounters {
+        SharedCounters(std::size_t normalSteps, std::size_t cleanupSteps)
+            : normal(normalSteps), cleanup(cleanupSteps) {}
+        std::atomic<std::size_t> normal;
+        std::atomic<std::size_t> cleanup;
+    };
+    std::shared_ptr<SharedCounters> shared_;
+    std::function<bool()> cancellationCheck_;
+    std::size_t normalResetSteps_ = maximumSteps;
+    std::size_t remaining_ = maximumSteps;
+    std::size_t cleanupRemaining_ = maximumSteps;
+    unsigned cleanupDepth_ = 0;
+};
+
+struct ListOwnership {
+    std::size_t bytes;
+    std::size_t elements;
+
+    ListOwnership appended(std::size_t itemBytes, std::size_t itemElements) const {
+        const auto elementCost = boundedOwnedSum(1, itemElements, maximumListElements);
+        const auto nextElements = boundedOwnedSum(elements, elementCost, maximumListElements);
+        const auto nextBytes = boundedOwnedSum(bytes, itemBytes, maximumListBytes);
+        if (nextElements > maximumListElements)
+            throw ExecutionFailure("list aggregate element limit exceeded");
+        if (nextBytes > maximumListBytes)
+            throw ExecutionFailure("list owned byte limit exceeded");
+        return {nextBytes, nextElements};
+    }
+};
+
+template<class T>
+class List {
+public:
+    static List Empty() { return {}; }
+    void add(T value) {
+        using pipelang::model::validate;
+        validate(value);
+        using pipelang::model::ownedBytes;
+        using pipelang::model::ownedElements;
+        const auto next = ListOwnership{bytes_, elements_}.appended(ownedBytes(value), ownedElements(value));
+        // vector append has the strong exception guarantee for compiler-admitted
+        // copyable owned values. Cost counters change only after append succeeds.
+        values_.push_back(std::move(value));
+        elements_ = next.elements;
+        bytes_ = next.bytes;
+    }
+    std::int64_t count() const { return static_cast<std::int64_t>(values_.size()); }
+    T at(std::int64_t index) const {
+        if (index < 0 || static_cast<std::uint64_t>(index) >= values_.size())
+            throw ExecutionFailure("list index outside admitted range");
+        return values_[static_cast<std::size_t>(index)];
+    }
+    const std::vector<T>& values() const { return values_; }
+    std::size_t ownedByteCost() const { return bytes_; }
+    std::size_t ownedElementCost() const { return elements_; }
+    bool operator==(const List& other) const { return values_ == other.values_; }
+private:
+    std::vector<T> values_;
+    std::size_t bytes_ = sizeof(List);
+    std::size_t elements_ = 0;
+};
+template<class T>
+std::size_t ownedBytes(const List<T>& value) { return value.ownedByteCost(); }
+template<class T>
+std::size_t ownedElements(const List<T>& value) { return value.ownedElementCost(); }
+template<class T>
+void validate(const List<T>& value) {
+    // Recurse even though normal insertion already validates: host validation
+    // and generated record validation have the same owning boundary.
+    using pipelang::model::validate;
+    for (const auto& item : value.values())
+        validate(item);
+    if (value.ownedByteCost() > maximumListBytes ||
+        value.ownedElementCost() > maximumListElements)
+        throw ExecutionFailure("list ownership budget exceeded");
+}
+}

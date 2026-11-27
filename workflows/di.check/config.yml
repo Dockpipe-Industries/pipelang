@@ -1,0 +1,10 @@
+name: pipelang-di-check
+description: Qualify source composition lifetimes against an explicitly selected installed SDK.
+platforms:
+  - deb
+docker_preflight: false
+steps:
+  - id: qualify
+    kind: host
+    cwd: repo
+    cmd: bash workflows/di.check/assets/scripts/run.sh

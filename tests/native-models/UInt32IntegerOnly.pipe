@@ -1,0 +1,28 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Class IntegerWords {
+    public uint32 word = 0xffffffffu;
+    public pure uint32 Read() => word;
+    public pure int Widen(uint32 value) => int.FromUInt32(value);
+    public pure uint32 Narrow(int value) => uint32.FromInt(value);
+    public pure uint32 Mix(uint32 value) => value ^ (value << 13);
+    public pure uint32 Nested() {
+        List<uint32> inner = List<uint32>.Empty();
+        inner.Add(0x80000000u);
+        List<List<uint32>> outer = List<List<uint32>>.Empty();
+        outer.Add(inner);
+        return outer.At(0).At(0);
+    }
+    public pure uint32 Keys() {
+        Dictionary<uint32,uint32> values = Dictionary<uint32,uint32>.Empty();
+        values.Add(0xffffffffu, 7u);
+        values.Add(0x80000000u, 9u);
+        HashSet<uint32> keys = HashSet<uint32>.Empty();
+        keys.Add(0xffffffffu);
+        return keys.Contains(0xffffffffu) ? values.At(0xffffffffu) + values.At(0x80000000u) : 0u;
+    }
+    public bool SharedKeys() {
+        ConcurrentDictionary<uint32,uint32> values = ConcurrentDictionary<uint32,uint32>.Empty();
+        values.TryAdd(0xffffffffu, 0x80000000u);
+        return values.TryGet(0xffffffffu).Value == 0x80000000u;
+    }
+}

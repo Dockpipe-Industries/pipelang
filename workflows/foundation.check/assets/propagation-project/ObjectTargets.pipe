@@ -1,0 +1,44 @@
+// Fields/methods inserted into the conformance service by the project fixture.
+private TargetBox firstTarget = new TargetBox();
+private TargetBox secondTarget = new TargetBox();
+private TargetBox currentTarget = firstTarget;
+
+private TargetBox Target() {
+    int marked = Mark(1);
+    return currentTarget;
+}
+
+private Result<int,FailureData> SwitchAndRead(int mode) {
+    currentTarget = secondTarget;
+    return Read(2, mode);
+}
+
+public Result<int,FailureData> ObjectAssign(int mode) {
+    trace = 0;
+    firstTarget.value = 0;
+    secondTarget.value = 0;
+    currentTarget = firstTarget;
+    Target().value = try SwitchAndRead(mode);
+    return Result<int,FailureData>.Success(firstTarget.value * 10 + secondTarget.value);
+}
+
+public Result<int,FailureData> ObjectCollection(int mode) {
+    trace = 0;
+    firstTarget.items = List<int>.Empty();
+    secondTarget.items = List<int>.Empty();
+    currentTarget = firstTarget;
+    Target().items.Add(try SwitchAndRead(mode));
+    return Result<int,FailureData>.Success(firstTarget.items.Count * 10 + secondTarget.items.Count);
+}
+
+private Result<TargetBox,FailureData> Acquire(int mode) {
+    int value = try Read(1, mode);
+    return Result<TargetBox,FailureData>.Success(firstTarget);
+}
+
+public Result<int,FailureData> ObjectFromResult(int mode) {
+    trace = 0;
+    firstTarget.value = 0;
+    (try Acquire(mode)).value = Mark(2);
+    return Result<int,FailureData>.Success(firstTarget.value);
+}

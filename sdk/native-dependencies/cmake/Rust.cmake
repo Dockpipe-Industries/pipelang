@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+if(NOT PACKAGE MATCHES "^[A-Za-z][A-Za-z0-9_-]*$")
+    message(FATAL_ERROR "Rust requires an explicit package name")
+endif()
+set(options)
+if(ACTION STREQUAL "test")
+    list(APPEND options --lib)
+endif()
+if(NOT DEFAULT_FEATURES)
+    list(APPEND options --no-default-features)
+endif()
+foreach(feature IN LISTS FEATURES)
+    if(NOT feature MATCHES "^[A-Za-z0-9_/-]+$")
+        message(FATAL_ERROR "Invalid Rust feature")
+    endif()
+endforeach()
+if(FEATURES)
+    list(JOIN FEATURES "," features)
+    list(APPEND options --features "${features}")
+endif()
+set(native_tools)
+foreach(native_tool cc cxx ar cmake)
+    if(DEFINED tool_${native_tool})
+        string(TOUPPER "${native_tool}" environment_name)
+        list(APPEND native_tools "${environment_name}=${tool_${native_tool}}")
+    endif()
+endforeach()
+pipelang_execute(${native_tools} "CARGO_HOME=${CACHE_DIRECTORY}" "CARGO_TARGET_DIR=${BUILD_DIRECTORY}/cargo"
+    "CARGO_BUILD_JOBS=1" "CARGO_NET_OFFLINE=true" "RUSTC=${tool_rustc}"
+    "RUSTFLAGS=${RUSTFLAGS}" "SOURCE_DATE_EPOCH=0" "AWS_LC_SYS_STATIC=1"
+    "${tool_cargo}" "${ACTION}" --manifest-path "${MANIFEST}" --package "${PACKAGE}"
+    --target "${target_triple}" --release --frozen --offline --jobs 1 ${options})

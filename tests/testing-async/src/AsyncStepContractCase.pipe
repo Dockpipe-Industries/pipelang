@@ -1,0 +1,42 @@
+module PipeLang.Testing.AsyncSelfTests;
+import PipeLang.Testing;
+import PipeLang.Testing.Async;
+
+public Class AsyncStepContractCase : IAsyncTestCase {
+    public pure string Id() => "async.step-values";
+    public pure string Name() => "Async assertions retain owned typed outcomes";
+
+    public async Task<Result<TestStepResult,string>> Setup(TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.Passed());
+    }
+
+    public async Task<Result<TestStepResult,string>> Cleanup(TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.Passed());
+    }
+
+    private Result<void,TestFailure> Verify() {
+        TestSteps steps = new TestSteps();
+        TestStepResult passed = steps.From(Assert.Equal<int>(7, 7, "owned value"));
+        try Assert.Equal<TestOutcome>(TestOutcome.Passed, passed.outcome, "successful typed step");
+        try Assert.False(passed.failure.HasValue, "successful step has no error");
+        TestStepResult failed = steps.From(Assert.Equal<string>("first", "second", "original assertion"));
+        try Assert.Equal<TestOutcome>(TestOutcome.Failed, failed.outcome, "failed typed step");
+        try Assert.Equal<string>("assert.equal", failed.failure.Value.code, "typed assertion code");
+        try Assert.Equal<string>("original assertion", failed.failure.Value.message, "typed assertion message");
+        TestStepResult cancelled = steps.From(Result<void,TestFailure>.Cancelled(TestFailure("domain.cancel", "owned cancellation")));
+        try Assert.Equal<TestOutcome>(TestOutcome.Cancelled, cancelled.outcome, "typed cancellation");
+        try Assert.Equal<string>("domain.cancel", cancelled.failure.Value.code, "typed cancellation code");
+        TestDeadlines deadlines = new TestDeadlines();
+        try Assert.Equal<int>(6, deadlines.RemainingMilliseconds(TestDeadline(10), 4), "remaining cooperative budget");
+        try Assert.Equal<int>(0, deadlines.RemainingMilliseconds(TestDeadline(10), 10), "exact boundary expires");
+        try Assert.Equal<int>(0, deadlines.RemainingMilliseconds(TestDeadline(0), 4), "fallback deadline expires");
+        return Result<void,TestFailure>.Success();
+    }
+
+    public async Task<Result<TestStepResult,string>> Body(TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        return Result<TestStepResult,string>.Success(steps.From(Verify()));
+    }
+}

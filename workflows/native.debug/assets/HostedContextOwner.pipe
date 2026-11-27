@@ -1,0 +1,98 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedContextOwner;
+
+public Class Child {
+    private ContextOwner lifetime;
+
+    public Child() {
+        lifetime = ContextOwner.Create();
+    }
+
+    public pure ContextOwner Lifetime() => lifetime;
+}
+
+public Class IncompleteChild {
+    private ContextOwner initialized;
+    private ContextOwner missing;
+
+    public IncompleteChild() {
+        initialized = ContextOwner.Create();
+    }
+}
+
+public model Class ContextOwnerModel {
+    private ContextOwner lifetime;
+    private Child? child;
+    public int changes;
+
+    public ContextOwnerModel() {
+        lifetime = ContextOwner.Create();
+        lifetime.Invalidate();
+        lifetime.Replace();
+    }
+
+    public pure ContextOwner Lifetime() => lifetime;
+    public pure int Changes() => changes;
+
+    public void Replace() {
+        lifetime.Replace();
+        changes = changes + 1;
+    }
+
+    public void Invalidate() {
+        lifetime.Invalidate();
+        changes = changes + 1;
+    }
+
+    public void Close() {
+        lifetime.Close();
+    }
+
+    public void InvalidateThenFail() {
+        lifetime.Invalidate();
+        changes = changes + 1;
+        throw Error("source failure");
+    }
+
+    public void CreateChild() {
+        child = new Child();
+    }
+
+    public void DropChild() {
+        child = null;
+    }
+
+    public pure ContextOwner ChildLifetime() => child.Value.Lifetime();
+
+    public void CreateIncompleteChild() {
+        IncompleteChild incomplete = new IncompleteChild();
+    }
+
+    public int Exercise(int scenario) {
+        ContextOwner operation = ContextOwner.Create();
+        if (scenario == 0) {
+            operation.Invalidate();
+            operation.Replace();
+            operation.Close();
+            operation.Close();
+            return 42;
+        }
+
+        operation.Close();
+        try {
+            operation.Replace();
+            return -1;
+        } catch (Error failure) {
+            if (failure.Message == "context.closed")
+                return 42;
+            throw failure;
+        }
+    }
+}
+
+public Class Entry {
+    public static int Run(int scenario) {
+        ContextOwnerModel model = new ContextOwnerModel();
+        return model.Exercise(scenario);
+    }
+}

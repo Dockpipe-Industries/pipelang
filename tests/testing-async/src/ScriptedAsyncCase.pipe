@@ -1,0 +1,104 @@
+module PipeLang.Testing.AsyncSelfTests;
+import PipeLang.Testing;
+import PipeLang.Testing.Async;
+
+public Class ScriptedAsyncCase : IAsyncTestCase {
+    private string id;
+    private AsyncBehavior setup;
+    private AsyncBehavior body;
+    private AsyncBehavior cleanup;
+    private TestClock clock;
+    private AsyncFixture fixture;
+    public string trace = "";
+    public int setupDeadline = 0;
+    public int bodyDeadline = 0;
+    public int cleanupDeadline = 0;
+    public bool cleanupCancelled = false;
+    public bool asyncObserved = false;
+
+    public ScriptedAsyncCase(string id, AsyncBehavior setup, AsyncBehavior body,
+                             AsyncBehavior cleanup, TestClock clock, AsyncFixture fixture) {
+        this.id = id;
+        this.setup = setup;
+        this.body = body;
+        this.cleanup = cleanup;
+        this.clock = clock;
+        this.fixture = fixture;
+    }
+
+    public pure string Id() => id;
+    public pure string Name() => "Async lifecycle " + id;
+
+    private async Task<Result<TestStepResult,string>> Execute(
+        AsyncBehavior behavior, string phase, TestDeadline deadline, CancellationToken token) {
+        TestSteps steps = new TestSteps();
+        if (behavior == AsyncBehavior.Throw)
+            throw Error(phase);
+        if (behavior == AsyncBehavior.AssertionFailure)
+            return Result<TestStepResult,string>.Success(steps.From(Assert.True(false, phase)));
+        if (behavior == AsyncBehavior.Cancelled)
+            return Result<TestStepResult,string>.Success(steps.From(
+                Result<void,TestFailure>.Cancelled(TestFailure("fixture.cancelled", phase))));
+        if (behavior == AsyncBehavior.TransportFailure)
+            return Result<TestStepResult,string>.Failure(phase);
+        if (behavior == AsyncBehavior.TransportCancelled)
+            return Result<TestStepResult,string>.Cancelled(phase);
+
+        Result<int,string> now = clock.NowMilliseconds();
+        if (!now.IsSuccess)
+            return Result<TestStepResult,string>.Failure(now.Error);
+        TestDeadlines deadlines = new TestDeadlines();
+        int remaining = deadlines.RemainingMilliseconds(deadline, now.Value);
+        if (remaining == 0)
+            return Result<TestStepResult,string>.Success(TestStepResult(TestOutcome.Failed,
+                TestFailure("test.deadline_exceeded", phase)));
+        Result<bool,string> observed = await fixture.Observe(phase, remaining, token);
+        if (!observed.IsSuccess) {
+            if (observed.IsCancelled)
+                return Result<TestStepResult,string>.Cancelled(observed.Error);
+            return Result<TestStepResult,string>.Failure(observed.Error);
+        }
+        asyncObserved = asyncObserved || observed.Value;
+        if (behavior == AsyncBehavior.CancelDuringBody) {
+            Result<void,string> cancelled = fixture.RequestBodyCancellation();
+            if (!cancelled.IsSuccess)
+                return Result<TestStepResult,string>.Failure(cancelled.Error);
+        }
+        if (behavior == AsyncBehavior.Expire) {
+            Result<void,string> advanced = fixture.AdvanceMilliseconds(11);
+            if (!advanced.IsSuccess)
+                return Result<TestStepResult,string>.Failure(advanced.Error);
+        }
+        if (behavior == AsyncBehavior.FailPhaseClock || behavior == AsyncBehavior.FailCleanupClock) {
+            int successfulReads = 0;
+            if (behavior == AsyncBehavior.FailCleanupClock)
+                successfulReads = 1;
+            Result<void,string> armed = fixture.FailClockAfter(successfulReads);
+            if (!armed.IsSuccess)
+                return Result<TestStepResult,string>.Failure(armed.Error);
+        }
+        return Result<TestStepResult,string>.Success(steps.Passed());
+    }
+
+    public async Task<Result<TestStepResult,string>> Setup(TestDeadline deadline, CancellationToken token) {
+        trace = trace + "setup";
+        setupDeadline = deadline.expiresAtMilliseconds;
+        Result<TestStepResult,string> result = await Execute(setup, "setup", deadline, token);
+        return result;
+    }
+
+    public async Task<Result<TestStepResult,string>> Body(TestDeadline deadline, CancellationToken token) {
+        trace = trace + "body";
+        bodyDeadline = deadline.expiresAtMilliseconds;
+        Result<TestStepResult,string> result = await Execute(body, "body", deadline, token);
+        return result;
+    }
+
+    public async Task<Result<TestStepResult,string>> Cleanup(TestDeadline deadline, CancellationToken token) {
+        trace = trace + "cleanup";
+        cleanupDeadline = deadline.expiresAtMilliseconds;
+        cleanupCancelled = token.IsCancellationRequested;
+        Result<TestStepResult,string> result = await Execute(cleanup, "cleanup", deadline, token);
+        return result;
+    }
+}

@@ -1,0 +1,5 @@
+module PipeLang.Crypto;
+
+public Record CryptoFailure {
+    public string code = "";
+}

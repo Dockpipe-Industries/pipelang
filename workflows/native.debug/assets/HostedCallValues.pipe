@@ -1,0 +1,55 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedCallValues;
+
+public Record Request {
+    public string label;
+    public List<string> paths;
+}
+
+public Record Fault {
+    public string code;
+}
+
+public model Class Session {
+    private List<string> saved = List<string>.Empty();
+
+    public Session() {}
+
+    public async Task<Result<int,string>> Run(Request request, bool commit, int expected, CancellationToken token) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool opened = await gate.WaitAsync(2);
+        if (opened || token.IsCancellationRequested)
+            return Result<int,string>.Cancelled("request cancelled");
+        if (request.label != "qualification" || request.paths.Count != 2 ||
+            request.paths.At(0) != "source.pipe" || expected != 2)
+            return Result<int,string>.Failure("native request changed");
+        if (commit)
+            saved = request.paths;
+        if (saved.Count != 2 || saved.At(1) != "résultat.json")
+            return Result<int,string>.Failure("native request did not persist");
+        return Result<int,string>.Success(saved.Count);
+    }
+
+    public pure int Inspect() {
+        return saved.Count;
+    }
+
+    public void Clear() {
+        saved = List<string>.Empty();
+    }
+
+    private Result<int,Fault> CheckInput(int scenario) {
+        if (scenario == 1)
+            return Result<int,Fault>.Failure(Fault("request rejected"));
+        if (scenario == 2)
+            return Result<int,Fault>.Cancelled(Fault("request retired"));
+        if (scenario == 3)
+            throw Error("request faulted");
+        return Result<int,Fault>.Success(saved.Count);
+    }
+
+    public Result<int,Fault> Check(int scenario) {
+        int count = try CheckInput(scenario);
+        return Result<int,Fault>.Success(count);
+    }
+}

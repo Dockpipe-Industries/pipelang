@@ -1,0 +1,6 @@
+module PipeLang.Crypto;
+
+public Record Sha256Digest {
+    public int byteCount = 0;
+    public string lowercaseHex = "";
+}

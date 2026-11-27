@@ -1,0 +1,8 @@
+module DiLifecycle.Contracts;
+
+public Interface ResourcePort {
+    Result<int,string> Open(string kind, int context);
+    Result<void,string> Close(int resource, CancellationToken token);
+    Result<void,string> Note(string operation, int resource, int dependency);
+    Task<Result<int,string>> Wait(int resource, CancellationToken token);
+}

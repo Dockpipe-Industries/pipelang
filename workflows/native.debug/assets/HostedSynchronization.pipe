@@ -1,0 +1,103 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedSynchronization;
+
+public Record Item {
+    public string label;
+    public int value;
+}
+
+public Class Counter {
+    private Atomic<int> count;
+    private Lock gate;
+    public Counter() {}
+
+    private pure int Adjust(int input) {
+        return input + 1;
+    }
+
+    private pure int Compute(int input) {
+        return Adjust(input) * 2;
+    }
+
+    public int Next() {
+        Atomic<int> sum = Atomic<int>.Create(0);
+        List<int> inputs = List<int>.Empty();
+        inputs.Add(1);
+        inputs.Add(2);
+        parallel foreach (int input in inputs) {
+            sum.Add(Compute(input));
+        }
+        if (sum.Load() != Compute(1) + Compute(2))
+            throw Error("worker helper returned an incorrect result");
+        lock (gate) {
+            return count.Increment();
+        }
+    }
+}
+
+public model Class Session {
+    private Atomic<int> number = Atomic<int>.Create(40);
+    private Atomic<int> workers;
+    private Lock workerLock = Lock.Create();
+    private SemaphoreSlim available = SemaphoreSlim.Create(1, 16);
+    private SemaphoreSlim defaultGate;
+    private SemaphoreSlim waitGate = SemaphoreSlim.Create(0, 1);
+    private Counter child = new Counter();
+    private ConcurrentQueue<Item> inbox;
+    private ConcurrentStack<int> stack = ConcurrentStack<int>.Empty();
+    private ConcurrentDictionary<string,Item> registry = ConcurrentDictionary<string,Item>.Empty();
+
+    public Session() {}
+
+    private pure int WorkerAmount(int input) {
+        return input;
+    }
+
+    private async Task<Result<int,string>> Observe(Atomic<int> value, CancellationToken token) {
+        bool acquired = await waitGate.WaitAsync(10, token);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected permit");
+        return Result<int,string>.Success(value.Load());
+    }
+
+    public async Task<Result<int,string>> Run(int scenario, CancellationToken token) {
+        Atomic<int> alias = number;
+        Atomic<int> shared = workers;
+        Lock guard = workerLock;
+        SemaphoreSlim permits = available;
+        ConcurrentQueue<Item> queue = inbox;
+        List<int> inputs = List<int>.Empty();
+        inputs.Add(1);
+        inputs.Add(2);
+        parallel foreach (int item in inputs) {
+            lock (guard) {
+                lock (guard) {
+                    shared.Add(WorkerAmount(item));
+                    permits.Release();
+                    Item message = new Item {label = "worker", value = item};
+                    queue.Enqueue(message);
+                }
+            }
+        }
+        int current = alias.Increment();
+        int fromChild = child.Next();
+        Item history = new Item {label = "retained", value = current};
+        registry.Set(string.FromInt(fromChild), history);
+        stack.Push(current);
+        int sum = 0;
+        foreach (Item item in inbox) {
+            sum = sum + item.value;
+        }
+        if (sum != fromChild * 3 || stack.Count != fromChild || stack.TryPeek().Value != current ||
+            registry.Count != fromChild || registry.At("1").value != 41)
+            return Result<int,string>.Failure("hosted collections lost their content");
+        if (permits.CurrentCount != 1 + fromChild * 2 || defaultGate.Release() != fromChild - 1)
+            return Result<int,string>.Failure("hosted semaphore lost its permit count");
+        if (shared.Load() != fromChild * 3 || current != 40 + fromChild)
+            return Result<int,string>.Failure("hosted fields lost their shared cell");
+        Result<int,string> observed = await Observe(alias, token);
+        if (scenario == 2)
+            return Result<int,string>.Failure("expected hosted failure");
+        return observed;
+    }
+}

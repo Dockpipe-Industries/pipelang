@@ -1,0 +1,131 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ByteBuffers;
+
+public Record Packet {
+    public ByteBuffer body;
+}
+
+public Class BufferOwner {
+    private ByteBuffer stored = ByteBuffer.Empty();
+
+    private ByteBuffer Reset() {
+        stored = ByteBuffer.FromUtf8("new");
+        return ByteBuffer.FromUtf8(" tail");
+    }
+
+    public bool OrderedMutation() {
+        stored = ByteBuffer.FromUtf8("old");
+        stored.Append(Reset());
+        return stored.DecodeUtf8() == "new tail";
+    }
+
+    public int Snapshot(ByteBuffer buffer) {
+        stored = buffer;
+        int total = 0;
+        foreach (uint32 item in stored) {
+            stored.Add(9u);
+            total = total + int.FromUInt32(item);
+        }
+        return total;
+    }
+}
+
+public Class App {
+    private static async Task<Result<Packet,string>> Transfer(ByteBuffer value) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(15);
+        if (acquired)
+            return Result<Packet,string>.Failure("unexpected semaphore signal");
+        return Result<Packet,string>.Success(Packet(value));
+    }
+
+    public static async Task<Result<int,string>> Run(int scenario) {
+        var bytes = ByteBuffer.FromUtf8("éabc");
+        if (scenario == 1)
+            return Result<int,string>.Success(int.FromUInt32(bytes.At(bytes.Length)));
+        if (scenario == 2)
+            return Result<int,string>.Success(bytes.Slice(-1, 0).Length);
+        if (scenario == 3)
+            return Result<int,string>.Success(bytes.Slice(1, 5).Length);
+        if (scenario == 4)
+            return Result<int,string>.Success(bytes.IndexOf(bytes, bytes.Length + 1));
+        if (scenario == 5) {
+            bytes.Add(255u);
+            return Result<int,string>.Success(string.Utf8Length(bytes.DecodeUtf8()));
+        }
+        if (scenario == 6) {
+            bytes.Add(256u);
+            return Result<int,string>.Success(bytes.Length);
+        }
+        if (scenario == 7) {
+            var full = ByteBuffer.FromUtf8("x");
+            for (int power = 0; power < 20; power = power + 1)
+                full.Append(full);
+            full.Add(1u);
+            return Result<int,string>.Success(full.Length);
+        }
+
+        bytes.Add(0u);
+        bytes.Add(255u);
+        var prefix = bytes;
+        var substring = bytes.Slice(2, 3);
+        bytes.Append(bytes);
+        bytes.Append(substring);
+        var branched = prefix;
+        branched.Add(9u);
+        if (bytes.Length != 17 || bytes.At(13) != 255u ||
+            prefix.Length != 7 || prefix.At(5) != 0u || prefix.At(6) != 255u ||
+            branched.Length != 8 || branched.At(7) != 9u ||
+            substring.DecodeUtf8() != "abc" || bytes.IndexOf(substring, 6) != 9 ||
+            bytes.IndexOf(ByteBuffer.Empty(), 17) != 17 || bytes.IndexOf(ByteBuffer.FromUtf8("missing"), 0) != -1)
+            return Result<int,string>.Failure("byte views or append copies changed");
+
+        Packet returned = try await Transfer(prefix);
+        List<Packet> captured = List<Packet>.Empty();
+        captured.Add(returned);
+        if (captured.At(0).body != prefix || bytes.Slice(0, 2).DecodeUtf8() != "é" ||
+            bytes.Slice(17, 0) != ByteBuffer.Empty())
+            return Result<int,string>.Failure("byte buffer changed after suspension or projection");
+        returned.body.Add(42u);
+        if (returned.body.At(7) != 42u || captured.At(0).body != prefix || prefix.Length != 7)
+            return Result<int,string>.Failure("mutating a record field changed the captured value");
+
+        var owner = new BufferOwner();
+        if (!owner.OrderedMutation() || owner.Snapshot(substring) != 294)
+            return Result<int,string>.Failure("byte receiver order or iteration snapshot changed");
+        return Result<int,string>.Success(42);
+    }
+}
+
+public model Class ReferenceApp {
+    public ReferenceApp() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        var result = await App.Run(scenario);
+        return result;
+    }
+}
+
+public Interface BytePort {
+    Task<Result<Packet,string>> Echo(Packet request, CancellationToken token);
+}
+
+public Class Session {
+    private ByteBuffer stored;
+    private BytePort port;
+
+    public Session(ByteBuffer initial, BytePort port) {
+        stored = initial;
+        this.port = port;
+    }
+
+    public async Task<Result<Packet,string>> Run(int scenario, CancellationToken token) {
+        if (scenario == 1) {
+            stored.Add(153u);
+            stored.Add(256u);
+        }
+        Packet response = try await port.Echo(Packet(stored), token);
+        stored = response.body;
+        return Result<Packet,string>.Success(Packet(stored));
+    }
+}

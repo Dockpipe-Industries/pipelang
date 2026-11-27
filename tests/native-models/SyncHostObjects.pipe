@@ -1,0 +1,37 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Interface World {
+    Result<int,string> Read(int number);
+}
+
+public source Interface ISampler {
+    Result<int,string> Sample();
+}
+
+public Class Sampler : ISampler {
+    private World world;
+    private int calls = 0;
+
+    public Sampler(World service) {
+        world = service;
+    }
+
+    public pure int Calls() => calls;
+
+    public Result<int,string> Sample() {
+        calls = calls + 1;
+        return world.Read(calls);
+    }
+}
+
+public Class App {
+    private Sampler sampler;
+    private ISampler view;
+
+    public App(World service) {
+        sampler = new Sampler(service);
+        view = sampler;
+    }
+
+    public pure int Calls() => sampler.Calls();
+    public Result<int,string> Run() => view.Sample();
+}

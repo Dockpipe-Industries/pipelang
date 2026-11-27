@@ -1,0 +1,275 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Interface CleanupHost {
+    Task<Result<int,string>> Pause(int phase, CancellationToken token);
+    Result<void,string> Mark(int phase);
+}
+
+public source Interface IResource {
+    Task<Result<int,string>> Release(CancellationToken token);
+}
+
+public Class Resource : IResource {
+    private CleanupHost host;
+    public Resource(CleanupHost host) { this.host = host; }
+    private async Task<Result<int,string>> Finish<T>(int phase, T retained, CancellationToken token) {
+        Result<int,string> result = await host.Pause(phase, token);
+        return result;
+    }
+    public async Task<Result<int,string>> Release(CancellationToken token) {
+        try {
+            Result<int,string> result = await Finish<int>(40, 19, token);
+            return result;
+        } finally {
+            Result<int,string> result = await host.Pause(41, CancellationToken.None);
+        }
+    }
+}
+
+public Class VirtualResource {
+    public virtual async Task<Result<int,string>> Release(CancellationToken token) {
+        return Result<int,string>.Success(1);
+    }
+}
+
+public Class OwnedResource : VirtualResource {
+    private CleanupHost host;
+    public OwnedResource(CleanupHost host) { this.host = host; }
+    public override async Task<Result<int,string>> Release(CancellationToken token) {
+        try {
+            return Result<int,string>.Success(17);
+        } finally {
+            Result<int,string> result = await host.Pause(42, token);
+        }
+    }
+}
+
+public Class App {
+    private CleanupHost host;
+    private IResource resource;
+    private VirtualResource virtualResource;
+    private SemaphoreSlim permits = SemaphoreSlim.Create(0, 1);
+    public int marker = 0;
+    public int returns = 0;
+    public int cleaned = 0;
+    public string detail = "original";
+
+    public App(CleanupHost host) {
+        this.host = host;
+        resource = new Resource(host);
+        virtualResource = new OwnedResource(host);
+    }
+    private int Next() {
+        returns = returns + 1;
+        return returns;
+    }
+    public void Edit(int value) { marker = value; }
+    public void ReleasePermit() { permits.Release(); }
+
+    public async Task<Result<int,string>> Run(CancellationToken token, bool bodyFails, bool cleanupFails) {
+        try {
+            Result<int,string> body = await host.Pause(1, token);
+            marker = marker + 1;
+            if (bodyFails)
+                throw Error("primary failure");
+            if (!body.IsSuccess)
+                return body;
+            return Result<int,string>.Success(Next());
+        } finally {
+            marker = marker + 10;
+            Result<void,string> marked = host.Mark(2);
+            if (!marked.IsSuccess)
+                throw Error(marked.Error);
+            Result<int,string> cleanup = await host.Pause(2, CancellationToken.None);
+            marker = marker + 100;
+            cleaned = cleaned + 1;
+            if (cleanupFails)
+                throw Error("cleanup failure");
+        }
+    }
+
+    public async Task<Result<string,string>> OwnedReturn() {
+        try {
+            return Result<string,string>.Success(detail);
+        } finally {
+            detail = "before suspension";
+            Result<int,string> cleanup = await host.Pause(3, CancellationToken.None);
+            detail = "after suspension";
+        }
+    }
+
+    public async Task<Result<int,string>> Transfers() {
+        int total = 0;
+        try {
+            for (int index = 0; index < 4; index = index + 1) {
+                try {
+                    if (index == 0)
+                        continue;
+                    if (index == 2)
+                        break;
+                    total = total + index;
+                } finally {
+                    Result<int,string> cleanup = await host.Pause(10 + index, CancellationToken.None);
+                }
+            }
+            return Result<int,string>.Success(total);
+        } finally {
+            Result<int,string> cleanup = await host.Pause(20, CancellationToken.None);
+        }
+    }
+
+    public async Task<Result<int,string>> NestedTransfers(List<int> values) {
+        int total = 0;
+        foreach (int value in values) {
+            try {
+                if (value == 0)
+                    continue;
+                if (value == 2)
+                    break;
+                total = total + value;
+            } finally {
+                Result<int,string> cleanup = await host.Pause(50 + value, CancellationToken.None);
+            }
+        }
+        int index = 0;
+        while (index < 3) {
+            try {
+                index = index + 1;
+                if (index == 1)
+                    continue;
+                if (index == 3)
+                    break;
+                total = total + index;
+            } finally {
+                Result<int,string> cleanup = await host.Pause(60 + index, CancellationToken.None);
+            }
+        }
+        try {
+            marker = 1;
+        } finally {
+            for (int local = 0; local < 2; local = local + 1) {
+                try {
+                    Result<int,string> first = await host.Pause(70 + local, CancellationToken.None);
+                } finally {
+                    Result<int,string> second = await host.Pause(80 + local, CancellationToken.None);
+                }
+            }
+        }
+        return Result<int,string>.Success(total);
+    }
+
+    private pure Result<bool,string> LoopCondition(int index) => Result<bool,string>.Success(index < 3);
+    public async Task<Result<int,string>> PropagatingLoop() {
+        int total = 0;
+        for (int index = 0; try LoopCondition(index); index = index + 1) {
+            try {
+                if (index < 2)
+                    continue;
+                total = total + index;
+            } finally {
+                Result<int,string> cleanup = await host.Pause(21 + index, CancellationToken.None);
+            }
+        }
+        return Result<int,string>.Success(total);
+    }
+
+    private pure Result<int,string> FailedValue() => Result<int,string>.Failure("propagated failure");
+    public async Task<Result<int,string>> PropagatedReturn() {
+        try {
+            int value = try FailedValue();
+            return Result<int,string>.Success(value);
+        } finally {
+            Result<int,string> cleanup = await host.Pause(24, CancellationToken.None);
+        }
+    }
+
+    public async Task<Result<int,string>> Recover() {
+        try {
+            try {
+                return Result<int,string>.Success(99);
+            } finally {
+                Result<int,string> cleanup = await host.Pause(25, CancellationToken.None);
+                throw Error("cleanup replaces return");
+            }
+        } catch (Error error) {
+            detail = error.Message;
+            Result<int,string> recovered = await host.Pause(26, CancellationToken.None);
+            return Result<int,string>.Success(8);
+        } finally {
+            Result<int,string> cleanup = await host.Pause(27, CancellationToken.None);
+        }
+    }
+
+    public async Task<Result<int,string>> CleanupHelpers(CancellationToken token) {
+        try {
+            Result<int,string> body = await host.Pause(1, token);
+            return body;
+        } finally {
+            Result<int,string> first = await resource.Release(CancellationToken.None);
+            Result<int,string> second = await virtualResource.Release(CancellationToken.None);
+            cleaned = cleaned + 1;
+        }
+    }
+
+    public async Task<Result<int,string>> ExplicitCleanupToken(CancellationToken cleanupToken) {
+        try {
+            return Result<int,string>.Success(7);
+        } finally {
+            Result<int,string> cleanup = await host.Pause(28, cleanupToken);
+            if (cleanup.IsCancelled)
+                marker = 28;
+        }
+    }
+
+    public async Task<Result<int,string>> CleanupWait() {
+        try {
+            return Result<int,string>.Success(7);
+        } finally {
+            await permits.WaitAsync(CancellationToken.None);
+            cleaned = cleaned + 1;
+        }
+    }
+
+    public async Task<Result<int,string>> CleanupBudget() {
+        try {
+            return Result<int,string>.Success(7);
+        } finally {
+            for (int round = 0; round < 12; round = round + 1) {
+                Result<int,string> cleanup = await host.Pause(30, CancellationToken.None);
+                int total = 0;
+                for (int index = 0; index < 4096; index = index + 1)
+                    total = total + index;
+                marker = total;
+            }
+        }
+    }
+
+    public async Task<Result<int,string>> ExhaustedBody() {
+        try {
+            while (true)
+                marker = marker + 1;
+        } finally {
+            Result<int,string> cleanup = await host.Pause(31, CancellationToken.None);
+            throw Error("secondary cleanup failure");
+        }
+    }
+
+    private async Task<Result<int,string>> Extra() => Result<int,string>.Success(8);
+    private async Task<Result<int,string>> Recur(int depth, bool extra) {
+        if (depth > 0) {
+            Result<int,string> child = await Recur(depth - 1, extra);
+            return child;
+        }
+        try {
+            return Result<int,string>.Success(9);
+        } finally {
+            Result<int,string> cleanup = await host.Pause(32, CancellationToken.None);
+            if (extra) {
+                Result<int,string> child = await Extra();
+            }
+        }
+    }
+    public async Task<Result<int,string>> Depth(int depth, bool extra) {
+        Result<int,string> child = await Recur(depth, extra);
+        return child;
+    }
+}

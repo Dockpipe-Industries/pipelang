@@ -1,0 +1,6 @@
+module PipeLang.Testing.Async;
+import PipeLang.Testing;
+
+public Interface TestClock {
+    Result<int,string> NowMilliseconds();
+}

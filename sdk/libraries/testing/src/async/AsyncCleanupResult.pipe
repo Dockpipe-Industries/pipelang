@@ -1,0 +1,7 @@
+module PipeLang.Testing.Async;
+import PipeLang.Testing;
+
+public Record AsyncCleanupResult {
+    public TestStepResult step;
+    public TestFailure? clockFailure;
+}

@@ -1,0 +1,25 @@
+module DiLifecycle.Bootstrap;
+import DiLifecycle.Contracts;
+import DiLifecycle.Resources;
+import DiLifecycle.Factories;
+
+public composition Startup {
+    singleton input ResourcePort;
+    scoped input ScopeStamp;
+
+    singleton RootDependencyFactory = RootDependencyFactory;
+    singleton RootFactory = RootFactory;
+    singleton ScopedFactory = ScopedFactory;
+    singleton TransientFactory = TransientFactory;
+
+    transient RootDependency = factory RootDependencyFactory.Create;
+    singleton IRootResource = factory RootFactory.Create;
+    scoped IScopedResource = factory ScopedFactory.Create;
+    transient ITransientResource = factory TransientFactory.Create;
+
+    cleanup IResourceCleanup.Close;
+
+    export IRootResource;
+    export IScopedResource;
+    export ITransientResource;
+}

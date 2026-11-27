@@ -1,0 +1,10 @@
+name: pipelang-foundation-check
+description: Qualify a bounded language foundation candidate through an immutable native SDK and focused runtime proofs.
+platforms: [deb]
+vault: none
+docker_preflight: false
+steps:
+- id: foundation
+  kind: host
+  cwd: repo
+  cmd: /bin/bash workflows/foundation.check/assets/scripts/run.sh

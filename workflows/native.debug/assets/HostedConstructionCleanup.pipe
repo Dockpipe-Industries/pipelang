@@ -1,0 +1,632 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedConstructionCleanup;
+
+public Interface Probe {
+    pure int Mark(int event);
+    pure Result<int,string> Check();
+}
+
+public Class Part {
+    public Part(int scenario) {
+        if (scenario == 1)
+            throw Error("fixture.caught");
+        if (scenario == 2)
+            throw Error("fixture.primary");
+    }
+
+    public pure int Read() => 30;
+}
+
+public model Class Session {
+    private int value = 0;
+    private int resultCleanupCount = 0;
+    private NestedState receiverState;
+    private IResult<string> initialResult;
+    private bool directWritesInInvocation;
+    private Atomic<int> standalone = Atomic<int>.Create(0);
+    private Atomic<int> defaultCounter;
+    private Lock implicitLock;
+    private ConcurrentDictionary<int,int> concurrentValues;
+    private ConcurrentQueue<int> deferred;
+    private ConcurrentStack<int> backtrack;
+    private List<int> remembered = List<int>.Empty();
+
+    public Session(Probe probe, int scenario) {
+        try {
+            if (scenario == 5) {
+                for (int index = 0; index < 10000; index = index + 1)
+                    value = value + 1;
+            }
+            try {
+                Part part = new Part(scenario);
+                value = part.Read();
+                if (scenario == 3)
+                    value = probe.Mark(3);
+                if (scenario == 6)
+                    value = probe.Check().Value;
+                if (scenario == 7)
+                    value = LoopTransfers();
+                if (scenario == 8)
+                    value = CheckSavepoints();
+                if (scenario == 9 || scenario == 10)
+                    value = BuildList(scenario == 10);
+                if (scenario == 15)
+                    value = CollectionSnapshots();
+                if (scenario == 17) {
+                    standalone.Store(4);
+                    if (defaultCounter.Load() != 0)
+                        throw Error("fixture.atomic.default");
+                    defaultCounter.Store(2);
+                    int previous = defaultCounter.Exchange(5);
+                    value = standalone.Load() + previous + defaultCounter.Load();
+                }
+                if (scenario == 18)
+                    value = Synchronization();
+                if (scenario == 19)
+                    value = ConcurrentCollections();
+                if (scenario == 20)
+                    value = CheckConcurrentEffects();
+                if (scenario == 21)
+                    value = FloatingInitialization();
+                if (scenario == 22)
+                    value = CheckResultPropagation();
+                if (scenario == 23)
+                    value = CheckRecordAssignment();
+                if (scenario == 24)
+                    value = CheckUnsignedMath();
+                if (scenario == 25)
+                    value = CheckOwnedFixedValues();
+                if (scenario == 27)
+                    value = CheckSdkProjections();
+                if (scenario == 28)
+                    value = CheckErasedResults();
+                if (scenario == 29)
+                    value = CheckDirectConstructorWrites();
+                if (scenario == 26) {
+                    FixedArray<int,1> one = FixedArray<int,1>.Create(11);
+                    value = one.At(-1);
+                }
+                if (scenario == 16) {
+                    Stack<int> empty = Stack<int>.Empty();
+                    value = Unwrap(empty.TryPop());
+                }
+                if (scenario == 11)
+                    value = Recursive(30);
+                if (scenario == 12)
+                    value = Recursive(31);
+                if (scenario == 13) {
+                    RecursivePart withinLimit = new RecursivePart(30);
+                    value = withinLimit.Read();
+                }
+                if (scenario == 14) {
+                    RecursivePart beyondLimit = new RecursivePart(31);
+                    value = beyondLimit.Read();
+                }
+            } catch (Error error) {
+                if (error.Message == "fixture.caught")
+                    value = 7;
+                else if (error.Message == "Result.Value requires Success")
+                    value = 8;
+                else if (error.Message == "list index outside admitted range" ||
+                         error.Message == "Optional.Value requires Some")
+                    value = 9;
+                else
+                    throw;
+            } finally {
+                value = value + probe.Mark(2);
+                if (scenario == 2 || scenario == 4) {
+                    try {
+                        throw Error("fixture.cleanup");
+                    } finally {
+                        value = value + probe.Mark(20);
+                    }
+                }
+            }
+        } finally {
+            value = value + probe.Mark(10);
+        }
+        initialResult = Result<int,string>.Success(0);
+        directWritesInInvocation = scenario == 30;
+    }
+
+    private int CheckDirectConstructorWrites() {
+        MutableReport report = new MutableReport();
+        try {
+            ReportUpdate failed = new ReportUpdate(report, true);
+            return -1;
+        } catch (Error error) {
+            if (error.Message != "fixture.direct.rollback")
+                throw;
+        }
+        if (report.number != 0 || report.details.title != "initial" ||
+            report.details.packet.DecodeUtf8() != "initial")
+            return -2;
+        ReportUpdate committed = new ReportUpdate(report, false);
+        if (report.number != 30 || report.details.title != "next" ||
+            report.details.packet.DecodeUtf8() != "initial changed")
+            return -3;
+        return report.number;
+    }
+
+    private int CheckErasedResults() {
+        try {
+            if (initialResult.IsSuccess)
+                return -1;
+        } catch (Error error) {
+            if (error.Message != "result interface is empty")
+                throw;
+        }
+        IResult<string> failed = Result<int,string>.Failure("expected failure");
+        IResult<string> cancelled = Result<int,string>.Cancelled("expected cancellation");
+        IResult<string>? optional = Result<int,string>.Success(7);
+        if (!failed.IsFailure || failed.Error != "expected failure" ||
+            !cancelled.IsCancelled || cancelled.Error != "expected cancellation" ||
+            !optional.Value.IsSuccess)
+            return -1;
+        return 30;
+    }
+
+    private int FloatingInitialization() {
+        uint32 facts = FloatingEnvironment.Observe();
+        if ((facts & FloatingEnvironment.PortableRoundingKnown) == 0u)
+            throw Error("fixture.floating.environment");
+        float source = float.FromInt(16);
+        float32 single = float32.FromFloat(source);
+        int total = int.FromFloat(float.Sqrt(source));
+        if (float32.ToBits(float32.Sqrt(single)) != 1082130432u)
+            throw Error("fixture.floating.binary32");
+        try {
+            total = int.FromFloat(float.PositiveInfinity);
+        } catch (Error error) {
+            if (error.Message != "floating-to-int conversion requires a finite value in signed64 range")
+                throw;
+            total = total + 26;
+        }
+        return total;
+    }
+
+    private Result<void,string> CheckResultStatus(int outcome) {
+        if (outcome == 1)
+            return Result<void,string>.Failure("fixture.result.failure");
+        if (outcome == 2)
+            return Result<void,string>.Cancelled("fixture.result.cancelled");
+        return Result<void,string>.Success();
+    }
+
+    private Result<int,string> PropagateDefault(Result<int,string> input, int outcome) {
+        try {
+            try CheckResultStatus(outcome);
+            int number = try input;
+            return Result<int,string>.Success(number + 1);
+        } finally {
+            resultCleanupCount = resultCleanupCount + 1;
+        }
+    }
+
+    private int CheckResultPropagation() {
+        Result<int,string> success = PropagateDefault(Result<int,string>.Success(26), 0);
+        Result<int,string> failed = PropagateDefault(Result<int,string>.Failure("fixture.result.input"), 0);
+        Result<int,string> cancelled = PropagateDefault(Result<int,string>.Success(0), 2);
+        if (!success.IsSuccess || !failed.IsFailure || failed.Error != "fixture.result.input" ||
+            !cancelled.IsCancelled || cancelled.Error != "fixture.result.cancelled")
+            return -1;
+        return success.Value + resultCleanupCount;
+    }
+
+    private int CheckRecordAssignment() {
+        NestedState state = new NestedState {};
+        string prefix = "local";
+        state.data.title = prefix + " captured";
+        state.data.packet = ByteBuffer.FromUtf8(state.data.title);
+        receiverState.data.title = state.data.packet.DecodeUtf8();
+        receiverState.data.packet = ByteBuffer.FromUtf8("saved payload");
+        receiverState.data.accepted = true;
+        if (receiverState.data.title != "local captured" || !receiverState.data.accepted)
+            return -1;
+        if (receiverState.data.packet.DecodeUtf8() != "saved payload")
+            return -1;
+        return 30;
+    }
+
+    private int CheckUnsignedMath() {
+        uint32 high = uint32.FromInt(4294967295);
+        uint32 wrapped = uint32.WrappingAdd(high, 1u);
+        if (wrapped != 0u || high >> 31 != 1u)
+            return -1;
+        uint32 offset = 5u;
+        int total = int.FromUInt32(offset * 6u);
+        try {
+            high = high + 1u;
+            return -1;
+        } catch (Error error) {
+            if (error.Message != "uint32 addition overflow")
+                throw;
+        }
+        try {
+            high = high << 32;
+            return -1;
+        } catch (Error error) {
+            if (error.Message != "uint32 shift count must be between 0 and 31")
+                throw;
+        }
+        try {
+            high = uint32.FromInt(-1);
+            return -1;
+        } catch (Error error) {
+            if (error.Message != "uint32 conversion requires an int in range 0..4294967295")
+                throw;
+        }
+        return total;
+    }
+
+    private pure string RepeatedText(int count) {
+        string text = "x";
+        for (int index = 0; index < count; index = index + 1)
+            text = text + text;
+        return text;
+    }
+
+    private int CheckOwnedFixedValues() {
+        FixedArray<string,65> values = FixedArray<string,65>.Create(RepeatedText(13));
+        try {
+            values.Set(0, RepeatedText(19));
+            return -1;
+        } catch (Error error) {
+            if (error.Message != "collection owned byte limit exceeded")
+                throw;
+        }
+        if (string.Utf8Length(values.At(0)) != 8192)
+            return -1;
+        FixedArray<string,65> original = values;
+        values.Set(0, "updated");
+        if (values.Length != 65 || values.At(0) != "updated" || string.Utf8Length(original.At(0)) != 8192)
+            return -1;
+        try {
+            values.Set(65, "out of bounds");
+            return -1;
+        } catch (Error error) {
+            if (error.Message != "collection index outside admitted range")
+                throw;
+        }
+        try {
+            FixedArray<string,64> oversized = FixedArray<string,64>.Create(RepeatedText(14));
+            return -1;
+        } catch (Error error) {
+            if (error.Message != "collection owned byte limit exceeded")
+                throw;
+        }
+        return 30;
+    }
+
+    private int CheckSdkProjections() {
+        if (CancellationToken.None.IsCancellationRequested)
+            return -1;
+        KeyValuePair<string,int> pair = KeyValuePair<string,int>.Create("key", 30);
+        Dictionary<string,int> items = Dictionary<string,int>.Empty();
+        items.Add(pair.Key, pair.Value);
+        List<string> keys = items.Keys;
+        List<int> values = items.Values;
+        List<KeyValuePair<string,int>> entries = items.Entries;
+        items.Clear();
+        if (keys.At(0) != "key" || values.At(0) != 30 || entries.At(0).Value != 30)
+            return -1;
+        ConcurrentDictionary<string,int> shared = ConcurrentDictionary<string,int>.Empty();
+        shared.Set(pair.Key, pair.Value);
+        List<string> sharedKeys = shared.Keys;
+        List<int> sharedValues = shared.Values;
+        List<KeyValuePair<string,int>> sharedEntries = shared.Entries;
+        shared.Clear();
+        if (sharedKeys.At(0) != "key" || sharedValues.At(0) != 30 || sharedEntries.At(0).Value != 30)
+            return -1;
+        return sharedEntries.At(0).Value;
+    }
+
+    private int ConcurrentCollections() {
+        int total = 0;
+        concurrentValues.Set(2, 3);
+        foreach (KeyValuePair<int,int> entry in concurrentValues) {
+            concurrentValues.Clear();
+            total = total + entry.Key + entry.Value;
+        }
+
+        deferred.Enqueue(4);
+        if (deferred.Count != 1)
+            throw Error("fixture.concurrent.queue");
+        total = total + deferred.TryDequeue().Value;
+
+        backtrack.Push(8);
+        backtrack.Push(2);
+        int stackOrder = 0;
+        foreach (int item in backtrack) {
+            backtrack.Clear();
+            stackOrder = stackOrder * 10 + item;
+        }
+        if (stackOrder != 28)
+            throw Error("fixture.concurrent.stack");
+        total = total + 10;
+        if (concurrentValues.Count != 0 || deferred.Count != 0 || backtrack.Count != 0)
+            throw Error("fixture.concurrent.empty");
+        return total;
+    }
+
+    private int Synchronization() {
+        SemaphoreSlim gate = SemaphoreSlim.Create(0, 1);
+        if (gate.CurrentCount != 0 || gate.Release() != 0 || !gate.Wait(0) || gate.CurrentCount != 0)
+            throw Error("fixture.semaphore");
+        try {
+            lock (implicitLock) {
+                throw Error("fixture.lock");
+            }
+        } catch (Error error) {
+            if (error.Message != "fixture.lock")
+                throw;
+        }
+
+        int observed = 0;
+        lock (implicitLock) {
+            observed = 4;
+        }
+        return observed;
+    }
+
+    private pure int Unwrap(int? item) => item.Value;
+
+    private int CollectionSnapshots() {
+        int total = 0;
+
+        HashSet<int> members = HashSet<int>.Empty();
+        if (!members.Add(4) || members.Add(4))
+            throw Error("fixture.collection.set");
+        foreach (int item in members) {
+            members.Clear();
+            total = total + item;
+        }
+
+        Dictionary<string,int> directory = Dictionary<string,int>.Empty();
+        directory.Add("sample", 5);
+        foreach (KeyValuePair<string,int> entry in directory) {
+            directory.Clear();
+            if (entry.Key != "sample")
+                throw Error("fixture.collection.dictionary");
+            total = total + entry.Value;
+        }
+
+        var queueValues = Queue<int>.Empty();
+        queueValues.Enqueue(4);
+        queueValues.Enqueue(8);
+        Queue<int> saved = queueValues;
+        if (queueValues.Dequeue() != 4 || queueValues.Count != 1 || saved.Count != 2)
+            throw Error("fixture.collection.queue");
+        foreach (int item in saved)
+            total = total + item;
+
+        Stack<int> stack = Stack<int>.Empty();
+        stack.Push(8);
+        stack.Push(4);
+        int? popped = stack.TryPop();
+        if (!popped.HasValue || stack.Peek() != 8)
+            throw Error("fixture.collection.stack");
+        stack.Clear();
+        if (stack.TryPop().HasValue)
+            throw Error("fixture.collection.empty");
+        return total + popped.Value;
+    }
+
+    private int BuildList(bool outOfBounds) {
+        List<int> values = List<int>.Empty();
+        values.Add(7);
+        values.Add(8);
+        if (outOfBounds)
+            return values.At(90);
+        remembered = values;
+        values.Add(200);
+        return values.At(0) + remembered.Count;
+    }
+
+    private pure int Recursive(int remaining) {
+        if (remaining == 0)
+            return 0;
+        return 1 + Recursive(remaining - 1);
+    }
+
+    private int CheckSavepoints() {
+        Sequence sequence = new Sequence();
+        string key = "set-key";
+        for (int exponent = 0; exponent < 11; exponent = exponent + 1)
+            key = key + key;
+        for (int index = 0; index < 4200; index = index + 1) {
+            try {
+                FailedUpdate failed = new FailedUpdate(sequence, key);
+                return -1;
+            } catch (Error error) {
+                if (error.Message != "fixture.rollback")
+                    throw;
+            }
+        }
+        SequenceUpdate committed = new SequenceUpdate(sequence);
+        return sequence.Read();
+    }
+
+    private int CheckConcurrentEffects() {
+        ConcurrentObservation observation = new ConcurrentObservation();
+        for (int index = 1; index <= 4200; index = index + 1) {
+            try {
+                FailedConcurrentUpdate failed = new FailedConcurrentUpdate(observation, index);
+                return -1;
+            } catch (Error error) {
+                if (error.Message != "fixture.rollback.concurrent")
+                    throw;
+            }
+        }
+        return observation.Read();
+    }
+
+    private pure int LoopTransfers() {
+        int count = 0;
+        for (int index = 0; index < 5; index = index + 1) {
+            try {
+                if (index == 0)
+                    continue;
+                if (index == 2)
+                    break;
+                count = count + 10;
+            } finally {
+                count = count + 1;
+            }
+        }
+        return count;
+    }
+
+    public int Run() {
+        if (directWritesInInvocation)
+            return CheckDirectConstructorWrites();
+        if (receiverState.data.accepted && receiverState.data.packet.DecodeUtf8() != "saved payload")
+            return -1;
+        return value + remembered.Count;
+    }
+}
+
+public Class Sequence {
+    private int value = 0;
+    private List<int> recorded = List<int>.Empty();
+    private Array<int> tracked = Array<int>.Create(1, 1);
+    private Atomic<int> attempts;
+
+    public Sequence() {
+        recorded.Add(1);
+    }
+
+    public void StageCollections() {
+        attempts.Add(1);
+        recorded.Add(2);
+        tracked.Set(0, 2);
+    }
+
+    public void Increment() {
+        value = value + 1;
+    }
+
+    public int Read() {
+        if (recorded.Count != 1 || recorded.At(0) != 1 || tracked.At(0) != 1)
+            return -999;
+        if (attempts.Load() != 4200)
+            return -998;
+        return value;
+    }
+}
+
+public Class SequenceUpdate {
+    public SequenceUpdate(Sequence sequence) {
+        sequence.Increment();
+    }
+}
+
+public Class FailedUpdate {
+    private ByteBuffer packet = ByteBuffer.FromUtf8("packet stress");
+    private Atomic<int> counter = Atomic<int>.Create(0);
+    private Atomic<int> provisional;
+
+    public FailedUpdate(Sequence sequence, string key) {
+        provisional.Store(1);
+        FixedArray<int,1024> seed = FixedArray<int,1024>.Create(7);
+        Array<FixedArray<int,1024>> samples = Array<FixedArray<int,1024>>.Create(1, seed);
+        List<FixedArray<int,1024>> entries = List<FixedArray<int,1024>>.Empty();
+        entries.Add(seed);
+        Queue<FixedArray<int,1024>> queued = Queue<FixedArray<int,1024>>.Empty();
+        queued.Enqueue(seed);
+        Dictionary<int,FixedArray<int,1024>> mapped = Dictionary<int,FixedArray<int,1024>>.Empty();
+        mapped.Add(1, seed);
+        HashSet<string> keys = HashSet<string>.Empty();
+        if (!keys.Add(key) || samples.Count != 1 || entries.Count != 1 || queued.Count != 1 || mapped.Count != 1)
+            throw Error("fixture.rollback.collections");
+        for (int exponent = 0; exponent < 10; exponent = exponent + 1)
+            packet.Append(packet);
+        sequence.StageCollections();
+        SequenceUpdate update = new SequenceUpdate(sequence);
+        RaiseFailure();
+    }
+
+    private void RaiseFailure() {
+        throw Error("fixture.rollback");
+    }
+}
+
+public Class RecursivePart {
+    private int value = 0;
+
+    public RecursivePart(int remaining) {
+        if (remaining > 0) {
+            RecursivePart child = new RecursivePart(remaining - 1);
+            value = 1 + child.Read();
+        }
+    }
+
+    public pure int Read() => value;
+}
+
+public Class ConcurrentObservation {
+    private int value = 0;
+    private ConcurrentDictionary<string,string> dictionary;
+    private ConcurrentQueue<string> queue;
+    private ConcurrentStack<string> stack;
+
+    public void Update(int attempt) {
+        value = attempt;
+        string label = "pending";
+        if (attempt == 4200)
+            label = "owned";
+        string text = label + " value";
+        dictionary.Set("shared key", text);
+        queue.Clear();
+        queue.Enqueue(text);
+        stack.Clear();
+        stack.Push(text);
+    }
+
+    public int Read() {
+        if (value != 0 || dictionary.At("shared key") != "owned value" ||
+            queue.TryPeek().Value != "owned value" || stack.TryPeek().Value != "owned value")
+            return -1;
+        return 31;
+    }
+}
+
+public Class FailedConcurrentUpdate {
+    public FailedConcurrentUpdate(ConcurrentObservation observation, int attempt) {
+        observation.Update(attempt);
+        throw Error("fixture.rollback.concurrent");
+    }
+}
+
+public Record NestedState {
+    public RecordState data;
+}
+
+public Record RecordState {
+    public string title;
+    public ByteBuffer packet;
+    public bool accepted;
+}
+
+public Class MutableReport {
+    public int number = 0;
+    public RecordState details;
+
+    public MutableReport() {
+        details = new RecordState {
+            title = "initial",
+            packet = ByteBuffer.FromUtf8("initial"),
+            accepted = false
+        };
+    }
+}
+
+public Class ReportUpdate {
+    public ReportUpdate(MutableReport report, bool fail) {
+        report.number = 30;
+        report.details.title = "next";
+        report.details.packet.Append(ByteBuffer.FromUtf8(" changed"));
+        if (fail)
+            throw Error("fixture.direct.rollback");
+    }
+}

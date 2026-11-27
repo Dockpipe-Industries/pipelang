@@ -1,0 +1,5 @@
+module PipeLang.IO;
+
+// Read-only operations always report NoDurableOutput. This names absence of
+// created/published output, not absence of the target or a power-loss guarantee.
+public Enum OutputEffect { NoDurableOutput, OwnedPartial, Committed, Unknown }

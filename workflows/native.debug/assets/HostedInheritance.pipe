@@ -1,0 +1,70 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.HostedInheritance;
+
+public source Interface IReading {
+    pure int Read();
+    Task<Result<int,string>> Later();
+}
+
+public Class Base {
+    private int stored;
+
+    public Base(int initial) {
+        stored = initial;
+    }
+
+    public virtual pure int Read() {
+        return stored;
+    }
+
+    public virtual async Task<Result<int,string>> Later() {
+        var gate = SemaphoreSlim.Create(0, 1);
+        bool acquired = await gate.WaitAsync(3);
+        if (acquired)
+            return Result<int,string>.Failure("unexpected base permit");
+        return Result<int,string>.Success(stored);
+    }
+}
+
+public Class Session : Base, IReading {
+    private int offset;
+
+    public Session(int initial, int added) : base(initial) {
+        offset = added;
+    }
+
+    public override pure int Read() {
+        return base.Read() + offset;
+    }
+
+    public override async Task<Result<int,string>> Later() {
+        int inherited = try await base.Later();
+        return Result<int,string>.Success(inherited + offset);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        if (scenario == 0) {
+            Base reader = this;
+            int first = reader.Read();
+            int second = try await reader.Later();
+            return Result<int,string>.Success(first + second);
+        }
+        IReading reader = this;
+        int first = reader.Read();
+        int second = try await reader.Later();
+        return Result<int,string>.Success(first + second);
+    }
+}
+
+public model Class ReferenceHarness {
+    private Session session;
+
+    public ReferenceHarness(int initial, int added) {
+        session = new Session(initial, added);
+    }
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        Result<int,string> result = await session.Run(scenario);
+        return result;
+    }
+}

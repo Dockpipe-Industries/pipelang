@@ -1,0 +1,30 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+public Record Vector {
+    public float32 x = 0.0f;
+    public float32 y = 0.0f;
+}
+
+public Interface RotationQueries {
+    pure Result<Vector,string> Rotate(Vector value);
+    Result<Vector,string> Height(Vector value);
+}
+
+public Class Geometry {
+    public const float32 EyeHeight = 168.0f;
+    private RotationQueries math;
+    public Geometry(RotationQueries queries) {
+        math = queries;
+    }
+    public pure Result<Vector,string> Apply(Vector value) => math.Rotate(value);
+    public pure float32 ReadHeight() => EyeHeight;
+}
+
+public Class App {
+    public const float32 EyeHeight = Geometry.EyeHeight;
+    private Geometry geometry;
+    public App(RotationQueries queries) {
+        geometry = new Geometry(queries);
+    }
+    public pure Result<Vector,string> Rotate(Vector value) => geometry.Apply(value);
+    public pure float32 ReadHeight() => geometry.ReadHeight();
+}

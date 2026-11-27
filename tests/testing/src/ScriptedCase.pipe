@@ -1,0 +1,36 @@
+module PipeLang.Testing.SelfTests;
+import PipeLang.Testing;
+
+public Class ScriptedCase : ITestCase {
+    private string id;
+    private TestBehavior setup;
+    private TestBehavior body;
+    private TestBehavior cleanup;
+    public string trace = "";
+
+    public ScriptedCase(string caseId, TestBehavior setupBehavior,
+                        TestBehavior bodyBehavior, TestBehavior cleanupBehavior) {
+        id = caseId;
+        setup = setupBehavior;
+        body = bodyBehavior;
+        cleanup = cleanupBehavior;
+    }
+
+    public pure string Id() => id;
+    public pure string Name() => "Lifecycle fixture " + id;
+
+    private Result<void,TestFailure> Execute(TestBehavior behavior, string phase) {
+        trace = trace + phase;
+        if (behavior == TestBehavior.Throw)
+            throw Error(phase);
+        if (behavior == TestBehavior.Failure)
+            return Result<void,TestFailure>.Failure(TestFailure("fixture.failure", phase));
+        if (behavior == TestBehavior.Cancelled)
+            return Result<void,TestFailure>.Cancelled(TestFailure("fixture.cancelled", phase));
+        return Result<void,TestFailure>.Success();
+    }
+
+    public Result<void,TestFailure> Setup(CancellationToken token) => Execute(setup, "setup");
+    public Result<void,TestFailure> Body(CancellationToken token) => Execute(body, "body");
+    public Result<void,TestFailure> Cleanup() => Execute(cleanup, "cleanup");
+}

@@ -1,0 +1,13 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.FloatingObservation;
+
+public model Class Session {
+    public Session() {}
+
+    public Result<int,string> Run() {
+        uint32 facts = FloatingEnvironment.Observe();
+        if ((facts & FloatingEnvironment.PortableRoundingKnown) == 0u)
+            return Result<int,string>.Failure("missing portable rounding mode");
+        return Result<int,string>.Success(int.FromUInt32(facts));
+    }
+}

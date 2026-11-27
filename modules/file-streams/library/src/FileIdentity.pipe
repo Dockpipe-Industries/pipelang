@@ -1,0 +1,8 @@
+module PipeLang.IO;
+
+// Bounded opaque observations, not authorization or an immutable source lease.
+public Record FileIdentity {
+    public string objectId = "";
+    public string revision = "";
+    public int linkCount = 0;
+}

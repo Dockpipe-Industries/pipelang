@@ -1,0 +1,14 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module DiFixture.Root;
+import DiFixture.Contracts;
+
+public Class IdentitySequence : IIdentitySequence {
+    private int next = 0;
+
+    public int Next() {
+        next = next + 1;
+        return next;
+    }
+
+    public pure int Count() => next;
+}

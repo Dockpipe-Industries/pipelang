@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+set(_PipeLangWorkspaceIo_PREFIX "${PACKAGE_PREFIX_DIR}")
+include(CMakeFindDependencyMacro)
+find_dependency(PipeLangModel 0.1.0 EXACT CONFIG)
+find_dependency(Threads)
+if(NOT TARGET PipeLangWorkspaceIoCrypto)
+    add_library(PipeLangWorkspaceIoCrypto STATIC IMPORTED GLOBAL)
+    set_target_properties(PipeLangWorkspaceIoCrypto PROPERTIES
+        IMPORTED_LOCATION "${_PipeLangWorkspaceIo_PREFIX}/@CMAKE_INSTALL_LIBDIR@/libpipelang_workspace_crypto.a")
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/PipeLangWorkspaceIoTargets.cmake")
+check_required_components(PipeLangWorkspaceIo)

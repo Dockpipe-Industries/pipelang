@@ -1,0 +1,6 @@
+module PipeLang.Testing.AsyncSelfTests;
+
+public Enum AsyncBehavior {
+    Success, AssertionFailure, Cancelled, Throw, TransportFailure,
+    TransportCancelled, CancelDuringBody, Expire, FailPhaseClock, FailCleanupClock
+}

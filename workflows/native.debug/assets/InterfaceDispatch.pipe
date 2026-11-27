@@ -1,0 +1,113 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.InterfaceDispatch;
+
+public Record Request {
+    public int increment;
+    public string marker;
+}
+
+public source Interface ICase {
+    pure int Id();
+    Task<Result<int,string>> Run(Request request);
+}
+
+public Enum Bias {
+    Normal,
+    Increased
+}
+
+public Class First : ICase {
+    private int seed;
+    private Bias bias;
+
+    public First(int input, Bias mode) {
+        this.seed = input;
+        this.bias = mode;
+    }
+
+    public pure int Id() {
+        if (bias == Bias.Increased)
+            return 4;
+        return 3;
+    }
+
+    public async Task<Result<int,string>> Run(Request request) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var acquired = await gate.WaitAsync(15);
+        if (acquired || request.marker != "étape")
+            return Result<int,string>.Failure("interface request changed across suspension");
+        return Result<int,string>.Success(seed + request.increment);
+    }
+}
+
+public Class Second : ICase {
+    public Second() {}
+
+    public pure int Id() {
+        return 7;
+    }
+
+    public async Task<Result<int,string>> Run(Request request) {
+        return Result<int,string>.Success(100 + request.increment);
+    }
+}
+
+public Class Runner {
+    public static async Task<Result<int,string>> RunAll(List<ICase> cases, Request request) {
+        int total = 0;
+        foreach (ICase item in cases) {
+            int id = item.Id();
+            int value = try await item.Run(request);
+            total = total + id + value;
+        }
+        return Result<int,string>.Success(total);
+    }
+
+    public static async Task<Result<int,string>> RunAll(Array<ICase> cases, Request request) {
+        int total = 0;
+        foreach (ICase item in cases) {
+            int id = item.Id();
+            int value = try await item.Run(request);
+            total = total + id + value;
+        }
+        return Result<int,string>.Success(total);
+    }
+}
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int scenario) {
+        List<ICase> cases = List<ICase>.Empty();
+        for (int index = 1; index < 3; index = index + 1) {
+            cases.Add(new First(index, Bias.Normal));
+        }
+        cases.Add(new Second());
+        string marker = scenario < 0 ? "invalid" : "étape";
+        var result = await Runner.RunAll(cases, Request(scenario, marker));
+        return result;
+    }
+
+    public static async Task<Result<int,string>> RunArray(int scenario) {
+        Array<ICase> cases = Array<ICase>.Create(3, new First(0, Bias.Normal));
+        for (int index = 1; index < 3; index = index + 1) {
+            cases.Set(index - 1, new First(index, Bias.Normal));
+        }
+        cases.Set(2, new Second());
+        string marker = scenario < 0 ? "invalid" : "étape";
+        var result = await Runner.RunAll(cases, Request(scenario, marker));
+        return result;
+    }
+}
+
+public model Class ReferenceApp {
+    public ReferenceApp() {}
+
+    public async Task<Result<int,string>> Run(int scenario) {
+        var result = await App.Run(scenario);
+        return result;
+    }
+
+    public async Task<Result<int,string>> RunArray(int scenario) {
+        var result = await App.RunArray(scenario);
+        return result;
+    }
+}

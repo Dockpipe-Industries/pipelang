@@ -1,0 +1,52 @@
+{
+  "protocol": "pipelang.source-library.v1",
+  "name": "PipeLang.Json",
+  "version": "0.1.0",
+  "source_root": "src",
+  "sources": [
+    {
+      "path": "JsonDocumentOutput.pipe",
+      "sha256": "d0cc1dfef058611e4fceb61c6774cb5d9294cea5491706cf9a8979a1d5a08556"
+    },
+    {
+      "path": "JsonKind.pipe",
+      "sha256": "c11f6559dff9f18fa0c49ef64ed86ebda9b5bb260ea2e5abb69241e94827f2f4"
+    },
+    {
+      "path": "JsonNode.pipe",
+      "sha256": "8d3ba42639b67ba74cac83b6cb316df391fda3154aefd7021f522816cfbdac9c"
+    },
+    {
+      "path": "JsonReadLimits.pipe",
+      "sha256": "135d016fa72e278a802955aed2656a1838e2d6633604d8178713987ccf101911"
+    },
+    {
+      "path": "JsonReader.pipe",
+      "sha256": "b30a70f47abf94a97b4f2f2a4834655343795da529604fc212a0d85eade237e7"
+    },
+    {
+      "path": "JsonRenderLayout.pipe",
+      "sha256": "137dd27a22554e50ba09c69051abd5fe78073f9b745467211c3535074ce23557"
+    },
+    {
+      "path": "JsonRenderOptions.pipe",
+      "sha256": "6873e879c7369a83175875f82a6212455d594083e6051990544cdf05645d8ac6"
+    },
+    {
+      "path": "JsonStringIndex.pipe",
+      "sha256": "0d1e5d209f29dc77c6b87b34e553a44212c9a889581fd3b9ef6c1a3f653e9172"
+    },
+    {
+      "path": "JsonStringIndexLimits.pipe",
+      "sha256": "2125ea66920a4954a2fc29e511b96fc1ddf0ebf0c7d0ae31bfe39de2cd0df61c"
+    },
+    {
+      "path": "JsonStringIndexer.pipe",
+      "sha256": "ab598e06d3bbdd96c6d9be3ef49fe2262bee2e4b3c2c8bcc3a3a6cd97d36216d"
+    },
+    {
+      "path": "JsonValueRenderer.pipe",
+      "sha256": "a97b5a188f50c7e9a4f79afb66b9e0de03f307dc893776e6eb3bb6bb53533988"
+    }
+  ]
+}

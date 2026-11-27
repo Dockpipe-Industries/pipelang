@@ -1,0 +1,3 @@
+module PipeLang.Testing;
+
+public Enum TestPhase { NotRun, Setup, Body, Cleanup }

@@ -1,0 +1,45 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.ScopedHandles;
+
+public Class Component {
+    private SemaphoreSlim ready;
+    private Lock gate;
+    private Atomic<int> count;
+    private ConcurrentQueue<int> queue;
+    private ConcurrentStack<int> stack;
+    private ConcurrentDictionary<int,int> values;
+
+    public int Measure() {
+        lock (gate) {
+            return ready.CurrentCount + count.Load() + queue.Count + stack.Count + values.Count;
+        }
+    }
+
+    public int Add(int value) {
+        lock (gate) {
+            queue.Enqueue(value);
+            stack.Push(value);
+            values.Set(value, value * 2);
+            count.Add(value);
+            return queue.TryPeek().Value + stack.TryPeek().Value + values.At(value) + count.Load();
+        }
+    }
+
+    public void Signal() {
+        ready.Release();
+    }
+
+    public async Task<Result<int,string>> Wait() {
+        await ready.WaitAsync();
+        return Result<int,string>.Success(count.Load());
+    }
+}
+
+public model Class Root {
+    public pure int Run() => 1;
+}
+
+public composition Startup {
+    scoped Component = Component;
+    export Component;
+}

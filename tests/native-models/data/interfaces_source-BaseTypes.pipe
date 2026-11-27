@@ -1,0 +1,2 @@
+module BaseTypes;
+public source Interface Base { pure int Read(); }

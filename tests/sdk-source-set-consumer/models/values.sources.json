@@ -1,0 +1,8 @@
+{
+  "protocol": "pipelang.native-model-source-set.v1",
+  "entry": "ValueApp",
+  "modules": [
+    {"name": "ValueApp", "path": "ValueApp.pipe"},
+    {"name": "ValueData", "path": "values/Balance.pipe"}
+  ]
+}

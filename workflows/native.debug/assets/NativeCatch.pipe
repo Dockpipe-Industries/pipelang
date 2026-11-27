@@ -1,0 +1,65 @@
+// Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
+module NativeProof.NativeCatch;
+
+public Class App {
+    public static async Task<Result<int,string>> Run(int input) {
+        var gate = SemaphoreSlim.Create(0, 1);
+        try {
+            try {
+                var body = await gate.WaitAsync(50);
+                if (input == 0) {
+                    var authored = Error("échec \"source\"");
+                    throw authored;
+                }
+                if (input == 1) {
+                    return Result<int,string>.Success(42 / (input - 1));
+                }
+                if (input == 2) {
+                    throw Error("preserve the caught message");
+                }
+                if (input == 3) {
+                    var exhausted = await Helper.Exhaust();
+                }
+                if (input == 5) {
+                    return Result<int,string>.Failure("authored failure result");
+                }
+                if (input == 6) {
+                    var missing = Result<int,string>.Cancelled();
+                    return Result<int,string>.Success(missing.Value);
+                }
+                return Result<int,string>.Success(42);
+            } catch (Error caught) {
+                var recovered = await Helper.Recover();
+                var preserved = caught;
+                if (input == 2) {
+                    throw;
+                }
+                if (input == 0 || input == 6) {
+                    return Result<int,string>.Failure(preserved.Message);
+                }
+                return recovered;
+            }
+        } catch (Error outer) {
+            return Result<int,string>.Cancelled(outer.Message);
+        } finally {
+            if (input == 3 || input == 4) {
+                var closed = await Helper.Recover();
+            }
+        }
+    }
+}
+
+public Class Helper {
+    public static async Task<Result<int,string>> Recover() {
+        var gate = SemaphoreSlim.Create(0, 1);
+        var finished = await gate.WaitAsync(65);
+        return Result<int,string>.Success(42);
+    }
+
+    public static async Task<Result<int,string>> Exhaust() {
+        var count = 0;
+        while (true) {
+            count = count + 1;
+        }
+    }
+}

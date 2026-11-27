@@ -36,7 +36,8 @@ endfunction()
 
 run(relocated-sdk-verify "${sdk_tool}" verify --prefix "${relocated}"
     --manifest "${manifest}" --sha256 "${manifest_sha256}")
-set(canonical "${relocated}/share/pipelang-model/compiler-profiles/gnu-conservative-gc.rsp")
+set(profile_path "share/pipelang-model/compiler-profiles/gnu-conservative-gc.rsp")
+set(canonical "${relocated}/${profile_path}")
 file(READ "${canonical}" canonical_bytes)
 if(NOT canonical_bytes STREQUAL "--param=ggc-min-expand=10\n--param=ggc-min-heapsize=4096\n")
     message(FATAL_ERROR "GNU profile must contain only the two qualified GC parameters")
@@ -306,7 +307,7 @@ execute_process(COMMAND "${sdk_tool}" verify --prefix "${relocated}"
     --manifest "${manifest}" --sha256 "${manifest_sha256}"
     RESULT_VARIABLE tampered OUTPUT_VARIABLE tampered_output ERROR_VARIABLE tampered_error TIMEOUT 30)
 file(WRITE "${OUTPUT_ROOT}/profile-tamper.output" "${tampered_output}${tampered_error}")
-file(WRITE "${canonical}" "${canonical_bytes}")
+file(COPY_FILE "${SDK_PREFIX}/${profile_path}" "${canonical}")
 if("${tampered}" STREQUAL "0")
     message(FATAL_ERROR "SDK verification accepted a changed compiler policy artifact")
 endif()

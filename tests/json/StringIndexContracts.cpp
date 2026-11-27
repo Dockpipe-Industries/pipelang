@@ -10,6 +10,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -342,14 +343,20 @@ void lifetimeAndAggregate() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
-        equalityAndOwnership();
-        crossDocumentMembership();
-        cardinalityAndBalance();
-        limitsAndMemoryFailure();
-        longComparisonCancellation();
-        lifetimeAndAggregate();
+        const std::string_view selection = argc == 2 ? argv[1] : "all";
+        require(argc == 1 || (argc == 2 && (selection == "operations" || selection == "aggregate")),
+                "expected no argument, operations, or aggregate");
+        if (selection != "aggregate") {
+            equalityAndOwnership();
+            crossDocumentMembership();
+            cardinalityAndBalance();
+            limitsAndMemoryFailure();
+            longComparisonCancellation();
+        }
+        if (selection != "operations")
+            lifetimeAndAggregate();
         std::cout << "JSON decoded-string index contracts passed\n";
         return 0;
     } catch (const std::exception& error) {

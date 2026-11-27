@@ -1,10 +1,10 @@
 // Copyright PipeLang contributors. SPDX-License-Identifier: Apache-2.0
 #include "../support/support.hpp"
 #include <csignal>
+#include <cstdint>
 #include <iostream>
 #include <thread>
 #include <unistd.h>
-#include <libproc.h>
 
 namespace pipelang::contained {
 void probeEstate(const std::filesystem::path& output);
@@ -29,9 +29,19 @@ void workload(const std::string& mode, const fs::path& marker) {
     if (mode == "nonzero")
         std::exit(17);
     if (mode == "memory") {
-        std::vector<std::vector<unsigned char>> blocks;
+        // Sampled residency can stay below the stop when macOS compresses
+        // repeated bytes. Touch the same bounded allocation with varied data.
+        constexpr std::size_t wordsPerMebibyte = (1U << 20) / sizeof(std::uint64_t);
+        std::vector<std::vector<std::uint64_t>> blocks;
+        std::uint64_t state = 0x9e3779b97f4a7c15ULL;
         for (int index = 0; index < 950; ++index) {
-            blocks.emplace_back(1U << 20, 1);
+            auto& block = blocks.emplace_back(wordsPerMebibyte);
+            for (auto& word : block) {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                word = state;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
         throw std::runtime_error("sampled memory stop did not fire");
@@ -92,7 +102,8 @@ void inside(const fs::path& runner, const fs::path& self, const fs::path& output
         require(fs::exists(marker) && receipt.at("sampled_descendants_removed") == true, "native workload start or cleanup was not observed");
         require((result.exit == 0) == success, "unexpected native outcome: " + mode + ": " + result.output + result.diagnostic);
         if (mode == "memory")
-            require(receipt.value("error", "").find("proactive memory stop") != std::string::npos, "memory probe failed for another reason");
+            require(receipt.value("error", "").find("proactive memory stop") != std::string::npos,
+                "memory probe failed for another reason: " + receipt.dump(2) + "\n" + result.output + result.diagnostic);
         if (mode == "threads")
             require(receipt.value("error", "").find("native thread stop") != std::string::npos, "thread probe failed for another reason");
         if (mode == "logs")

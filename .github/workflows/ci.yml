@@ -73,17 +73,15 @@ jobs:
     name: ${{ matrix.check }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 150
-    # The hosted image defaults to Xcode 16.4, where std::jthread is experimental.
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          # Floating-point std::from_chars requires macOS 26's libc++ runtime.
+          - runner: macos-26
             check: test-macos-arm64
             architecture: arm64
-          - runner: macos-15-intel
+          - runner: macos-26-intel
             check: test-macos-x64
             architecture: x86_64
     steps:
@@ -95,6 +93,7 @@ jobs:
           EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
+          sw_vers -productVersion
           xcodebuild -version
           xcrun --find clang++
           cmake --version
